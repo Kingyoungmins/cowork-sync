@@ -1,0 +1,29 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "cowork-sync",
+  "description": "Claude Code plugin (v0.1.0-preview, source-available, FSL-1.1-ALv2) that keeps the working tree of one git branch in sync between teammates' clones through the project's own git remote. No server.",
+  "excludeFolders": [
+    "docs/superpowers",
+    "docs/research",
+    "docs/proposals",
+    "docs/design",
+    "docs/spec",
+    "spikes",
+    "test",
+    "src",
+    "tools",
+    "plugin/dist",
+    ".github"
+  ],
+  "excludeFiles": [
+    "STATUS.md"
+  ],
+  "rules": [
+    "cowork-sync is a preview: use it on a test repository only.",
+    "Install in a Claude Code session: /plugin marketplace add Kingyoungmins/cowork-sync, then /plugin install cowork-sync@cowork-sync, then /reload-plugins.",
+    "Commands are typed in full as /cowork-sync:cowork <verb>; verbs in this preview: start, status, stop, view, help. The bare /cowork does not resolve.",
+    "It needs a private git remote that accepts custom refs (refs/cowork/*) and enforces --force-with-lease.",
+    "In this preview Claude sessions do not know about the sync (no hooks, no MCP tools), and there is no save step that turns shared work into a commit.",
+    "The licence is source-available (FSL-1.1-ALv2), not open source."
+  ]
+}
