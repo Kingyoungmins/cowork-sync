@@ -1,5 +1,7 @@
 # cowork-sync
 
+Website (auf Englisch): [kingyoungmins.github.io/cowork-sync](https://kingyoungmins.github.io/cowork-sync/)
+
 cowork-sync ist ein Claude-Code-Plugin, das das Arbeitsverzeichnis eines
 git-Branches zwischen mehreren Klonen in Echtzeit synchron hält. Jedes
 Teammitglied arbeitet an seinem eigenen PC, in seinem eigenen Klon und mit

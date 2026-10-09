@@ -1,5 +1,7 @@
 # cowork-sync
 
+Website: [kingyoungmins.github.io/cowork-sync](https://kingyoungmins.github.io/cowork-sync/)
+
 cowork-sync is a Claude Code plugin that keeps the working tree of one git
 branch in sync between several clones, in real time. Each teammate works on
 their own PC, in their own clone, with their own Claude Code session. When

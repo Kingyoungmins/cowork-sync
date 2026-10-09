@@ -1,5 +1,7 @@
 # cowork-sync
 
+网站(英文):[kingyoungmins.github.io/cowork-sync](https://kingyoungmins.github.io/cowork-sync/)
+
 cowork-sync 是一个 Claude Code 插件,可以让多个克隆之间实时同步同一个 git
 分支的工作树。每位队友在自己的电脑上、自己的克隆里,使用自己的 Claude Code
 会话工作。有人保存文件后,这个改动会出现在其他所有人的工作树里。唯一的传输

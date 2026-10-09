@@ -1,5 +1,7 @@
 # cowork-sync
 
+웹사이트: [kingyoungmins.github.io/cowork-sync/ko](https://kingyoungmins.github.io/cowork-sync/ko/)
+
 cowork-sync는 여러 클론에 걸쳐 git 브랜치 하나의 작업 트리를 실시간으로 맞춰 주는
 Claude Code 플러그인입니다. 팀원은 각자 자기 PC의 자기 클론에서, 각자 자기
 Claude Code 세션으로 일합니다. 누군가 파일을 저장하면 그 변경이 다른 모든 사람의

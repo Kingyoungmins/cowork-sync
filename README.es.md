@@ -1,5 +1,7 @@
 # cowork-sync
 
+Sitio web (en inglés): [kingyoungmins.github.io/cowork-sync](https://kingyoungmins.github.io/cowork-sync/)
+
 cowork-sync es un plugin de Claude Code que mantiene sincronizado, en tiempo
 real, el árbol de trabajo de una rama de git entre varios clones. Cada
 compañero trabaja en su propio PC, en su propio clone, con su propia sesión de

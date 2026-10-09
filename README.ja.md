@@ -1,5 +1,7 @@
 # cowork-sync
 
+ウェブサイト（英語）: [kingyoungmins.github.io/cowork-sync](https://kingyoungmins.github.io/cowork-sync/)
+
 cowork-sync は、1 つの git ブランチの作業ツリーを、複数のクローン間でリアルタイムに同期する Claude Code プラグインです。チームメンバーはそれぞれ自分の PC で、自分のクローンを使い、自分の Claude Code セッションで作業します。誰かがファイルを保存すると、その変更が全員の作業ツリーに届きます。通信経路はプロジェクト自身の git リモートだけで、サーバーはありません。
 
 cowork-sync は個人のソース公開型（source-available）プロジェクトです。いかなる会社や雇用主とも提携しておらず、後援や推奨も受けていません。ライセンスは FSL-1.1-ALv2 です（[LICENSE.md](LICENSE.md) を参照）。コントリビューションには、[CONTRIBUTING.md](CONTRIBUTING.md) に記載された CLA が必要です。
