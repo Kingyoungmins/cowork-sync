@@ -1,0 +1,41 @@
+# cowork-sync project site.
+# Note: crawlers read robots.txt only at the host root (https://kingyoungmins.github.io/robots.txt).
+# This copy at /cowork-sync/robots.txt documents the intended policy: every crawler is welcome.
+
+User-agent: *
+Allow: /
+
+User-agent: Googlebot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: bingbot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-User
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+Sitemap: https://kingyoungmins.github.io/cowork-sync/sitemap.xml

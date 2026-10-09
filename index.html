@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>cowork-sync: live sync of one git branch, no server</title>
+<meta name="description" content="cowork-sync is a Claude Code plugin, now in preview, that keeps one git branch&#x27;s working tree in sync between teammates&#x27; clones through your own git remote. No server. Source-available.">
+<meta name="author" content="Youngmin Seo">
+<link rel="canonical" href="https://kingyoungmins.github.io/cowork-sync/">
+<link rel="alternate" hreflang="en" href="https://kingyoungmins.github.io/cowork-sync/">
+<link rel="alternate" hreflang="ko" href="https://kingyoungmins.github.io/cowork-sync/ko/">
+<link rel="alternate" hreflang="x-default" href="https://kingyoungmins.github.io/cowork-sync/">
+<link rel="alternate" type="text/markdown" href="https://kingyoungmins.github.io/cowork-sync/index.md">
+<link rel="describedby" href="https://kingyoungmins.github.io/cowork-sync/llms.txt">
+<link rel="icon" href="https://kingyoungmins.github.io/cowork-sync/favicon.svg" type="image/svg+xml">
+<link rel="sitemap" type="application/xml" href="https://kingyoungmins.github.io/cowork-sync/sitemap.xml">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F6F7F5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#13202A" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="cowork-sync">
+<meta property="og:url" content="https://kingyoungmins.github.io/cowork-sync/">
+<meta property="og:title" content="cowork-sync">
+<meta property="og:description" content="Saved edits reach every teammate&#x27;s clone through git. A Claude Code plugin, v0.1.0-preview, source-available.">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="ko_KR">
+<meta property="og:image" content="https://kingyoungmins.github.io/cowork-sync/og.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="cowork-sync: saved edits reach every teammate&#x27;s clone through git. Preview v0.1.0-preview. github.com/Kingyoungmins/cowork-sync">
+<meta name="twitter:image" content="https://kingyoungmins.github.io/cowork-sync/og.png">
+<meta name="twitter:image:alt" content="cowork-sync: saved edits reach every teammate&#x27;s clone through git. Preview v0.1.0-preview. github.com/Kingyoungmins/cowork-sync">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="cowork-sync">
+<meta name="twitter:description" content="Saved edits reach every teammate&#x27;s clone through git. A Claude Code plugin, v0.1.0-preview, source-available.">
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": [
+  "SoftwareApplication",
+  "SoftwareSourceCode"
+ ],
+ "@id": "https://kingyoungmins.github.io/cowork-sync/#software",
+ "name": "cowork-sync",
+ "description": "cowork-sync is a Claude Code plugin that keeps the working tree of one git branch in sync between teammates’ clones, in real time, using only the project’s own git remote and no server.",
+ "url": "https://kingyoungmins.github.io/cowork-sync/",
+ "inLanguage": "en",
+ "applicationCategory": "DeveloperApplication",
+ "operatingSystem": "Windows, macOS, Linux",
+ "softwareVersion": "0.1.0-preview",
+ "datePublished": "2026-10-09",
+ "softwareRequirements": "Claude Code 2.1.270 or newer; Node.js 20 or newer; git 2.43 or newer",
+ "license": "https://github.com/Kingyoungmins/cowork-sync/blob/main/LICENSE.md",
+ "codeRepository": "https://github.com/Kingyoungmins/cowork-sync",
+ "downloadUrl": "https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.0-preview",
+ "author": {
+  "@type": "Person",
+  "name": "Youngmin Seo",
+  "url": "https://github.com/Kingyoungmins"
+ },
+ "isAccessibleForFree": true,
+ "offers": {
+  "@type": "Offer",
+  "price": "0",
+  "priceCurrency": "USD"
+ },
+ "image": "https://kingyoungmins.github.io/cowork-sync/og.png"
+}
+</script>
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "FAQPage",
+ "@id": "https://kingyoungmins.github.io/cowork-sync/#faq",
+ "inLanguage": "en",
+ "mainEntity": [
+  {
+   "@type": "Question",
+   "name": "Is it ready for my real project?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "No. It is an early preview, not a finished product. Use it on a test repository only, and back up anything you care about."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Is there a server? Where does my code go?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "There is no server. The only transport is your project’s own git remote. Saved files go to two custom refs on it: refs/cowork/<branch>/board and refs/cowork/<branch>/code."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Which git hosts work?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "A host that accepts custom refs and enforces --force-with-lease. GitHub does both, and the first PC’s start refuses a host that fails its probe. Only GitHub has been tried for real; GitLab and Gitea are in the v1 plan."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Will it push to my branch or clutter my history?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "No. The preview never pushes to refs/heads/<branch>, and a plain git fetch does not download the custom refs. The refs stay on the remote until you delete them."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "What happens when two people edit the same line?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "One version wins. The other is kept as a hold record in the clone whose version lost, and it is never thrown away. There is no command yet to see or restore it."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Does my Claude coordinate with my teammates’ Claude?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Not in this preview. Claude does not know about the sync; its edits sync like any saved file. Hooks, MCP tools, claims and coordination are planned."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Can I use a public repository? Who can read the shared work?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Use a private remote only. Anyone who can read the repository can fetch refs/cowork/*, and the preview does not check that the remote is private."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "How do I turn the shared work into a commit?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "There is no save step yet; it comes with the full command set. Do not run git commands that move HEAD while sync runs; stop sync first."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "How fast do edits arrive?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "No end-to-end latency is published for the preview. The daemon’s loop runs every 2.5 s when active, and the team shares a budget of 12 pushes a minute (6 after throttling)."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Do I need Claude Code open while it syncs? Does it work with other editors?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "You install the plugin and run the command in Claude Code, and the same verbs run from a terminal. After start, the daemon keeps running in the background and picks up saved files, whatever saved them. As far as the code shows, the preview’s daemon is not tied to an open Claude Code session; it runs until you stop it."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Will it share my .env or keys?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "New files with secret-like names (.env, *.pem, *.key, id_rsa*, *credentials* and more) are not shared. File contents are not scanned yet, so do not put secrets in synced files."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Can I use it at work, and can I contribute?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Internal use is allowed under FSL-1.1-ALv2; offering it, or something substantially similar, to others as a commercial product or service is not. Each release becomes Apache-2.0 two years after it is released. Contributions need the CLA, agreed with a comment on your pull request."
+   }
+  }
+ ]
+}
+</script>
+<style>
+:root{
+  --bg:#F6F7F5;--surface:#E7ECEA;--card:#FFFFFF;--ink:#16202A;--muted:#47545F;--rule:#C3CDD1;
+  --accent:#0A6767;--accent-strong:#064B4B;--accent-soft:#D4EAE6;
+  --hold-bg:#FBEFD0;--hold-ink:#5F3C00;--hold-rule:#D9B262;
+  --focus:#0A6767;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Roboto,"Helvetica Neue",Arial,system-ui,sans-serif;
+  --mono:ui-monospace,"Cascadia Mono","SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --rail:3rem;
+  color-scheme:light;
+}
+html:lang(ko){--sans:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR","Noto Sans CJK KR",system-ui,sans-serif}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#13202A;--surface:#1D2E39;--card:#182833;--ink:#E3E9EC;--muted:#A6B4BE;--rule:#33475A;
+    --accent:#65CDC4;--accent-strong:#9BE3DC;--accent-soft:#1C3C3F;
+    --hold-bg:#3A2E10;--hold-ink:#F5D28A;--hold-rule:#7A6024;
+    --focus:#9BE3DC;color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#13202A;--surface:#1D2E39;--card:#182833;--ink:#E3E9EC;--muted:#A6B4BE;--rule:#33475A;
+  --accent:#65CDC4;--accent-strong:#9BE3DC;--accent-soft:#1C3C3F;
+  --hold-bg:#3A2E10;--hold-ink:#F5D28A;--hold-rule:#7A6024;
+  --focus:#9BE3DC;color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 1.0625rem/1.6 var(--sans);overflow-wrap:break-word}
+html:lang(ko) body{word-break:keep-all;line-height:1.72}
+img,svg{max-width:100%}
+a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:.18em}
+a:hover{color:var(--accent-strong);text-decoration-thickness:2px}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px;border-radius:3px}
+code,pre{font-family:var(--mono);font-size:.875em}
+:not(pre)>code{background:var(--surface);padding:.08em .34em;border-radius:4px;overflow-wrap:anywhere;word-break:normal}
+.vh{position:absolute!important;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.skip{position:absolute;left:1rem;top:-4rem;z-index:10;background:var(--card);color:var(--ink);padding:.6rem .9rem;border:2px solid var(--focus);border-radius:6px}
+.skip:focus{top:1rem}
+.wrap{max-width:70rem;margin-inline:auto;padding-inline:clamp(1rem,4vw,2rem)}
+
+/* header */
+.site-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.6rem 1.5rem;padding-block:1rem;border-bottom:1px solid var(--rule)}
+.brand{font:700 1.05rem/1.2 var(--mono);color:var(--ink);text-decoration:none}
+.brand:hover{color:var(--ink)}
+.site-nav ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:.3rem 1.15rem;font-size:.95rem}
+.site-nav a{color:var(--ink);text-decoration:none}
+.site-nav a:hover{text-decoration:underline;color:var(--accent-strong)}
+.site-nav a[aria-current]{font-weight:600;text-decoration:underline;text-decoration-color:var(--accent);text-decoration-thickness:2px}
+.site-nav .sep{border-left:1px solid var(--rule);padding-left:1.15rem}
+
+/* the chain: a fast-forward-only line of nodes, one per section */
+.chain{position:relative;padding-left:var(--rail);padding-bottom:1rem}
+.chain::before{content:"";position:absolute;left:calc(var(--rail) / 2 - 1px);top:4.1rem;bottom:0;width:2px;background:var(--rule)}
+.chain>section{padding-block:3.5rem 0}
+.chain>section>*:not(.wide){max-width:44rem}
+.chain>section>h2,.hero>h1{position:relative}
+.chain>section>h2::before{content:"";position:absolute;left:calc(var(--rail) / -2 - 7px);top:.33em;width:14px;height:14px;border-radius:50%;border:2px solid var(--accent);background:var(--bg)}
+.hero>h1::before{content:"";position:absolute;left:calc(var(--rail) / -2 - 9px);top:.15em;width:18px;height:18px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--bg)}
+
+h2{font-size:clamp(1.45rem,1.15rem + 1.1vw,1.9rem);line-height:1.2;letter-spacing:-.012em;margin:0 0 1rem;font-weight:700}
+h3{font-size:1.15rem;line-height:1.3;margin:2.2rem 0 .6rem;font-weight:700}
+h4{font-size:1rem;line-height:1.35;margin:1.5rem 0 .35rem;font-weight:700}
+p{margin:0 0 1rem}
+ul,ol{margin:0 0 1rem;padding-left:1.25rem}
+li{margin:.3rem 0}
+li::marker{color:var(--muted)}
+
+/* hero */
+.hero{padding-block:3.25rem .5rem}
+.hero>h1{font:700 clamp(1.2rem,1rem + .8vw,1.45rem)/1.2 var(--mono);margin:0 0 1.2rem;letter-spacing:0}
+.pitch{font-size:clamp(2rem,1.1rem + 3.9vw,3.6rem);line-height:1.07;font-weight:700;letter-spacing:-.028em;margin:0 0 1.4rem;max-width:16.5ch;text-wrap:balance}
+html:lang(ko) .pitch{line-height:1.22;letter-spacing:-.03em;max-width:13em}
+.lede{font-size:1.17rem;line-height:1.55;max-width:40rem;margin:0 0 1.3rem}
+.status-line{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .8rem;margin:0 0 1.9rem;color:var(--muted);max-width:44rem}
+.badge{display:inline-block;font:700 .85rem/1 var(--sans);padding:.4rem .65rem;border-radius:999px;background:var(--hold-bg);color:var(--hold-ink);border:1px solid var(--hold-rule)}
+.install{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(min(100%,23rem),1fr));max-width:60rem;margin:0 0 1.2rem}
+.snippet{border:1px solid var(--rule);border-radius:10px;background:var(--card);min-width:0;overflow:hidden}
+.snippet-head{display:flex;justify-content:space-between;align-items:center;gap:.75rem;min-height:2.9rem;padding:.4rem .5rem .4rem .9rem;border-bottom:1px solid var(--rule);font-size:.92rem;color:var(--muted)}
+.snippet pre{margin:0;padding:.85rem .9rem;overflow-x:auto;line-height:1.6}
+.cmd-row{display:flex;align-items:center;gap:.6rem;padding:.5rem .5rem .5rem .9rem}
+.cmd-row+.cmd-row{border-top:1px solid var(--rule)}
+.cmd-row>code{display:block;flex:1;min-width:0;overflow-x:auto;white-space:pre;background:none;padding:.15rem 0;border-radius:0;line-height:1.6}
+.copy{flex:none;font:600 .85rem/1 var(--sans);color:var(--ink);background:var(--bg);border:1px solid var(--rule);border-radius:6px;padding:.5rem .75rem;cursor:pointer;min-height:2.1rem}
+.copy:hover{border-color:var(--accent);color:var(--accent-strong)}
+.copy[data-state="done"]{border-color:var(--accent);color:var(--accent-strong)}
+.after{max-width:44rem;color:var(--muted)}
+.hero-links{display:flex;flex-wrap:wrap;gap:.4rem 1.4rem}
+
+/* diagram */
+.diagram{margin:1.75rem 0 1.25rem}
+.diagram svg{display:block;width:100%;height:auto}
+.dg-h{max-width:60rem}
+.diagram .dg-v{display:none;max-width:23rem}
+@media (max-width:47.99rem){.diagram .dg-h{display:none}.diagram .dg-v{display:block}}
+.diagram figcaption{font-size:.95rem;color:var(--muted);margin-top:.85rem;max-width:44rem}
+.dg .box{fill:var(--card);stroke:var(--rule);stroke-width:1.5}
+.dg .inner{fill:var(--surface)}
+.dg .daemon{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
+.dg .ref{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
+.dg .ref-off{fill:none;stroke:var(--muted);stroke-width:1.25;stroke-dasharray:5 4}
+.dg .flow{stroke:var(--accent);stroke-width:2;fill:none}
+.dg .head{fill:var(--accent)}
+.dg text{font-family:var(--sans)}
+.dg .t-title{font-size:15px;font-weight:700;fill:var(--ink)}
+.dg .t-label{font-size:13.5px;font-weight:700;fill:var(--ink)}
+.dg .t-sub{font-size:12px;fill:var(--muted)}
+.dg .t-ref{font-family:var(--mono);font-size:12.5px;font-weight:700;fill:var(--ink)}
+.dg .t-ref-off{font-family:var(--mono);font-size:12.5px;fill:var(--muted)}
+.dg .t-arrow{font-size:12px;font-weight:700;fill:var(--accent)}
+.dg-v .t-sub{font-size:13px}
+.dg-v .t-arrow{font-size:13px}
+
+/* tables */
+.table-wrap{overflow-x:auto;margin:1rem 0 1.25rem;max-width:60rem}
+table{border-collapse:collapse;width:100%;font-size:.97rem}
+th,td{text-align:left;vertical-align:top;padding:.7rem .9rem .7rem 0;border-bottom:1px solid var(--rule)}
+th{font-weight:700;color:var(--muted);border-bottom-width:2px}
+.cmds td:first-child{white-space:nowrap;padding-right:1.5rem}
+.cmds td:first-child code{background:none;padding:0;font-weight:700;overflow-wrap:normal}
+@media (max-width:40rem){
+  .cmds thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .cmds tr{display:block;padding:.75rem 0;border-bottom:1px solid var(--rule)}
+  .cmds td{display:block;border:0;padding:.1rem 0}
+  .cmds td:first-child{white-space:normal;padding-right:0}
+  .cmds td:first-child code{overflow-wrap:anywhere}
+}
+.block{margin:0 0 1.25rem;padding:.8rem .9rem;background:var(--card);border:1px solid var(--rule);border-radius:8px;overflow-x:auto;line-height:1.6}
+
+/* works / limits */
+.ledger{display:grid;gap:.5rem 3rem;grid-template-columns:repeat(auto-fit,minmax(min(100%,21rem),1fr));max-width:62rem}
+.ledger>div{min-width:0}
+.ledger h3{margin-top:1rem}
+.works li::marker{color:var(--accent)}
+.limits{border-left:3px solid var(--hold-rule);padding-left:1.25rem}
+.limits li::marker{color:var(--hold-ink)}
+
+/* roadmap */
+.plan{list-style:none;padding-left:0}
+.plan li{position:relative;padding-left:1.4rem;margin:.55rem 0}
+.plan li::before{content:"";position:absolute;left:.1rem;top:.5em;width:10px;height:10px;border-radius:50%;border:2px solid var(--muted);background:var(--bg)}
+
+/* faq */
+.faq{margin-top:.5rem}
+.faq details{border-top:1px solid var(--rule)}
+.faq details:last-child{border-bottom:1px solid var(--rule)}
+.faq summary{cursor:pointer;padding:.85rem 0;font-weight:700;line-height:1.4}
+.faq summary:hover{color:var(--accent-strong)}
+.faq details>p{margin:0 0 1rem;padding-left:1.1rem}
+
+/* footer */
+.site-foot{border-top:1px solid var(--rule);margin-top:4.5rem;padding-block:2rem 3rem;font-size:.95rem;color:var(--muted)}
+.site-foot ul{list-style:none;padding:0;margin:0 0 1.2rem;display:flex;flex-wrap:wrap;gap:.45rem 1.4rem}
+.site-foot p{max-width:46rem;margin:0 0 .6rem}
+
+@media (max-width:40rem){
+  :root{--rail:1.25rem}
+  body{font-size:1rem}
+  .chain>section{padding-top:2.75rem}
+  .chain>section>h2::before{width:12px;height:12px;left:calc(var(--rail) / -2 - 6px)}
+  .hero>h1::before{width:14px;height:14px;left:calc(var(--rail) / -2 - 7px);top:.2em}
+  .chain::before{top:3.9rem}
+  .site-nav .sep{border-left:0;padding-left:0}
+}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="wrap site-head">
+<a class="brand" href="https://kingyoungmins.github.io/cowork-sync/">cowork-sync</a>
+<nav class="site-nav" aria-label="Site"><ul><li><a href="#how">How it works</a></li><li><a href="#commands">Commands</a></li><li><a href="#status">Limits</a></li><li><a href="#roadmap">Roadmap</a></li><li><a href="#faq">FAQ</a></li><li class="sep"><a href="https://kingyoungmins.github.io/cowork-sync/" aria-current="page" hreflang="en" lang="en">English</a></li><li><a href="https://kingyoungmins.github.io/cowork-sync/ko/" hreflang="ko" lang="ko">한국어</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync">GitHub</a></li></ul></nav>
+</header>
+<main id="main" class="wrap" tabindex="-1">
+<div class="chain">
+<section class="hero" aria-labelledby="top">
+<h1 id="top">cowork-sync</h1>
+<p class="pitch">Saved edits reach every teammate’s clone through git.</p>
+<p class="lede">cowork-sync is a Claude Code plugin that keeps the working tree of one git branch in sync between teammates’ clones, in real time, using only the project’s own git remote and no server.</p>
+<p class="status-line"><span class="badge">Preview</span><span>v0.1.0-preview is a GitHub pre-release. Use it on a test repository only.</span></p>
+<h2 class="vh">Install</h2>
+<div class="install">
+<div class="snippet">
+<div class="snippet-head"><span>In a Claude Code session, one line at a time</span></div>
+<div class="cmd-row"><code id="cc1" tabindex="0">/plugin marketplace add Kingyoungmins/cowork-sync</code><button type="button" class="copy" data-copy="cc1" data-done="Copied" data-fail="Selected" data-done-long="Copied to the clipboard." data-fail-long="Could not reach the clipboard. The text is selected; copy it with your keyboard." hidden><span class="btn-text">Copy</span><span class="vh"> the marketplace command</span></button></div>
+<div class="cmd-row"><code id="cc2" tabindex="0">/plugin install cowork-sync@cowork-sync</code><button type="button" class="copy" data-copy="cc2" data-done="Copied" data-fail="Selected" data-done-long="Copied to the clipboard." data-fail-long="Could not reach the clipboard. The text is selected; copy it with your keyboard." hidden><span class="btn-text">Copy</span><span class="vh"> the install command</span></button></div>
+</div>
+<div class="snippet">
+<div class="snippet-head"><span>Or from a shell</span><button type="button" class="copy" data-copy="sh1" data-done="Copied" data-fail="Selected" data-done-long="Copied to the clipboard." data-fail-long="Could not reach the clipboard. The text is selected; copy it with your keyboard." hidden><span class="btn-text">Copy</span><span class="vh"> the shell commands</span></button></div>
+<pre id="sh1" tabindex="0">claude plugin marketplace add Kingyoungmins/cowork-sync
+claude plugin install cowork-sync@cowork-sync</pre>
+</div>
+</div>
+<p class="after">Every PC that takes part installs the plugin and has its own clone. Run <code>/reload-plugins</code> (or restart Claude Code) to load it, then type <code>/cowork-sync:cowork start</code> in your clone.</p>
+<p class="hero-links"><a href="https://github.com/Kingyoungmins/cowork-sync">Source on GitHub</a><a href="https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.0-preview">Release notes for v0.1.0-preview</a></p>
+<p id="copy-status" class="vh" aria-live="polite"></p>
+</section>
+
+<section id="problem" aria-labelledby="problem-h">
+<h2 id="problem-h">The problem</h2>
+<p>A small team edits one codebase with Claude Code. Pushes and pulls collide, so the team takes turns: one person finishes, pushes and says so, and the next person pulls. What the team wants is closer to a shared spreadsheet: everyone works in the same files at once, and each person’s Claude knows what the others are touching.</p><p>cowork-sync covers the first part of that. Each teammate works on their own PC, in their own clone, with their own Claude Code session, on one branch of one repository. When someone saves a file, the change reaches everyone else’s working tree.</p><p>The second part, each person’s Claude knowing what the others are touching, is planned and not in this preview. Today Claude does not know about the sync; its edits sync like any other saved file.</p><p><strong>Who the preview is for:</strong> people who want to try live sync on a test repository with a private remote. It is not for production repositories or public repositories.</p>
+</section>
+
+<section id="how" aria-labelledby="how-h">
+<h2 id="how-h">How it works</h2>
+<p>Each clone runs one background process, the daemon. The daemons share work through two custom refs on the git remote you already use. Nothing else is in the path: there is no server.</p>
+<figure class="diagram wide">
+<svg class="dg dg-h" viewBox="0 0 960 400" role="img" aria-labelledby="dgh-t dgh-d" xmlns="http://www.w3.org/2000/svg"><title id="dgh-t">How cowork-sync moves edits between two clones</title><desc id="dgh-d">Two PCs, each with a Claude Code session, a working tree and a cowork-sync daemon. Each daemon pushes saved edits to the git remote and fetches teammates&#x27; edits from it. On the remote, refs/cowork/main/board and refs/cowork/main/code hold the shared work; refs/heads/main is not pushed to. There is no other server.</desc><defs><marker id="ah-h" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="4.6" markerHeight="4.6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="head"/></marker></defs><rect x="8" y="8" width="272" height="384" rx="12" class="box"/><text x="24" y="36" class="t-title">Your PC</text><rect x="24" y="52" width="240" height="60" rx="8" class="inner"/><text x="40" y="76" class="t-label">Claude Code session</text><text x="40" y="96" class="t-sub">or any editor that saves files</text><path d="M144 113L144 140" class="flow" marker-end="url(#ah-h)"/><text x="152" y="131" class="t-sub">saves</text><rect x="24" y="144" width="240" height="60" rx="8" class="inner"/><text x="40" y="168" class="t-label">Working tree</text><text x="40" y="188" class="t-sub">your own clone</text><path d="M104 205L104 247" class="flow" marker-end="url(#ah-h)"/><text x="96" y="231" class="t-arrow" text-anchor="end">picks up</text><path d="M184 251L184 209" class="flow" marker-end="url(#ah-h)"/><text x="192" y="231" class="t-arrow">writes in</text><rect x="24" y="252" width="240" height="104" rx="8" class="daemon"/><text x="40" y="278" class="t-label">cowork-sync daemon</text><text x="40" y="300" class="t-sub">one per clone</text><text x="40" y="318" class="t-sub">reads via its own git index</text><rect x="680" y="8" width="272" height="384" rx="12" class="box"/><text x="696" y="36" class="t-title">Teammate’s PC</text><rect x="696" y="52" width="240" height="60" rx="8" class="inner"/><text x="712" y="76" class="t-label">Claude Code session</text><text x="712" y="96" class="t-sub">or any editor that saves files</text><path d="M816 113L816 140" class="flow" marker-end="url(#ah-h)"/><text x="824" y="131" class="t-sub">saves</text><rect x="696" y="144" width="240" height="60" rx="8" class="inner"/><text x="712" y="168" class="t-label">Working tree</text><text x="712" y="188" class="t-sub">your own clone</text><path d="M776 205L776 247" class="flow" marker-end="url(#ah-h)"/><text x="768" y="231" class="t-arrow" text-anchor="end">picks up</text><path d="M856 251L856 209" class="flow" marker-end="url(#ah-h)"/><text x="864" y="231" class="t-arrow">writes in</text><rect x="696" y="252" width="240" height="104" rx="8" class="daemon"/><text x="712" y="278" class="t-label">cowork-sync daemon</text><text x="712" y="300" class="t-sub">one per clone</text><text x="712" y="318" class="t-sub">reads via its own git index</text><rect x="360" y="8" width="240" height="384" rx="12" class="box"/><text x="376" y="36" class="t-title">Your git remote</text><text x="376" y="56" class="t-sub">private; the only transport</text><rect x="376" y="76" width="208" height="72" rx="8" class="ref-off"/><text x="390" y="100" class="t-ref-off">refs/heads/main</text><text x="390" y="119" class="t-sub">your branch:</text><text x="390" y="136" class="t-sub">not pushed to</text><text x="376" y="184" class="t-sub">custom refs shared by the daemons</text><rect x="376" y="196" width="208" height="84" rx="8" class="ref"/><text x="390" y="220" class="t-ref">refs/cowork/main/board</text><text x="390" y="241" class="t-sub">fast-forward-only chain,</text><text x="390" y="258" class="t-sub">the authority</text><rect x="376" y="292" width="208" height="84" rx="8" class="ref"/><text x="390" y="316" class="t-ref">refs/cowork/main/code</text><text x="390" y="337" class="t-sub">mirror of the latest</text><text x="390" y="354" class="t-sub">shared tree</text><path d="M265 300L356 300" class="flow" marker-end="url(#ah-h)"/><text x="312" y="291" class="t-arrow" text-anchor="middle">push</text><path d="M359 336L268 336" class="flow" marker-end="url(#ah-h)"/><text x="312" y="357" class="t-arrow" text-anchor="middle">fetch</text><path d="M695 300L604 300" class="flow" marker-end="url(#ah-h)"/><text x="648" y="291" class="t-arrow" text-anchor="middle">push</text><path d="M601 336L692 336" class="flow" marker-end="url(#ah-h)"/><text x="648" y="357" class="t-arrow" text-anchor="middle">fetch</text></svg>
+<svg class="dg dg-v" viewBox="0 0 340 1052" role="img" aria-labelledby="dgv-t dgv-d" xmlns="http://www.w3.org/2000/svg"><title id="dgv-t">How cowork-sync moves edits between two clones</title><desc id="dgv-d">Two PCs, each with a Claude Code session, a working tree and a cowork-sync daemon. Each daemon pushes saved edits to the git remote and fetches teammates&#x27; edits from it. On the remote, refs/cowork/main/board and refs/cowork/main/code hold the shared work; refs/heads/main is not pushed to. There is no other server.</desc><defs><marker id="ah-v" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="4.6" markerHeight="4.6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="head"/></marker></defs><rect x="6" y="6" width="328" height="330" rx="12" class="box"/><text x="22" y="32" class="t-title">Your PC</text><rect x="22" y="46" width="296" height="56" rx="8" class="inner"/><text x="36" y="69" class="t-label">Claude Code session</text><text x="36" y="89" class="t-sub">or any editor that saves files</text><path d="M170 103L170 128" class="flow" marker-end="url(#ah-v)"/><text x="178" y="121" class="t-sub">saves</text><rect x="22" y="132" width="296" height="56" rx="8" class="inner"/><text x="36" y="155" class="t-label">Working tree</text><text x="36" y="175" class="t-sub">your own clone</text><path d="M120 189L120 218" class="flow" marker-end="url(#ah-v)"/><text x="112" y="208" class="t-arrow" text-anchor="end">picks up</text><path d="M220 221L220 192" class="flow" marker-end="url(#ah-v)"/><text x="228" y="208" class="t-arrow">writes in</text><rect x="22" y="222" width="296" height="100" rx="8" class="daemon"/><text x="36" y="247" class="t-label">cowork-sync daemon</text><text x="36" y="268" class="t-sub">one per clone</text><text x="36" y="287" class="t-sub">reads via its own git index</text><path d="M130 323L130 386" class="flow" marker-end="url(#ah-v)"/><text x="122" y="360" class="t-arrow" text-anchor="end">push</text><path d="M210 389L210 326" class="flow" marker-end="url(#ah-v)"/><text x="218" y="360" class="t-arrow">fetch</text><rect x="6" y="390" width="328" height="256" rx="12" class="box"/><text x="22" y="416" class="t-title">Your git remote</text><text x="22" y="436" class="t-sub">private; the only transport</text><rect x="22" y="450" width="296" height="50" rx="8" class="ref-off"/><text x="36" y="471" class="t-ref-off">refs/heads/main</text><text x="36" y="490" class="t-sub">your branch: not pushed to</text><text x="22" y="522" class="t-sub">custom refs shared by the daemons</text><rect x="22" y="532" width="296" height="50" rx="8" class="ref"/><text x="36" y="553" class="t-ref">refs/cowork/main/board</text><text x="36" y="572" class="t-sub">fast-forward-only chain, the authority</text><rect x="22" y="588" width="296" height="50" rx="8" class="ref"/><text x="36" y="609" class="t-ref">refs/cowork/main/code</text><text x="36" y="628" class="t-sub">mirror of the latest shared tree</text><path d="M130 715L130 650" class="flow" marker-end="url(#ah-v)"/><text x="122" y="686" class="t-arrow" text-anchor="end">push</text><path d="M210 647L210 712" class="flow" marker-end="url(#ah-v)"/><text x="218" y="686" class="t-arrow">fetch</text><rect x="6" y="716" width="328" height="330" rx="12" class="box"/><text x="22" y="742" class="t-title">Teammate’s PC</text><rect x="22" y="756" width="296" height="100" rx="8" class="daemon"/><text x="36" y="781" class="t-label">cowork-sync daemon</text><text x="36" y="802" class="t-sub">one per clone</text><text x="36" y="821" class="t-sub">reads via its own git index</text><path d="M120 889L120 860" class="flow" marker-end="url(#ah-v)"/><text x="112" y="878" class="t-arrow" text-anchor="end">picks up</text><path d="M220 857L220 886" class="flow" marker-end="url(#ah-v)"/><text x="228" y="878" class="t-arrow">writes in</text><rect x="22" y="890" width="296" height="56" rx="8" class="inner"/><text x="36" y="913" class="t-label">Working tree</text><text x="36" y="933" class="t-sub">your own clone</text><path d="M170 979L170 950" class="flow" marker-end="url(#ah-v)"/><text x="178" y="970" class="t-sub">saves</text><rect x="22" y="980" width="296" height="56" rx="8" class="inner"/><text x="36" y="1003" class="t-label">Claude Code session</text><text x="36" y="1023" class="t-sub">or any editor that saves files</text></svg>
+<figcaption>Example: two PCs on a branch named <code>main</code>. Each daemon publishes saved edits to <code>refs/cowork/main/board</code> and <code>refs/cowork/main/code</code> and writes teammates’ edits into its own working tree. The branch itself, <code>refs/heads/main</code>, is not pushed to.</figcaption>
+</figure>
+<h3>What happens when you save a file</h3>
+<ol><li>You save a file, from Claude Code or any editor. The daemon in your clone picks it up. It reads through its own private git index and never touches yours.</li><li>It publishes the change to your remote. <code>refs/cowork/&lt;branch&gt;/board</code> is a fast-forward-only chain of board commits and is the authority; <code>refs/cowork/&lt;branch&gt;/code</code> mirrors the latest shared tree.</li><li>Every push is a fast-forward guarded by a lease (<code>--force-with-lease</code>), so no PC can overwrite another’s update. When two PCs push at once, the one that loses fetches and tries again.</li><li>Teammates’ daemons fetch the change and merge it with <code>git merge-tree</code>, using explicit merge bases.</li><li>Each daemon writes the result into its working tree. A file is written only if it still holds the bytes the daemon last read, so an edit you just saved is never overwritten. A group of files is written all or none.</li></ol>
+<h3>Details that matter</h3>
+<ul><li>When two people change the same line, one version wins. The other is kept as a hold record in the clone and is never thrown away. The preview has no command yet to see or restore it.</li><li>The preview never pushes to your branch (<code>refs/heads/&lt;branch&gt;</code>). A plain <code>git fetch</code> does not download the custom refs, so your normal history stays clean.</li><li>Settings, hooks and CI files (<code>.claude/</code>, <code>CLAUDE.md</code>, <code>.github/workflows/</code>, <code>.gitattributes</code> and similar) never sync live. They move only through ordinary git commits.</li><li>New files with secret-like names (<code>.env</code>, <code>*.pem</code>, <code>*.key</code>, <code>id_rsa*</code>, <code>*credentials*</code> and more) are not shared. New files over 1 MiB are not shared, and files of 50 MiB or more never sync live.</li><li>The team shares a push budget of 12 pushes a minute, 6 for half an hour after any throttling, to keep the load on the host low. The daemon’s loop runs every 2.5 s when active and every 10 s when idle.</li><li>Git commands that move <code>HEAD</code> (commit, switch, checkout, pull, merge, rebase, stash) freeze sync until <code>HEAD</code> is back. Stop sync before you run them. If the board’s history is ever rewritten, every PC freezes until it is recovered.</li></ul>
+<h3>What leaves your PC</h3>
+<ul><li><strong>Where it goes:</strong> only to your clone’s own git remote, through git. The daemon runs git as child processes with git’s prompts turned off, and its bundle loads no Node network module.</li><li><strong>What is sent:</strong> the paths and contents of the files you save that are in sync scope, plus board commits. Anyone who can read the repository can fetch them, and the preview does not check that the remote is private.</li><li><strong>Your name:</strong> shared commits carry a display name: <code>--name</code> if you pass it, else your git <code>user.name</code>, else “cowork peer”. The commit address is a placeholder, not your git e-mail.</li><li><strong>Join record:</strong> when a PC joins the board, the board records its display name, the plugin version, a hash of the plugin, the protocol number, the <code>core.autocrlf</code> setting and hashed fingerprints of the repository’s filter drivers (no paths). When the first PC starts sync, the daemon also pushes a short-lived probe ref to test the host, then deletes it.</li><li><strong>What stays on your PC:</strong> <code>.git/cowork/status.json</code>, the daemon log (<code>.git/cowork/log/daemon-0.jsonl</code>), hold records, and the optional read-only viewer, which listens on 127.0.0.1 only.</li><li>The design rules out telemetry, crash reporting, update checks and analytics, and a source lint bans Node network modules everywhere except the viewer’s local server. This is a design rule plus a lint, not an independent audit.</li></ul>
+</section>
+
+<section id="commands" aria-labelledby="commands-h">
+<h2 id="commands-h">Requirements and commands</h2>
+<h3>What you need</h3>
+<ul><li>Claude Code 2.1.270 or newer.</li><li>Node.js 20 or newer on <code>PATH</code>.</li><li>git 2.43 or newer. <code>start</code> refuses an older git.</li><li>Windows, macOS or Linux.</li><li>A <strong>private</strong> git remote that accepts custom refs (<code>refs/cowork/*</code>) and enforces <code>--force-with-lease</code>. GitHub does both. The first PC’s <code>start</code> probes the host and refuses one that does not.</li><li>Credentials from a git credential helper. Git’s prompts are off, so a missing credential gives a refusal, not a hang.</li><li>Every PC that takes part installs the plugin and has its own clone, with <code>.git</code> on the same volume as the work tree.</li></ul>
+<h3 id="cmds-h">Commands</h3>
+<p>Claude Code names the plugin’s command <code>/cowork-sync:cowork</code>; type that name in full. The same verbs also run in a terminal, as <code>node "&lt;plugin folder&gt;/dist/cli.js" &lt;verb&gt;</code>; <code>/cowork-sync:cowork view</code> prints that path.</p>
+<section class="table-wrap wide" aria-labelledby="cmds-h" tabindex="0">
+<table class="cmds"><thead><tr><th scope="col">Command</th><th scope="col">What it does</th></tr></thead>
+<tbody><tr><td><code>/cowork-sync:cowork start [--branch &lt;b&gt;]</code></td><td>Starts sync for this repository, on the current branch. The first PC creates the shared board on the remote; every later PC joins it. The daemon keeps running in the background.</td></tr><tr><td><code>/cowork-sync:cowork status</code></td><td>Prints a short summary: the state (<code>ok</code>, <code>degraded</code>, <code>offline</code>, <code>frozen</code>, <code>down</code> and so on), the branch, and what is still waiting to be published or applied.</td></tr><tr><td><code>/cowork-sync:cowork view</code></td><td>Prints the command that opens the read-only viewer. The viewer opens only from a terminal: run that command there and it opens in your browser. If your build does not have the viewer process yet, it refuses with <code>RF_VIZ_START_FAILED</code>.</td></tr><tr><td><code>/cowork-sync:cowork stop</code></td><td>Stops the daemon cleanly. Your files stay as they are.</td></tr><tr><td><code>/cowork-sync:cowork help</code></td><td>Lists the commands.</td></tr></tbody></table>
+</section>
+<p><code>start</code> also takes <code>--publish=all|none</code> (at the first start, share or keep your uncommitted local work), <code>--remote &lt;name&gt;</code> and <code>--name &lt;display name&gt;</code>.</p><p>When a command refuses, it prints the reason with a code, and a <code>next:</code> line with the command to run.</p>
+<h3>What <code>start</code> checks</h3>
+<ul><li>It runs in the main clone. A linked worktree or a submodule is refused.</li><li>The branch is checked out, exists on the remote, and is neither ahead of nor behind it. No merge or rebase may be in progress.</li><li>The remote’s fetch URL equals its push URL, and no <code>insteadOf</code> rewrite applies.</li><li>Only one daemon runs per clone.</li><li>If you have uncommitted changes at the first start, it asks you to choose: share them with the team, or keep them on this PC.</li></ul>
+<h3>Update, remove, clean up</h3>
+<p>Updates are not automatic for this marketplace. To update, run <code>/plugin marketplace update cowork-sync</code>, then <code>claude plugin update cowork-sync@cowork-sync</code>. To remove the plugin, run <code>claude plugin uninstall cowork-sync@cowork-sync</code>.</p>
+<p>Stopping sync or uninstalling the plugin leaves the custom refs on the remote. After every PC has stopped, you can delete them by hand, for example:</p>
+<pre class="block" tabindex="0">git push origin --delete refs/cowork/main/board refs/cowork/main/code</pre>
+</section>
+
+<section id="status" aria-labelledby="status-h">
+<h2 id="status-h">What works today, and the preview’s limits</h2>
+<div class="ledger wide">
+<div class="works">
+<h3>Works in v0.1.0-preview</h3>
+<ul><li>Live sync of one branch’s working tree between several clones, through the git remote only.</li><li>One daemon per clone. The first PC creates the shared board and later PCs join it. After a crash or a stop, the next <code>start</code> resumes from the saved state and rebuilds lost local state.</li><li>A freeze when the board’s history is rewritten, with a <code>recover</code> step to restore it.</li><li>No overwrite of an edit you just saved; groups of files are written all or none.</li><li>Same-line conflicts keep both versions: one on the board, the other as a hold record in the clone.</li><li>Settings, hooks and CI files never sync live; new files with secret-like names are not shared.</li><li>A freeze while a git command has moved <code>HEAD</code>, lifted when <code>HEAD</code> is back.</li><li>A status file and a JSON-lines daemon log in each clone.</li><li>The <code>/cowork-sync:cowork</code> command with <code>start</code>, <code>status</code>, <code>stop</code>, <code>view</code> and <code>help</code>.</li><li>The core of a read-only viewer that draws the team’s board in a browser, started from a terminal (English only; see the <code>view</code> limit).</li></ul>
+<h4>Tested so far</h4>
+<ul><li>On a real GitHub repository with two clones: edits to different files, to the same file ten lines apart, and to the same line all ended in the same state on both clones, on one fast-forward history.</li><li>Hosted CI runs every check on Windows, macOS and Linux, each with Node 20 and Node 24, against local bare remotes and a simulator.</li></ul>
+</div>
+<div class="limits">
+<h3>Preview limits</h3>
+<h4>Safety and privacy</h4><ul><li>The remote is not checked for being private. Use a private repository: anyone who can read it can fetch <code>refs/cowork/*</code>.</li><li>File contents are not scanned for secrets; only new file names are checked. Keep secrets out of synced files.</li><li>Teammates with write access are trusted: their edits are written into your working tree. Back up anything you care about.</li></ul><h4>Not built yet</h4><ul><li>Claude does not know about the sync: no hooks, no MCP tools, no function-level claims, no Claude-to-Claude coordination.</li><li>No <code>save</code> step that turns shared work into a commit, and no <code>pause</code>, <code>resume</code>, <code>doctor</code> or <code>uninstall</code> verb.</li><li>No command to see or restore a hold record.</li><li><code>view</code> only prints a terminal command. A build without the viewer process refuses with <code>RF_VIZ_START_FAILED</code>.</li><li>Messages are in English only. Some refusals point at <code>/cowork doctor</code>, which does not exist yet, or name the bare <code>/cowork</code> instead of <code>/cowork-sync:cowork</code>.</li></ul><h4>Testing gaps</h4><ul><li>The real GitHub test ran both clones’ engines in one process. A run on two separate machines is still to do.</li><li>Only GitHub has been tried as a real host. Treat hosts that reject custom refs as unsupported.</li></ul><h4>Repositories and day-to-day use</h4><ul><li>Linked worktrees and submodules are refused.</li><li>Git commands that move <code>HEAD</code> freeze sync; stop sync first.</li><li>Custom refs stay on the remote after stop or uninstall; delete them by hand.</li><li>There is no autostart: after a reboot or logout, run <code>start</code> again.</li><li>Updates are not automatic.</li><li>This is a personal project. Reports are answered as time allows, and only the latest preview gets security fixes.</li></ul>
+</div>
+</div>
+</section>
+
+<section id="roadmap" aria-labelledby="roadmap-h">
+<h2 id="roadmap-h">Roadmap</h2>
+<p>Planned for v1, the first full public release. These are plans; no dates are set.</p>
+<ul class="plan"><li><strong>Holds and change-sets:</strong> see and restore hold records, a mass-change breaker, a revert detector.</li><li><strong>Function-level claims:</strong> Python, JS/TS and C# by symbol, other text files by block.</li><li><strong>Claude Code integration:</strong> hooks, an edit gate, MCP tools and local IPC.</li><li><strong>Claude-to-Claude coordination:</strong> conflict flows, requests and answers, notifications to sessions.</li><li><strong>The full command set:</strong> start, stop, pause, resume, save, adopt, recover, uninstall, status, doctor; a check that the remote is private; a secrets scanner; messages in six languages.</li><li><strong>Sync tied to a session:</strong> sync while a Claude Code session is open, or for a set time with <code>/cowork start --human &lt;minutes&gt;</code>. Public remotes refused.</li><li><strong>Hosts:</strong> GitHub, GitLab and Gitea, once the start probe confirms custom refs and leases.</li><li><strong>Viewer 2:</strong> <code>view</code> as a slash command, six-language catalogs, WebM and GIF export, a highlight reel. Its last task is the first full public release.</li><li><strong>Before host-dependent work ships:</strong> a second PC on another network, a 24-hour credential run with a forced sign-out, and interactive terminal and VS Code runs.</li></ul>
+<p>The developer notes in <a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/docs/STATUS.md">docs/STATUS.md</a> list what is done and what comes next.</p>
+</section>
+
+<section id="licence" aria-labelledby="licence-h">
+<h2 id="licence-h">Licence, in plain words</h2>
+<p>cowork-sync is source-available under the Functional Source License 1.1, with the Apache License 2.0 as its future licence (FSL-1.1-ALv2). Copyright 2026 Youngmin Seo.</p>
+<ul><li>You may use, copy, change and share it for any purpose except a competing use.</li><li>A competing use means offering it, or something that does substantially the same thing, to others as a commercial product or service.</li><li>Internal use, non-commercial education, non-commercial research, and professional services for a licensee are allowed.</li><li>Each release becomes available under the Apache License 2.0 two years after it is released.</li><li>There is no warranty, and the licence grants no trademark rights.</li><li>Contributions need the contributor licence agreement (CLA). You agree to it with a comment on your pull request.</li></ul>
+<p>This summary is not the licence. Read <a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/LICENSE.md">LICENSE.md</a> for the terms, the official FSL-1.1-ALv2 text from <a href="https://fsl.software">fsl.software</a>, and <a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a> for the CLA.</p>
+</section>
+
+<section id="faq" aria-labelledby="faq-h">
+<h2 id="faq-h">Frequently asked questions</h2>
+<div class="faq"><details><summary>Is it ready for my real project?</summary><p>No. It is an early preview, not a finished product. Use it on a test repository only, and back up anything you care about.</p></details><details><summary>Is there a server? Where does my code go?</summary><p>There is no server. The only transport is your project’s own git remote. Saved files go to two custom refs on it: <code>refs/cowork/&lt;branch&gt;/board</code> and <code>refs/cowork/&lt;branch&gt;/code</code>.</p></details><details><summary>Which git hosts work?</summary><p>A host that accepts custom refs and enforces <code>--force-with-lease</code>. GitHub does both, and the first PC’s <code>start</code> refuses a host that fails its probe. Only GitHub has been tried for real; GitLab and Gitea are in the v1 plan.</p></details><details><summary>Will it push to my branch or clutter my history?</summary><p>No. The preview never pushes to <code>refs/heads/&lt;branch&gt;</code>, and a plain <code>git fetch</code> does not download the custom refs. The refs stay on the remote until you delete them.</p></details><details><summary>What happens when two people edit the same line?</summary><p>One version wins. The other is kept as a hold record in the clone whose version lost, and it is never thrown away. There is no command yet to see or restore it.</p></details><details><summary>Does my Claude coordinate with my teammates’ Claude?</summary><p>Not in this preview. Claude does not know about the sync; its edits sync like any saved file. Hooks, MCP tools, claims and coordination are planned.</p></details><details><summary>Can I use a public repository? Who can read the shared work?</summary><p>Use a private remote only. Anyone who can read the repository can fetch <code>refs/cowork/*</code>, and the preview does not check that the remote is private.</p></details><details><summary>How do I turn the shared work into a commit?</summary><p>There is no <code>save</code> step yet; it comes with the full command set. Do not run git commands that move <code>HEAD</code> while sync runs; stop sync first.</p></details><details><summary>How fast do edits arrive?</summary><p>No end-to-end latency is published for the preview. The daemon’s loop runs every 2.5 s when active, and the team shares a budget of 12 pushes a minute (6 after throttling).</p></details><details><summary>Do I need Claude Code open while it syncs? Does it work with other editors?</summary><p>You install the plugin and run the command in Claude Code, and the same verbs run from a terminal. After <code>start</code>, the daemon keeps running in the background and picks up saved files, whatever saved them. As far as the code shows, the preview’s daemon is not tied to an open Claude Code session; it runs until you stop it.</p></details><details><summary>Will it share my .env or keys?</summary><p>New files with secret-like names (<code>.env</code>, <code>*.pem</code>, <code>*.key</code>, <code>id_rsa*</code>, <code>*credentials*</code> and more) are not shared. File contents are not scanned yet, so do not put secrets in synced files.</p></details><details><summary>Can I use it at work, and can I contribute?</summary><p>Internal use is allowed under FSL-1.1-ALv2; offering it, or something substantially similar, to others as a commercial product or service is not. Each release becomes Apache-2.0 two years after it is released. Contributions need the CLA, agreed with a comment on your pull request.</p></details></div>
+</section>
+</div>
+</main>
+<footer class="wrap site-foot">
+<nav aria-label="Project links"><ul><li><a href="https://github.com/Kingyoungmins/cowork-sync">Repository</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.0-preview">Release v0.1.0-preview</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/LICENSE.md">Licence (FSL-1.1-ALv2)</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/CHANGELOG.md">Changelog</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/SECURITY.md">Security policy</a></li><li><a href="https://kingyoungmins.github.io/cowork-sync/llms.txt">llms.txt for agents</a></li></ul></nav>
+<p>cowork-sync v0.1.0-preview is a personal source-available project by Youngmin Seo.</p><p>Report security problems through the repository’s <a href="https://github.com/Kingyoungmins/cowork-sync/security">Security tab</a> (“Report a vulnerability”), not in a public issue.</p><p>Not affiliated with or endorsed by Anthropic.</p>
+</footer>
+<script>
+(function(){
+  var live=document.getElementById('copy-status');
+  function selectNode(el){try{var r=document.createRange();r.selectNodeContents(el);var s=window.getSelection();s.removeAllRanges();s.addRange(r);}catch(e){}}
+  var buttons=document.querySelectorAll('button[data-copy]');
+  for(var i=0;i<buttons.length;i++){(function(btn){
+    btn.hidden=false;
+    var label=btn.querySelector('.btn-text');
+    var idle=label.textContent;
+    btn.addEventListener('click',function(){
+      var el=document.getElementById(btn.getAttribute('data-copy'));
+      var text=el.textContent.replace(/\s+$/,'');
+      function finish(ok){
+        label.textContent=ok?btn.getAttribute('data-done'):btn.getAttribute('data-fail');
+        btn.setAttribute('data-state',ok?'done':'fail');
+        live.textContent=ok?btn.getAttribute('data-done-long'):btn.getAttribute('data-fail-long');
+        if(!ok){selectNode(el);}
+        setTimeout(function(){label.textContent=idle;btn.removeAttribute('data-state');},2200);
+      }
+      if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(text).then(function(){finish(true);},function(){finish(false);});}
+      else{finish(false);}
+    });
+  })(buttons[i]);}
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="ko" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>cowork-sync: 서버 없이 git 브랜치 하나를 실시간 동기화</title>
+<meta name="description" content="cowork-sync는 git 브랜치 하나의 작업 트리를 팀원들의 클론 사이에서 실시간으로 맞춰 주는 Claude Code 플러그인입니다. 별도 서버 없이 프로젝트의 git 원격 저장소만 씁니다. 미리보기, 소스 공개형.">
+<meta name="author" content="Youngmin Seo">
+<link rel="canonical" href="https://kingyoungmins.github.io/cowork-sync/ko/">
+<link rel="alternate" hreflang="en" href="https://kingyoungmins.github.io/cowork-sync/">
+<link rel="alternate" hreflang="ko" href="https://kingyoungmins.github.io/cowork-sync/ko/">
+<link rel="alternate" hreflang="x-default" href="https://kingyoungmins.github.io/cowork-sync/">
+<link rel="describedby" href="https://kingyoungmins.github.io/cowork-sync/llms.txt">
+<link rel="icon" href="https://kingyoungmins.github.io/cowork-sync/favicon.svg" type="image/svg+xml">
+<link rel="sitemap" type="application/xml" href="https://kingyoungmins.github.io/cowork-sync/sitemap.xml">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F6F7F5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#13202A" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="cowork-sync">
+<meta property="og:url" content="https://kingyoungmins.github.io/cowork-sync/ko/">
+<meta property="og:title" content="cowork-sync">
+<meta property="og:description" content="저장한 수정이 git 원격만으로 모든 팀원 클론에 전달됩니다. Claude Code 플러그인, v0.1.0-preview, 소스 공개형.">
+<meta property="og:locale" content="ko_KR">
+<meta property="og:locale:alternate" content="en_US">
+<meta property="og:image" content="https://kingyoungmins.github.io/cowork-sync/og.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="cowork-sync: saved edits reach every teammate&#x27;s clone through git. Preview v0.1.0-preview. github.com/Kingyoungmins/cowork-sync">
+<meta name="twitter:image" content="https://kingyoungmins.github.io/cowork-sync/og.png">
+<meta name="twitter:image:alt" content="cowork-sync: saved edits reach every teammate&#x27;s clone through git. Preview v0.1.0-preview. github.com/Kingyoungmins/cowork-sync">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="cowork-sync">
+<meta name="twitter:description" content="저장한 수정이 git 원격만으로 모든 팀원 클론에 전달됩니다. Claude Code 플러그인, v0.1.0-preview, 소스 공개형.">
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": [
+  "SoftwareApplication",
+  "SoftwareSourceCode"
+ ],
+ "@id": "https://kingyoungmins.github.io/cowork-sync/#software",
+ "name": "cowork-sync",
+ "description": "cowork-sync는 git 브랜치 하나의 작업 트리를 팀원들의 클론 사이에서 실시간으로 맞춰 주는 Claude Code 플러그인으로, 별도 서버 없이 프로젝트 자체의 git 원격 저장소만 사용합니다.",
+ "url": "https://kingyoungmins.github.io/cowork-sync/ko/",
+ "inLanguage": "ko",
+ "applicationCategory": "DeveloperApplication",
+ "operatingSystem": "Windows, macOS, Linux",
+ "softwareVersion": "0.1.0-preview",
+ "datePublished": "2026-10-09",
+ "softwareRequirements": "Claude Code 2.1.270 or newer; Node.js 20 or newer; git 2.43 or newer",
+ "license": "https://github.com/Kingyoungmins/cowork-sync/blob/main/LICENSE.md",
+ "codeRepository": "https://github.com/Kingyoungmins/cowork-sync",
+ "downloadUrl": "https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.0-preview",
+ "author": {
+  "@type": "Person",
+  "name": "Youngmin Seo",
+  "url": "https://github.com/Kingyoungmins"
+ },
+ "isAccessibleForFree": true,
+ "offers": {
+  "@type": "Offer",
+  "price": "0",
+  "priceCurrency": "USD"
+ },
+ "image": "https://kingyoungmins.github.io/cowork-sync/og.png"
+}
+</script>
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "FAQPage",
+ "@id": "https://kingyoungmins.github.io/cowork-sync/ko/#faq",
+ "inLanguage": "ko",
+ "mainEntity": [
+  {
+   "@type": "Question",
+   "name": "실제 프로젝트에 써도 되나요?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "아니요. 초기 미리보기이며 완성된 제품이 아닙니다. 테스트용 저장소에서만 쓰고, 소중한 것은 백업해 두세요."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "서버가 있나요? 내 코드는 어디로 가나요?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "서버는 없습니다. 전달 경로는 프로젝트의 git 원격 저장소뿐입니다. 저장한 파일은 그 원격의 사용자 지정 ref 두 개, refs/cowork/<branch>/board와 refs/cowork/<branch>/code로 갑니다."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "어떤 git 호스트에서 되나요?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "사용자 지정 ref를 받아 주고 --force-with-lease를 적용하는 호스트입니다. GitHub는 둘 다 되며, 첫 PC의 start가 호스트를 확인해 통과하지 못하면 거부합니다. 실제로 써 본 곳은 GitHub뿐이고, GitLab과 Gitea는 v1 계획에 들어 있습니다."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "내 브랜치에 push 하거나 이력을 어지럽히나요?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "아니요. 미리보기는 refs/heads/<branch>에 절대 push 하지 않으며, 일반 git fetch는 사용자 지정 ref를 내려받지 않습니다. 이 ref는 직접 지우기 전까지 원격에 남습니다."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "두 사람이 같은 줄을 고치면 어떻게 되나요?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "한 버전이 이깁니다. 진 버전은 그 사람의 클론에 보류 기록으로 보관되며 버려지지 않습니다. 이를 보거나 되살리는 명령은 아직 없습니다."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "내 Claude가 팀원의 Claude와 조율하나요?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "이번 미리보기에서는 아닙니다. Claude는 동기화를 알지 못하며, Claude의 수정도 다른 저장된 파일과 똑같이 동기화됩니다. 훅, MCP 도구, 선점, 협업은 계획되어 있습니다."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "공개 저장소에 써도 되나요? 공유된 작업은 누가 볼 수 있나요?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "비공개 원격 저장소만 쓰세요. 저장소를 읽을 수 있는 사람은 누구나 refs/cowork/*를 가져갈 수 있고, 미리보기는 원격이 비공개인지 확인하지 않습니다."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "공유된 작업을 커밋으로 만들려면요?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "아직 save 단계가 없습니다. 전체 명령과 함께 들어올 예정입니다. 동기화 중에는 HEAD를 움직이는 git 명령을 실행하지 말고, 먼저 동기화를 멈추세요."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "수정이 얼마나 빨리 전달되나요?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "미리보기의 종단 간 지연 시간은 발표된 수치가 없습니다. 데몬의 루프는 활동 중일 때 2.5초마다 돌고, 팀 전체가 분당 push 12회(제한 뒤에는 6회) 예산을 나눠 씁니다."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "동기화하는 동안 Claude Code를 켜 둬야 하나요? 다른 편집기에서도 되나요?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "플러그인 설치와 명령 실행은 Claude Code에서 하고, 같은 동작을 터미널에서도 실행할 수 있습니다. start 뒤에는 데몬이 백그라운드에서 계속 돌며, 무엇으로 저장했든 저장된 파일을 감지합니다. 코드를 보면, 미리보기의 데몬은 Claude Code 세션이 열려 있는지와 상관없이 중지할 때까지 계속 돌아갑니다."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": ".env나 키 파일도 공유되나요?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "비밀 정보처럼 보이는 이름의 새 파일(.env, *.pem, *.key, id_rsa*, *credentials* 등)은 공유되지 않습니다. 하지만 파일 내용은 아직 검사하지 않으니, 동기화되는 파일에 비밀 정보를 넣지 마세요."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "회사에서 써도 되나요? 기여할 수 있나요?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "FSL-1.1-ALv2에서 내부 사용은 허용됩니다. 이 소프트웨어나 본질적으로 비슷한 것을 상용 제품이나 서비스로 남에게 제공하는 것은 안 됩니다. 각 릴리스는 공개 2년 뒤 Apache-2.0이 됩니다. 기여에는 CLA가 필요하며, 풀 리퀘스트에 댓글을 달아 동의합니다."
+   }
+  }
+ ]
+}
+</script>
+<style>
+:root{
+  --bg:#F6F7F5;--surface:#E7ECEA;--card:#FFFFFF;--ink:#16202A;--muted:#47545F;--rule:#C3CDD1;
+  --accent:#0A6767;--accent-strong:#064B4B;--accent-soft:#D4EAE6;
+  --hold-bg:#FBEFD0;--hold-ink:#5F3C00;--hold-rule:#D9B262;
+  --focus:#0A6767;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Roboto,"Helvetica Neue",Arial,system-ui,sans-serif;
+  --mono:ui-monospace,"Cascadia Mono","SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --rail:3rem;
+  color-scheme:light;
+}
+html:lang(ko){--sans:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR","Noto Sans CJK KR",system-ui,sans-serif}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#13202A;--surface:#1D2E39;--card:#182833;--ink:#E3E9EC;--muted:#A6B4BE;--rule:#33475A;
+    --accent:#65CDC4;--accent-strong:#9BE3DC;--accent-soft:#1C3C3F;
+    --hold-bg:#3A2E10;--hold-ink:#F5D28A;--hold-rule:#7A6024;
+    --focus:#9BE3DC;color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#13202A;--surface:#1D2E39;--card:#182833;--ink:#E3E9EC;--muted:#A6B4BE;--rule:#33475A;
+  --accent:#65CDC4;--accent-strong:#9BE3DC;--accent-soft:#1C3C3F;
+  --hold-bg:#3A2E10;--hold-ink:#F5D28A;--hold-rule:#7A6024;
+  --focus:#9BE3DC;color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 1.0625rem/1.6 var(--sans);overflow-wrap:break-word}
+html:lang(ko) body{word-break:keep-all;line-height:1.72}
+img,svg{max-width:100%}
+a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:.18em}
+a:hover{color:var(--accent-strong);text-decoration-thickness:2px}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px;border-radius:3px}
+code,pre{font-family:var(--mono);font-size:.875em}
+:not(pre)>code{background:var(--surface);padding:.08em .34em;border-radius:4px;overflow-wrap:anywhere;word-break:normal}
+.vh{position:absolute!important;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.skip{position:absolute;left:1rem;top:-4rem;z-index:10;background:var(--card);color:var(--ink);padding:.6rem .9rem;border:2px solid var(--focus);border-radius:6px}
+.skip:focus{top:1rem}
+.wrap{max-width:70rem;margin-inline:auto;padding-inline:clamp(1rem,4vw,2rem)}
+
+/* header */
+.site-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.6rem 1.5rem;padding-block:1rem;border-bottom:1px solid var(--rule)}
+.brand{font:700 1.05rem/1.2 var(--mono);color:var(--ink);text-decoration:none}
+.brand:hover{color:var(--ink)}
+.site-nav ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:.3rem 1.15rem;font-size:.95rem}
+.site-nav a{color:var(--ink);text-decoration:none}
+.site-nav a:hover{text-decoration:underline;color:var(--accent-strong)}
+.site-nav a[aria-current]{font-weight:600;text-decoration:underline;text-decoration-color:var(--accent);text-decoration-thickness:2px}
+.site-nav .sep{border-left:1px solid var(--rule);padding-left:1.15rem}
+
+/* the chain: a fast-forward-only line of nodes, one per section */
+.chain{position:relative;padding-left:var(--rail);padding-bottom:1rem}
+.chain::before{content:"";position:absolute;left:calc(var(--rail) / 2 - 1px);top:4.1rem;bottom:0;width:2px;background:var(--rule)}
+.chain>section{padding-block:3.5rem 0}
+.chain>section>*:not(.wide){max-width:44rem}
+.chain>section>h2,.hero>h1{position:relative}
+.chain>section>h2::before{content:"";position:absolute;left:calc(var(--rail) / -2 - 7px);top:.33em;width:14px;height:14px;border-radius:50%;border:2px solid var(--accent);background:var(--bg)}
+.hero>h1::before{content:"";position:absolute;left:calc(var(--rail) / -2 - 9px);top:.15em;width:18px;height:18px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--bg)}
+
+h2{font-size:clamp(1.45rem,1.15rem + 1.1vw,1.9rem);line-height:1.2;letter-spacing:-.012em;margin:0 0 1rem;font-weight:700}
+h3{font-size:1.15rem;line-height:1.3;margin:2.2rem 0 .6rem;font-weight:700}
+h4{font-size:1rem;line-height:1.35;margin:1.5rem 0 .35rem;font-weight:700}
+p{margin:0 0 1rem}
+ul,ol{margin:0 0 1rem;padding-left:1.25rem}
+li{margin:.3rem 0}
+li::marker{color:var(--muted)}
+
+/* hero */
+.hero{padding-block:3.25rem .5rem}
+.hero>h1{font:700 clamp(1.2rem,1rem + .8vw,1.45rem)/1.2 var(--mono);margin:0 0 1.2rem;letter-spacing:0}
+.pitch{font-size:clamp(2rem,1.1rem + 3.9vw,3.6rem);line-height:1.07;font-weight:700;letter-spacing:-.028em;margin:0 0 1.4rem;max-width:16.5ch;text-wrap:balance}
+html:lang(ko) .pitch{line-height:1.22;letter-spacing:-.03em;max-width:13em}
+.lede{font-size:1.17rem;line-height:1.55;max-width:40rem;margin:0 0 1.3rem}
+.status-line{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .8rem;margin:0 0 1.9rem;color:var(--muted);max-width:44rem}
+.badge{display:inline-block;font:700 .85rem/1 var(--sans);padding:.4rem .65rem;border-radius:999px;background:var(--hold-bg);color:var(--hold-ink);border:1px solid var(--hold-rule)}
+.install{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(min(100%,23rem),1fr));max-width:60rem;margin:0 0 1.2rem}
+.snippet{border:1px solid var(--rule);border-radius:10px;background:var(--card);min-width:0;overflow:hidden}
+.snippet-head{display:flex;justify-content:space-between;align-items:center;gap:.75rem;min-height:2.9rem;padding:.4rem .5rem .4rem .9rem;border-bottom:1px solid var(--rule);font-size:.92rem;color:var(--muted)}
+.snippet pre{margin:0;padding:.85rem .9rem;overflow-x:auto;line-height:1.6}
+.cmd-row{display:flex;align-items:center;gap:.6rem;padding:.5rem .5rem .5rem .9rem}
+.cmd-row+.cmd-row{border-top:1px solid var(--rule)}
+.cmd-row>code{display:block;flex:1;min-width:0;overflow-x:auto;white-space:pre;background:none;padding:.15rem 0;border-radius:0;line-height:1.6}
+.copy{flex:none;font:600 .85rem/1 var(--sans);color:var(--ink);background:var(--bg);border:1px solid var(--rule);border-radius:6px;padding:.5rem .75rem;cursor:pointer;min-height:2.1rem}
+.copy:hover{border-color:var(--accent);color:var(--accent-strong)}
+.copy[data-state="done"]{border-color:var(--accent);color:var(--accent-strong)}
+.after{max-width:44rem;color:var(--muted)}
+.hero-links{display:flex;flex-wrap:wrap;gap:.4rem 1.4rem}
+
+/* diagram */
+.diagram{margin:1.75rem 0 1.25rem}
+.diagram svg{display:block;width:100%;height:auto}
+.dg-h{max-width:60rem}
+.diagram .dg-v{display:none;max-width:23rem}
+@media (max-width:47.99rem){.diagram .dg-h{display:none}.diagram .dg-v{display:block}}
+.diagram figcaption{font-size:.95rem;color:var(--muted);margin-top:.85rem;max-width:44rem}
+.dg .box{fill:var(--card);stroke:var(--rule);stroke-width:1.5}
+.dg .inner{fill:var(--surface)}
+.dg .daemon{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
+.dg .ref{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
+.dg .ref-off{fill:none;stroke:var(--muted);stroke-width:1.25;stroke-dasharray:5 4}
+.dg .flow{stroke:var(--accent);stroke-width:2;fill:none}
+.dg .head{fill:var(--accent)}
+.dg text{font-family:var(--sans)}
+.dg .t-title{font-size:15px;font-weight:700;fill:var(--ink)}
+.dg .t-label{font-size:13.5px;font-weight:700;fill:var(--ink)}
+.dg .t-sub{font-size:12px;fill:var(--muted)}
+.dg .t-ref{font-family:var(--mono);font-size:12.5px;font-weight:700;fill:var(--ink)}
+.dg .t-ref-off{font-family:var(--mono);font-size:12.5px;fill:var(--muted)}
+.dg .t-arrow{font-size:12px;font-weight:700;fill:var(--accent)}
+.dg-v .t-sub{font-size:13px}
+.dg-v .t-arrow{font-size:13px}
+
+/* tables */
+.table-wrap{overflow-x:auto;margin:1rem 0 1.25rem;max-width:60rem}
+table{border-collapse:collapse;width:100%;font-size:.97rem}
+th,td{text-align:left;vertical-align:top;padding:.7rem .9rem .7rem 0;border-bottom:1px solid var(--rule)}
+th{font-weight:700;color:var(--muted);border-bottom-width:2px}
+.cmds td:first-child{white-space:nowrap;padding-right:1.5rem}
+.cmds td:first-child code{background:none;padding:0;font-weight:700;overflow-wrap:normal}
+@media (max-width:40rem){
+  .cmds thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .cmds tr{display:block;padding:.75rem 0;border-bottom:1px solid var(--rule)}
+  .cmds td{display:block;border:0;padding:.1rem 0}
+  .cmds td:first-child{white-space:normal;padding-right:0}
+  .cmds td:first-child code{overflow-wrap:anywhere}
+}
+.block{margin:0 0 1.25rem;padding:.8rem .9rem;background:var(--card);border:1px solid var(--rule);border-radius:8px;overflow-x:auto;line-height:1.6}
+
+/* works / limits */
+.ledger{display:grid;gap:.5rem 3rem;grid-template-columns:repeat(auto-fit,minmax(min(100%,21rem),1fr));max-width:62rem}
+.ledger>div{min-width:0}
+.ledger h3{margin-top:1rem}
+.works li::marker{color:var(--accent)}
+.limits{border-left:3px solid var(--hold-rule);padding-left:1.25rem}
+.limits li::marker{color:var(--hold-ink)}
+
+/* roadmap */
+.plan{list-style:none;padding-left:0}
+.plan li{position:relative;padding-left:1.4rem;margin:.55rem 0}
+.plan li::before{content:"";position:absolute;left:.1rem;top:.5em;width:10px;height:10px;border-radius:50%;border:2px solid var(--muted);background:var(--bg)}
+
+/* faq */
+.faq{margin-top:.5rem}
+.faq details{border-top:1px solid var(--rule)}
+.faq details:last-child{border-bottom:1px solid var(--rule)}
+.faq summary{cursor:pointer;padding:.85rem 0;font-weight:700;line-height:1.4}
+.faq summary:hover{color:var(--accent-strong)}
+.faq details>p{margin:0 0 1rem;padding-left:1.1rem}
+
+/* footer */
+.site-foot{border-top:1px solid var(--rule);margin-top:4.5rem;padding-block:2rem 3rem;font-size:.95rem;color:var(--muted)}
+.site-foot ul{list-style:none;padding:0;margin:0 0 1.2rem;display:flex;flex-wrap:wrap;gap:.45rem 1.4rem}
+.site-foot p{max-width:46rem;margin:0 0 .6rem}
+
+@media (max-width:40rem){
+  :root{--rail:1.25rem}
+  body{font-size:1rem}
+  .chain>section{padding-top:2.75rem}
+  .chain>section>h2::before{width:12px;height:12px;left:calc(var(--rail) / -2 - 6px)}
+  .hero>h1::before{width:14px;height:14px;left:calc(var(--rail) / -2 - 7px);top:.2em}
+  .chain::before{top:3.9rem}
+  .site-nav .sep{border-left:0;padding-left:0}
+}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+<header class="wrap site-head">
+<a class="brand" href="https://kingyoungmins.github.io/cowork-sync/ko/">cowork-sync</a>
+<nav class="site-nav" aria-label="사이트"><ul><li><a href="#how">동작 방식</a></li><li><a href="#commands">명령</a></li><li><a href="#status">한계</a></li><li><a href="#roadmap">로드맵</a></li><li><a href="#faq">자주 묻는 질문</a></li><li class="sep"><a href="https://kingyoungmins.github.io/cowork-sync/" hreflang="en" lang="en">English</a></li><li><a href="https://kingyoungmins.github.io/cowork-sync/ko/" aria-current="page" hreflang="ko" lang="ko">한국어</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync">GitHub</a></li></ul></nav>
+</header>
+<main id="main" class="wrap" tabindex="-1">
+<div class="chain">
+<section class="hero" aria-labelledby="top">
+<h1 id="top">cowork-sync</h1>
+<p class="pitch">저장한 수정이 git 원격만으로 모든 팀원 클론에 전달됩니다.</p>
+<p class="lede">cowork-sync는 git 브랜치 하나의 작업 트리를 팀원들의 클론 사이에서 실시간으로 맞춰 주는 Claude Code 플러그인으로, 별도 서버 없이 프로젝트 자체의 git 원격 저장소만 사용합니다.</p>
+<p class="status-line"><span class="badge">미리보기</span><span>v0.1.0-preview는 GitHub 프리릴리스입니다. 테스트용 저장소에서만 사용하세요.</span></p>
+<h2 class="vh">설치</h2>
+<div class="install">
+<div class="snippet">
+<div class="snippet-head"><span>Claude Code 세션에서, 한 줄씩</span></div>
+<div class="cmd-row"><code id="cc1" tabindex="0">/plugin marketplace add Kingyoungmins/cowork-sync</code><button type="button" class="copy" data-copy="cc1" data-done="복사됨" data-fail="선택됨" data-done-long="클립보드에 복사했습니다." data-fail-long="클립보드를 쓸 수 없어 텍스트를 선택해 두었습니다. 키보드로 복사하세요." hidden><span class="btn-text">복사</span><span class="vh"> 마켓플레이스 추가 명령</span></button></div>
+<div class="cmd-row"><code id="cc2" tabindex="0">/plugin install cowork-sync@cowork-sync</code><button type="button" class="copy" data-copy="cc2" data-done="복사됨" data-fail="선택됨" data-done-long="클립보드에 복사했습니다." data-fail-long="클립보드를 쓸 수 없어 텍스트를 선택해 두었습니다. 키보드로 복사하세요." hidden><span class="btn-text">복사</span><span class="vh"> 설치 명령</span></button></div>
+</div>
+<div class="snippet">
+<div class="snippet-head"><span>또는 셸에서</span><button type="button" class="copy" data-copy="sh1" data-done="복사됨" data-fail="선택됨" data-done-long="클립보드에 복사했습니다." data-fail-long="클립보드를 쓸 수 없어 텍스트를 선택해 두었습니다. 키보드로 복사하세요." hidden><span class="btn-text">복사</span><span class="vh"> 셸 명령</span></button></div>
+<pre id="sh1" tabindex="0">claude plugin marketplace add Kingyoungmins/cowork-sync
+claude plugin install cowork-sync@cowork-sync</pre>
+</div>
+</div>
+<p class="after">참여하는 모든 PC에 플러그인을 설치하고, 각자 자기 클론을 가지고 있어야 합니다. <code>/reload-plugins</code>를 실행하거나 Claude Code를 다시 시작해 플러그인을 불러온 뒤, 내 클론에서 <code>/cowork-sync:cowork start</code>를 입력하세요.</p>
+<p class="hero-links"><a href="https://github.com/Kingyoungmins/cowork-sync">GitHub의 소스</a><a href="https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.0-preview">v0.1.0-preview 릴리스 노트</a></p>
+<p id="copy-status" class="vh" aria-live="polite"></p>
+</section>
+
+<section id="problem" aria-labelledby="problem-h">
+<h2 id="problem-h">해결하려는 문제</h2>
+<p>작은 팀이 Claude Code로 코드베이스 하나를 함께 고칩니다. push와 pull이 자꾸 부딪히니 팀은 차례를 정해 일하게 됩니다. 한 사람이 일을 끝내고 push 한 뒤 알리면, 다음 사람이 pull 하는 식입니다. 팀이 바라는 건 공유 스프레드시트에 가까운 경험입니다. 모두가 같은 파일에서 동시에 일하고, 각자의 Claude는 다른 사람이 무엇을 고치고 있는지 아는 것이죠.</p><p>cowork-sync는 그중 앞부분을 다룹니다. 팀원은 각자 자기 PC에서, 자기 클론으로, 자기 Claude Code 세션을 띄워 저장소 하나의 브랜치 하나에서 일합니다. 누군가 파일을 저장하면 그 변경이 다른 모든 사람의 작업 트리에 전달됩니다.</p><p>뒷부분인 ‘각자의 Claude가 다른 사람이 무엇을 고치고 있는지 아는 것’은 계획 단계이며 이번 미리보기에는 없습니다. 지금은 Claude가 동기화를 알지 못하고, Claude의 수정도 다른 저장된 파일과 똑같이 동기화됩니다.</p><p><strong>이번 미리보기의 대상:</strong> 비공개 원격 저장소를 둔 테스트용 저장소에서 실시간 동기화를 시험해 보려는 사람입니다. 실제 운영 중인 저장소나 공개 저장소에는 맞지 않습니다.</p>
+</section>
+
+<section id="how" aria-labelledby="how-h">
+<h2 id="how-h">동작 방식</h2>
+<p>클론마다 백그라운드 프로세스(데몬)가 하나씩 돌아갑니다. 데몬들은 이미 쓰고 있는 git 원격 저장소의 사용자 지정 ref 두 개로 작업을 주고받습니다. 그 사이에 끼는 별도 서버는 없습니다.</p>
+<figure class="diagram wide">
+<svg class="dg dg-h" viewBox="0 0 960 400" role="img" aria-labelledby="dgh-t dgh-d" xmlns="http://www.w3.org/2000/svg"><title id="dgh-t">cowork-sync가 두 클론 사이에서 수정을 옮기는 방식</title><desc id="dgh-d">PC 두 대에 각각 Claude Code 세션, 작업 트리, cowork-sync 데몬이 있습니다. 각 데몬은 저장된 수정을 git 원격 저장소에 push 하고, 팀원의 수정을 fetch 합니다. 원격에서는 refs/cowork/main/board와 refs/cowork/main/code가 공유 작업을 담고, refs/heads/main에는 push 하지 않습니다. 별도 서버는 없습니다.</desc><defs><marker id="ah-h" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="4.6" markerHeight="4.6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="head"/></marker></defs><rect x="8" y="8" width="272" height="384" rx="12" class="box"/><text x="24" y="36" class="t-title">내 PC</text><rect x="24" y="52" width="240" height="60" rx="8" class="inner"/><text x="40" y="76" class="t-label">Claude Code 세션</text><text x="40" y="96" class="t-sub">또는 파일을 저장하는 어떤 편집기든</text><path d="M144 113L144 140" class="flow" marker-end="url(#ah-h)"/><text x="152" y="131" class="t-sub">저장</text><rect x="24" y="144" width="240" height="60" rx="8" class="inner"/><text x="40" y="168" class="t-label">작업 트리</text><text x="40" y="188" class="t-sub">각자의 클론</text><path d="M104 205L104 247" class="flow" marker-end="url(#ah-h)"/><text x="96" y="231" class="t-arrow" text-anchor="end">감지</text><path d="M184 251L184 209" class="flow" marker-end="url(#ah-h)"/><text x="192" y="231" class="t-arrow">써 넣기</text><rect x="24" y="252" width="240" height="104" rx="8" class="daemon"/><text x="40" y="278" class="t-label">cowork-sync 데몬</text><text x="40" y="300" class="t-sub">클론마다 하나</text><text x="40" y="318" class="t-sub">자기만의 git 인덱스로 읽음</text><rect x="680" y="8" width="272" height="384" rx="12" class="box"/><text x="696" y="36" class="t-title">팀원 PC</text><rect x="696" y="52" width="240" height="60" rx="8" class="inner"/><text x="712" y="76" class="t-label">Claude Code 세션</text><text x="712" y="96" class="t-sub">또는 파일을 저장하는 어떤 편집기든</text><path d="M816 113L816 140" class="flow" marker-end="url(#ah-h)"/><text x="824" y="131" class="t-sub">저장</text><rect x="696" y="144" width="240" height="60" rx="8" class="inner"/><text x="712" y="168" class="t-label">작업 트리</text><text x="712" y="188" class="t-sub">각자의 클론</text><path d="M776 205L776 247" class="flow" marker-end="url(#ah-h)"/><text x="768" y="231" class="t-arrow" text-anchor="end">감지</text><path d="M856 251L856 209" class="flow" marker-end="url(#ah-h)"/><text x="864" y="231" class="t-arrow">써 넣기</text><rect x="696" y="252" width="240" height="104" rx="8" class="daemon"/><text x="712" y="278" class="t-label">cowork-sync 데몬</text><text x="712" y="300" class="t-sub">클론마다 하나</text><text x="712" y="318" class="t-sub">자기만의 git 인덱스로 읽음</text><rect x="360" y="8" width="240" height="384" rx="12" class="box"/><text x="376" y="36" class="t-title">git 원격 저장소</text><text x="376" y="56" class="t-sub">비공개, 유일한 전달 경로</text><rect x="376" y="76" width="208" height="72" rx="8" class="ref-off"/><text x="390" y="100" class="t-ref-off">refs/heads/main</text><text x="390" y="119" class="t-sub">내 브랜치:</text><text x="390" y="136" class="t-sub">push 하지 않음</text><text x="376" y="184" class="t-sub">데몬들이 함께 쓰는 사용자 지정 ref</text><rect x="376" y="196" width="208" height="84" rx="8" class="ref"/><text x="390" y="220" class="t-ref">refs/cowork/main/board</text><text x="390" y="241" class="t-sub">fast-forward로만 이어지는</text><text x="390" y="258" class="t-sub">체인, 기준 기록</text><rect x="376" y="292" width="208" height="84" rx="8" class="ref"/><text x="390" y="316" class="t-ref">refs/cowork/main/code</text><text x="390" y="337" class="t-sub">가장 최근 공유 트리의</text><text x="390" y="354" class="t-sub">미러</text><path d="M265 300L356 300" class="flow" marker-end="url(#ah-h)"/><text x="312" y="291" class="t-arrow" text-anchor="middle">push</text><path d="M359 336L268 336" class="flow" marker-end="url(#ah-h)"/><text x="312" y="357" class="t-arrow" text-anchor="middle">fetch</text><path d="M695 300L604 300" class="flow" marker-end="url(#ah-h)"/><text x="648" y="291" class="t-arrow" text-anchor="middle">push</text><path d="M601 336L692 336" class="flow" marker-end="url(#ah-h)"/><text x="648" y="357" class="t-arrow" text-anchor="middle">fetch</text></svg>
+<svg class="dg dg-v" viewBox="0 0 340 1052" role="img" aria-labelledby="dgv-t dgv-d" xmlns="http://www.w3.org/2000/svg"><title id="dgv-t">cowork-sync가 두 클론 사이에서 수정을 옮기는 방식</title><desc id="dgv-d">PC 두 대에 각각 Claude Code 세션, 작업 트리, cowork-sync 데몬이 있습니다. 각 데몬은 저장된 수정을 git 원격 저장소에 push 하고, 팀원의 수정을 fetch 합니다. 원격에서는 refs/cowork/main/board와 refs/cowork/main/code가 공유 작업을 담고, refs/heads/main에는 push 하지 않습니다. 별도 서버는 없습니다.</desc><defs><marker id="ah-v" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="4.6" markerHeight="4.6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="head"/></marker></defs><rect x="6" y="6" width="328" height="330" rx="12" class="box"/><text x="22" y="32" class="t-title">내 PC</text><rect x="22" y="46" width="296" height="56" rx="8" class="inner"/><text x="36" y="69" class="t-label">Claude Code 세션</text><text x="36" y="89" class="t-sub">또는 파일을 저장하는 어떤 편집기든</text><path d="M170 103L170 128" class="flow" marker-end="url(#ah-v)"/><text x="178" y="121" class="t-sub">저장</text><rect x="22" y="132" width="296" height="56" rx="8" class="inner"/><text x="36" y="155" class="t-label">작업 트리</text><text x="36" y="175" class="t-sub">각자의 클론</text><path d="M120 189L120 218" class="flow" marker-end="url(#ah-v)"/><text x="112" y="208" class="t-arrow" text-anchor="end">감지</text><path d="M220 221L220 192" class="flow" marker-end="url(#ah-v)"/><text x="228" y="208" class="t-arrow">써 넣기</text><rect x="22" y="222" width="296" height="100" rx="8" class="daemon"/><text x="36" y="247" class="t-label">cowork-sync 데몬</text><text x="36" y="268" class="t-sub">클론마다 하나</text><text x="36" y="287" class="t-sub">자기만의 git 인덱스로 읽음</text><path d="M130 323L130 386" class="flow" marker-end="url(#ah-v)"/><text x="122" y="360" class="t-arrow" text-anchor="end">push</text><path d="M210 389L210 326" class="flow" marker-end="url(#ah-v)"/><text x="218" y="360" class="t-arrow">fetch</text><rect x="6" y="390" width="328" height="256" rx="12" class="box"/><text x="22" y="416" class="t-title">git 원격 저장소</text><text x="22" y="436" class="t-sub">비공개, 유일한 전달 경로</text><rect x="22" y="450" width="296" height="50" rx="8" class="ref-off"/><text x="36" y="471" class="t-ref-off">refs/heads/main</text><text x="36" y="490" class="t-sub">내 브랜치: push 하지 않음</text><text x="22" y="522" class="t-sub">데몬들이 함께 쓰는 사용자 지정 ref</text><rect x="22" y="532" width="296" height="50" rx="8" class="ref"/><text x="36" y="553" class="t-ref">refs/cowork/main/board</text><text x="36" y="572" class="t-sub">fast-forward로만 이어지는 체인, 기준 기록</text><rect x="22" y="588" width="296" height="50" rx="8" class="ref"/><text x="36" y="609" class="t-ref">refs/cowork/main/code</text><text x="36" y="628" class="t-sub">가장 최근 공유 트리의 미러</text><path d="M130 715L130 650" class="flow" marker-end="url(#ah-v)"/><text x="122" y="686" class="t-arrow" text-anchor="end">push</text><path d="M210 647L210 712" class="flow" marker-end="url(#ah-v)"/><text x="218" y="686" class="t-arrow">fetch</text><rect x="6" y="716" width="328" height="330" rx="12" class="box"/><text x="22" y="742" class="t-title">팀원 PC</text><rect x="22" y="756" width="296" height="100" rx="8" class="daemon"/><text x="36" y="781" class="t-label">cowork-sync 데몬</text><text x="36" y="802" class="t-sub">클론마다 하나</text><text x="36" y="821" class="t-sub">자기만의 git 인덱스로 읽음</text><path d="M120 889L120 860" class="flow" marker-end="url(#ah-v)"/><text x="112" y="878" class="t-arrow" text-anchor="end">감지</text><path d="M220 857L220 886" class="flow" marker-end="url(#ah-v)"/><text x="228" y="878" class="t-arrow">써 넣기</text><rect x="22" y="890" width="296" height="56" rx="8" class="inner"/><text x="36" y="913" class="t-label">작업 트리</text><text x="36" y="933" class="t-sub">각자의 클론</text><path d="M170 979L170 950" class="flow" marker-end="url(#ah-v)"/><text x="178" y="970" class="t-sub">저장</text><rect x="22" y="980" width="296" height="56" rx="8" class="inner"/><text x="36" y="1003" class="t-label">Claude Code 세션</text><text x="36" y="1023" class="t-sub">또는 파일을 저장하는 어떤 편집기든</text></svg>
+<figcaption>예: <code>main</code> 브랜치를 함께 쓰는 PC 두 대. 각 데몬은 저장된 수정을 <code>refs/cowork/main/board</code>와 <code>refs/cowork/main/code</code>에 올리고, 팀원의 수정을 자기 작업 트리에 써 넣습니다. 브랜치 자체(<code>refs/heads/main</code>)에는 push 하지 않습니다.</figcaption>
+</figure>
+<h3>파일을 저장하면 일어나는 일</h3>
+<ol><li>Claude Code든 다른 편집기든, 파일을 저장합니다. 내 클론의 데몬이 이를 감지합니다. 데몬은 자기만의 비공개 git 인덱스로 파일을 읽으며, 내 인덱스는 건드리지 않습니다.</li><li>데몬이 변경을 원격 저장소에 올립니다. <code>refs/cowork/&lt;branch&gt;/board</code>는 fast-forward로만 이어지는 보드 커밋 체인이자 기준 기록이고, <code>refs/cowork/&lt;branch&gt;/code</code>는 가장 최근 공유 트리의 미러입니다.</li><li>모든 push는 리스(<code>--force-with-lease</code>)로 보호되는 fast-forward입니다. 그래서 어떤 PC도 다른 PC의 갱신을 덮어쓸 수 없습니다. 두 PC가 동시에 push 하면, 진 쪽이 다시 fetch 한 뒤 재시도합니다.</li><li>팀원들의 데몬이 변경을 fetch 하고, 명시적인 병합 기준(merge base)을 지정해 <code>git merge-tree</code>로 병합합니다.</li><li>각 데몬이 결과를 자기 작업 트리에 씁니다. 파일은 데몬이 마지막으로 읽은 바이트 그대로일 때만 써지므로, 방금 저장한 내 수정이 덮어써지는 일은 없습니다. 파일 묶음은 전부 쓰거나 전혀 쓰지 않습니다.</li></ol>
+<h3>알아 둘 점</h3>
+<ul><li>두 사람이 같은 줄을 바꾸면 한 버전이 이깁니다. 다른 버전은 클론에 보류(hold) 기록으로 보관되며 버려지지 않습니다. 다만 미리보기에는 이를 보거나 되살리는 명령이 아직 없습니다.</li><li>미리보기는 내 브랜치(<code>refs/heads/&lt;branch&gt;</code>)에 절대 push 하지 않습니다. 일반 <code>git fetch</code>는 사용자 지정 ref를 내려받지 않으므로 평소의 git 이력은 깨끗하게 유지됩니다.</li><li>설정, 훅, CI 파일(<code>.claude/</code>, <code>CLAUDE.md</code>, <code>.github/workflows/</code>, <code>.gitattributes</code> 등)은 실시간으로 동기화되지 않습니다. 이런 파일은 평소처럼 git 커밋으로만 옮겨집니다.</li><li>비밀 정보처럼 보이는 이름의 새 파일(<code>.env</code>, <code>*.pem</code>, <code>*.key</code>, <code>id_rsa*</code>, <code>*credentials*</code> 등)은 공유되지 않습니다. 1 MiB를 넘는 새 파일도 공유되지 않고, 50 MiB 이상인 파일은 실시간으로 동기화되지 않습니다.</li><li>호스트 부하를 낮추려고 팀 전체가 push 예산을 나눠 씁니다. 분당 12회, 제한이 걸린 뒤 30분 동안은 6회입니다. 데몬의 루프는 활동 중일 때 2.5초, 한가할 때 10초마다 돌아갑니다.</li><li><code>HEAD</code>를 움직이는 git 명령(commit, switch, checkout, pull, merge, rebase, stash)을 실행하면 <code>HEAD</code>가 제자리로 돌아올 때까지 동기화가 멈춥니다(freeze). 이런 명령은 동기화를 중지한 뒤 실행하세요. 보드의 이력이 다시 쓰이는 일이 생기면, 복구될 때까지 모든 PC의 동기화가 멈춥니다.</li></ul>
+<h3>내 PC 밖으로 나가는 것</h3>
+<ul><li><strong>가는 곳:</strong> 내 클론의 git 원격 저장소 하나뿐이며, git을 통해서만 갑니다. 데몬은 git의 입력 프롬프트를 끈 채로 git을 자식 프로세스로 실행하고, 데몬 번들은 Node 네트워크 모듈을 하나도 불러오지 않습니다.</li><li><strong>보내는 것:</strong> 동기화 범위 안에서 내가 저장한 파일의 경로와 내용, 그리고 보드 커밋. 저장소를 읽을 수 있는 사람은 누구나 이를 가져갈 수 있으며, 미리보기는 원격 저장소가 비공개인지 확인하지 않습니다.</li><li><strong>내 이름:</strong> 공유 커밋에는 표시 이름이 붙습니다. <code>--name</code>을 주면 그 이름, 아니면 git <code>user.name</code>, 그것도 없으면 “cowork peer”입니다. 커밋의 이메일 주소 칸에는 임의로 만든 값이 들어가며, 내 git 이메일은 쓰지 않습니다.</li><li><strong>참여 기록:</strong> PC가 보드에 참여하면 표시 이름, 플러그인 버전, 플러그인 해시, 프로토콜 번호, <code>core.autocrlf</code> 설정값, 저장소 필터 드라이버의 해시 지문(경로는 담지 않음)이 보드에 남습니다. 첫 PC가 동기화를 시작할 때는 호스트를 확인하려고 잠깐 쓰는 확인용 ref를 push 했다가 지웁니다.</li><li><strong>내 PC에 남는 것:</strong> <code>.git/cowork/status.json</code>, 데몬 로그(<code>.git/cowork/log/daemon-0.jsonl</code>), 보류 기록, 그리고 127.0.0.1에서만 접속을 받는 읽기 전용 뷰어(선택).</li><li>설계상 텔레메트리, 오류 보고, 업데이트 확인, 분석은 두지 않으며, 소스 린트가 뷰어의 로컬 서버를 뺀 모든 곳에서 Node 네트워크 모듈을 막습니다. 설계 규칙과 린트일 뿐, 독립적인 감사를 받은 것은 아닙니다.</li></ul>
+</section>
+
+<section id="commands" aria-labelledby="commands-h">
+<h2 id="commands-h">요구 사항과 명령</h2>
+<h3>필요한 것</h3>
+<ul><li>Claude Code 2.1.270 이상.</li><li>Node.js 20 이상(<code>PATH</code>에서 실행할 수 있어야 함).</li><li>git 2.43 이상. 더 낮은 git이면 <code>start</code>가 거부합니다.</li><li>Windows, macOS 또는 Linux.</li><li>사용자 지정 ref(<code>refs/cowork/*</code>)를 받아 주고 <code>--force-with-lease</code>를 실제로 적용하는 <strong>비공개</strong> git 원격 저장소. GitHub는 둘 다 됩니다. 첫 PC의 <code>start</code>가 호스트를 확인해 보고, 조건에 맞지 않으면 거부합니다.</li><li>git 자격 증명 도우미(credential helper)에서 가져오는 자격 증명. git의 입력 프롬프트가 꺼져 있으므로, 자격 증명이 없으면 응답 없이 멈추는 대신 거부 메시지가 나옵니다.</li><li>참여하는 모든 PC에 플러그인을 설치하고 각자 자기 클론을 둡니다. <code>.git</code>은 작업 트리와 같은 볼륨에 있어야 합니다.</li></ul>
+<h3 id="cmds-h">명령</h3>
+<p>Claude Code는 플러그인의 명령 이름을 <code>/cowork-sync:cowork</code>로 붙이므로, 이 이름을 전부 입력하세요. 같은 동작을 터미널에서도 <code>node "&lt;플러그인 폴더&gt;/dist/cli.js" &lt;동작&gt;</code> 형태로 실행할 수 있으며, <code>/cowork-sync:cowork view</code>가 그 경로를 출력해 줍니다.</p>
+<section class="table-wrap wide" aria-labelledby="cmds-h" tabindex="0">
+<table class="cmds"><thead><tr><th scope="col">명령</th><th scope="col">하는 일</th></tr></thead>
+<tbody><tr><td><code>/cowork-sync:cowork start [--branch &lt;b&gt;]</code></td><td>이 저장소의 현재 브랜치에서 동기화를 시작합니다. 첫 번째 PC가 원격 저장소에 공용 보드를 만들고, 이후의 PC는 그 보드에 참여합니다. 데몬은 백그라운드에서 계속 실행됩니다.</td></tr><tr><td><code>/cowork-sync:cowork status</code></td><td>짧은 요약을 출력합니다. 상태(<code>ok</code>, <code>degraded</code>, <code>offline</code>, <code>frozen</code>, <code>down</code> 등), 브랜치, 아직 올리거나 반영하지 못한 것을 보여 줍니다.</td></tr><tr><td><code>/cowork-sync:cowork view</code></td><td>읽기 전용 뷰어를 여는 명령을 출력합니다. 뷰어는 터미널에서만 열립니다. 출력된 명령을 터미널에서 실행하면 브라우저에서 열립니다. 아직 뷰어 프로세스가 없는 빌드라면 <code>RF_VIZ_START_FAILED</code>로 거부합니다.</td></tr><tr><td><code>/cowork-sync:cowork stop</code></td><td>데몬을 깔끔하게 멈춥니다. 내 파일은 그대로 남습니다.</td></tr><tr><td><code>/cowork-sync:cowork help</code></td><td>명령 목록을 보여 줍니다.</td></tr></tbody></table>
+</section>
+<p><code>start</code>는 <code>--publish=all|none</code>(처음 시작할 때 커밋하지 않은 로컬 작업을 공유할지, 이 PC에 둘지), <code>--remote &lt;name&gt;</code>, <code>--name &lt;display name&gt;</code>도 받습니다.</p><p>명령이 거부될 때는 코드가 붙은 이유와, 실행할 명령이 적힌 <code>next:</code> 줄을 출력합니다.</p>
+<h3><code>start</code>가 확인하는 것</h3>
+<ul><li>메인 클론에서 실행해야 합니다. 연결된 워크트리(linked worktree)나 서브모듈은 거부합니다.</li><li>브랜치가 체크아웃되어 있고, 원격 저장소에 있으며, 원격보다 앞서거나 뒤처지지 않아야 합니다. 병합이나 리베이스가 진행 중이어도 안 됩니다.</li><li>원격의 fetch URL과 push URL이 같아야 하고, <code>insteadOf</code> 재작성이 적용되지 않아야 합니다.</li><li>클론마다 데몬은 하나만 돌 수 있습니다.</li><li>처음 시작할 때 커밋하지 않은 변경이 있으면 선택을 묻습니다. 팀과 공유할지, 이 PC에만 둘지 고르세요.</li></ul>
+<h3>업데이트, 제거, 정리</h3>
+<p>이 마켓플레이스는 자동으로 업데이트되지 않습니다. 업데이트하려면 <code>/plugin marketplace update cowork-sync</code>를 실행한 뒤 <code>claude plugin update cowork-sync@cowork-sync</code>를 실행하세요. 플러그인을 지우려면 <code>claude plugin uninstall cowork-sync@cowork-sync</code>를 실행합니다.</p>
+<p>동기화를 중지하거나 플러그인을 지워도 원격 저장소의 사용자 지정 ref는 남습니다. 모든 PC가 멈춘 뒤에 직접 지울 수 있습니다. 예:</p>
+<pre class="block" tabindex="0">git push origin --delete refs/cowork/main/board refs/cowork/main/code</pre>
+</section>
+
+<section id="status" aria-labelledby="status-h">
+<h2 id="status-h">지금 되는 것과 미리보기의 한계</h2>
+<div class="ledger wide">
+<div class="works">
+<h3>v0.1.0-preview에서 되는 것</h3>
+<ul><li>여러 클론 사이에서 브랜치 하나의 작업 트리를 실시간으로 동기화. 전달 경로는 git 원격 저장소뿐입니다.</li><li>클론마다 데몬 하나. 첫 PC가 공용 보드를 만들고 이후 PC가 참여합니다. 비정상 종료나 중지 뒤에 다시 <code>start</code> 하면 저장된 상태에서 이어 가며, 잃어버린 로컬 상태를 다시 만듭니다.</li><li>보드 이력이 다시 쓰이면 동기화를 멈추고, <code>recover</code> 단계로 되살립니다.</li><li>방금 저장한 수정을 덮어쓰지 않으며, 파일 묶음은 전부 쓰거나 전혀 쓰지 않습니다.</li><li>같은 줄 충돌에서 두 버전을 모두 남깁니다. 하나는 보드에, 다른 하나는 클론의 보류 기록으로.</li><li>설정, 훅, CI 파일은 실시간 동기화되지 않으며, 비밀 정보처럼 보이는 이름의 새 파일은 공유되지 않습니다.</li><li>git 명령으로 <code>HEAD</code>가 움직이면 동기화를 멈추고, <code>HEAD</code>가 돌아오면 다시 이어 갑니다.</li><li>클론마다 상태 파일과 JSON lines 형식의 데몬 로그.</li><li><code>start</code>, <code>status</code>, <code>stop</code>, <code>view</code>, <code>help</code>를 갖춘 <code>/cowork-sync:cowork</code> 명령.</li><li>팀의 보드를 브라우저에 그려 주는 읽기 전용 뷰어의 핵심 부분. 터미널에서 띄우며 영어만 지원합니다(<code>view</code> 관련 한계 참고).</li></ul>
+<h4>지금까지 시험한 것</h4>
+<ul><li>실제 GitHub 저장소에 클론 두 개를 두고 시험했습니다. 서로 다른 파일을 고친 경우, 같은 파일의 10줄 떨어진 곳을 고친 경우, 같은 줄을 고친 경우 모두 두 클론이 같은 상태로 끝났고, 이력도 fast-forward로만 이어진 한 줄이었습니다.</li><li>호스팅 CI가 Windows, macOS, Linux에서 각각 Node 20과 Node 24로 모든 검사를 돌립니다. 로컬 bare 원격 저장소와 시뮬레이터를 씁니다.</li></ul>
+</div>
+<div class="limits">
+<h3>미리보기의 한계</h3>
+<h4>안전과 개인정보</h4><ul><li>원격 저장소가 비공개인지 확인하지 않습니다. 비공개 저장소를 쓰세요. 저장소를 읽을 수 있는 사람은 누구나 <code>refs/cowork/*</code>를 가져갈 수 있습니다.</li><li>파일 내용에서 비밀 정보를 찾지 않습니다. 새 파일의 이름만 봅니다. 동기화되는 파일에 비밀 정보를 넣지 마세요.</li><li>쓰기 권한이 있는 팀원을 신뢰한다는 전제입니다. 그들의 수정이 내 작업 트리에 그대로 써집니다. 소중한 것은 백업해 두세요.</li></ul><h4>아직 없는 것</h4><ul><li>Claude가 동기화를 알지 못합니다. 훅, MCP 도구, 함수 단위 선점(claim), Claude 간 협업이 없습니다.</li><li>공유 작업을 커밋으로 만드는 <code>save</code> 단계가 없고, <code>pause</code>, <code>resume</code>, <code>doctor</code>, <code>uninstall</code> 명령도 없습니다.</li><li>보류 기록을 보거나 되살리는 명령이 없습니다.</li><li><code>view</code>는 터미널 명령을 출력만 합니다. 뷰어 프로세스가 없는 빌드는 <code>RF_VIZ_START_FAILED</code>로 거부합니다.</li><li>메시지는 영어로만 나옵니다. 일부 거부 메시지는 아직 없는 <code>/cowork doctor</code>를 가리키거나, <code>/cowork-sync:cowork</code> 대신 <code>/cowork</code>라고만 적습니다.</li></ul><h4>시험이 덜 된 부분</h4><ul><li>실제 GitHub 시험은 두 클론의 엔진을 한 프로세스 안에서 돌렸습니다. 서로 다른 두 컴퓨터에서 돌리는 시험은 아직 남아 있습니다.</li><li>실제 호스트로는 GitHub만 써 봤습니다. 사용자 지정 ref를 거부하는 호스트는 지원하지 않는 것으로 보세요.</li></ul><h4>저장소와 평소 사용</h4><ul><li>연결된 워크트리와 서브모듈은 거부합니다.</li><li><code>HEAD</code>를 움직이는 git 명령을 쓰면 동기화가 멈춥니다. 먼저 동기화를 중지하세요.</li><li>동기화를 중지하거나 플러그인을 지운 뒤에도 사용자 지정 ref는 원격에 남습니다. 직접 지워야 합니다.</li><li>자동 시작이 없습니다. 재부팅이나 로그아웃 뒤에는 <code>start</code>를 다시 실행하세요.</li><li>자동 업데이트가 없습니다.</li><li>개인 프로젝트입니다. 제보에는 시간 나는 대로 답하며, 보안 수정은 최신 미리보기에만 들어갑니다.</li></ul>
+</div>
+</div>
+</section>
+
+<section id="roadmap" aria-labelledby="roadmap-h">
+<h2 id="roadmap-h">로드맵</h2>
+<p>첫 정식 공개 릴리스인 v1을 목표로 한 계획입니다. 계획일 뿐이며 날짜는 정해져 있지 않습니다.</p>
+<ul class="plan"><li><strong>보류와 변경 묶음:</strong> 보류 기록 보기와 되살리기, 대량 변경 차단기, 되돌림 감지기.</li><li><strong>함수 단위 선점:</strong> Python, JS/TS, C#은 심볼 단위로, 그 밖의 텍스트 파일은 블록 단위로.</li><li><strong>Claude Code 연동:</strong> 훅, 편집 게이트, MCP 도구, 로컬 IPC.</li><li><strong>Claude 간 협업:</strong> 충돌 처리 흐름, 요청과 응답, 세션에 보내는 알림.</li><li><strong>전체 명령:</strong> start, stop, pause, resume, save, adopt, recover, uninstall, status, doctor. 원격 저장소 비공개 확인, 비밀 정보 검사, 6개 언어 메시지.</li><li><strong>세션에 묶인 동기화:</strong> Claude Code 세션이 열려 있는 동안, 또는 <code>/cowork start --human &lt;minutes&gt;</code>로 정한 시간 동안만 동기화. 공개 원격 저장소는 거부.</li><li><strong>호스트:</strong> GitHub, GitLab, Gitea. 시작할 때 사용자 지정 ref와 리스 지원이 확인되는 경우에 한합니다.</li><li><strong>뷰어 2:</strong> 슬래시 명령으로 쓰는 <code>view</code>, 6개 언어, WebM과 GIF 내보내기, 하이라이트 모음. 뷰어 2의 마지막 작업이 첫 정식 공개 릴리스입니다.</li><li><strong>호스트에 따라 달라지는 작업을 내놓기 전에 할 시험:</strong> 다른 네트워크에 있는 두 번째 PC, 강제 로그아웃을 포함한 24시간 자격 증명 시험, 대화형 터미널과 VS Code에서의 시험.</li></ul>
+<p>끝난 일과 다음 일은 개발자 노트 <a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/docs/STATUS.md">docs/STATUS.md</a>(영어)에 있습니다.</p>
+</section>
+
+<section id="licence" aria-labelledby="licence-h">
+<h2 id="licence-h">라이선스, 쉬운 말로</h2>
+<p>cowork-sync는 소스 공개형(source-available)이며, Functional Source License 1.1에 미래 라이선스로 Apache License 2.0을 붙인 FSL-1.1-ALv2를 따릅니다. 저작권 2026 Youngmin Seo.</p>
+<ul><li>경쟁 목적의 사용만 빼면 어떤 목적으로든 사용, 복사, 수정, 공유할 수 있습니다.</li><li>경쟁 목적의 사용이란 이 소프트웨어, 또는 본질적으로 같은 일을 하는 것을 상용 제품이나 서비스로 다른 사람에게 제공하는 것을 말합니다.</li><li>내부 사용, 비상업적 교육과 연구, 라이선스를 받은 사람을 위한 전문 서비스는 허용됩니다.</li><li>각 릴리스는 공개된 지 2년 뒤부터 Apache License 2.0으로 이용할 수 있습니다.</li><li>보증은 없으며, 상표권은 주지 않습니다.</li><li>기여하려면 기여자 라이선스 계약(CLA)이 필요합니다. 풀 리퀘스트에 댓글을 달아 동의합니다.</li></ul>
+<p>이 요약은 라이선스 자체가 아닙니다. 조건은 <a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/LICENSE.md">LICENSE.md</a>(영어)에 있으며, 이 파일은 <a href="https://fsl.software">fsl.software</a>의 공식 FSL-1.1-ALv2 원문입니다. CLA는 <a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>에 설명되어 있습니다.</p>
+</section>
+
+<section id="faq" aria-labelledby="faq-h">
+<h2 id="faq-h">자주 묻는 질문</h2>
+<div class="faq"><details><summary>실제 프로젝트에 써도 되나요?</summary><p>아니요. 초기 미리보기이며 완성된 제품이 아닙니다. 테스트용 저장소에서만 쓰고, 소중한 것은 백업해 두세요.</p></details><details><summary>서버가 있나요? 내 코드는 어디로 가나요?</summary><p>서버는 없습니다. 전달 경로는 프로젝트의 git 원격 저장소뿐입니다. 저장한 파일은 그 원격의 사용자 지정 ref 두 개, <code>refs/cowork/&lt;branch&gt;/board</code>와 <code>refs/cowork/&lt;branch&gt;/code</code>로 갑니다.</p></details><details><summary>어떤 git 호스트에서 되나요?</summary><p>사용자 지정 ref를 받아 주고 <code>--force-with-lease</code>를 적용하는 호스트입니다. GitHub는 둘 다 되며, 첫 PC의 <code>start</code>가 호스트를 확인해 통과하지 못하면 거부합니다. 실제로 써 본 곳은 GitHub뿐이고, GitLab과 Gitea는 v1 계획에 들어 있습니다.</p></details><details><summary>내 브랜치에 push 하거나 이력을 어지럽히나요?</summary><p>아니요. 미리보기는 <code>refs/heads/&lt;branch&gt;</code>에 절대 push 하지 않으며, 일반 <code>git fetch</code>는 사용자 지정 ref를 내려받지 않습니다. 이 ref는 직접 지우기 전까지 원격에 남습니다.</p></details><details><summary>두 사람이 같은 줄을 고치면 어떻게 되나요?</summary><p>한 버전이 이깁니다. 진 버전은 그 사람의 클론에 보류 기록으로 보관되며 버려지지 않습니다. 이를 보거나 되살리는 명령은 아직 없습니다.</p></details><details><summary>내 Claude가 팀원의 Claude와 조율하나요?</summary><p>이번 미리보기에서는 아닙니다. Claude는 동기화를 알지 못하며, Claude의 수정도 다른 저장된 파일과 똑같이 동기화됩니다. 훅, MCP 도구, 선점, 협업은 계획되어 있습니다.</p></details><details><summary>공개 저장소에 써도 되나요? 공유된 작업은 누가 볼 수 있나요?</summary><p>비공개 원격 저장소만 쓰세요. 저장소를 읽을 수 있는 사람은 누구나 <code>refs/cowork/*</code>를 가져갈 수 있고, 미리보기는 원격이 비공개인지 확인하지 않습니다.</p></details><details><summary>공유된 작업을 커밋으로 만들려면요?</summary><p>아직 <code>save</code> 단계가 없습니다. 전체 명령과 함께 들어올 예정입니다. 동기화 중에는 <code>HEAD</code>를 움직이는 git 명령을 실행하지 말고, 먼저 동기화를 멈추세요.</p></details><details><summary>수정이 얼마나 빨리 전달되나요?</summary><p>미리보기의 종단 간 지연 시간은 발표된 수치가 없습니다. 데몬의 루프는 활동 중일 때 2.5초마다 돌고, 팀 전체가 분당 push 12회(제한 뒤에는 6회) 예산을 나눠 씁니다.</p></details><details><summary>동기화하는 동안 Claude Code를 켜 둬야 하나요? 다른 편집기에서도 되나요?</summary><p>플러그인 설치와 명령 실행은 Claude Code에서 하고, 같은 동작을 터미널에서도 실행할 수 있습니다. <code>start</code> 뒤에는 데몬이 백그라운드에서 계속 돌며, 무엇으로 저장했든 저장된 파일을 감지합니다. 코드를 보면, 미리보기의 데몬은 Claude Code 세션이 열려 있는지와 상관없이 중지할 때까지 계속 돌아갑니다.</p></details><details><summary>.env나 키 파일도 공유되나요?</summary><p>비밀 정보처럼 보이는 이름의 새 파일(<code>.env</code>, <code>*.pem</code>, <code>*.key</code>, <code>id_rsa*</code>, <code>*credentials*</code> 등)은 공유되지 않습니다. 하지만 파일 내용은 아직 검사하지 않으니, 동기화되는 파일에 비밀 정보를 넣지 마세요.</p></details><details><summary>회사에서 써도 되나요? 기여할 수 있나요?</summary><p>FSL-1.1-ALv2에서 내부 사용은 허용됩니다. 이 소프트웨어나 본질적으로 비슷한 것을 상용 제품이나 서비스로 남에게 제공하는 것은 안 됩니다. 각 릴리스는 공개 2년 뒤 Apache-2.0이 됩니다. 기여에는 CLA가 필요하며, 풀 리퀘스트에 댓글을 달아 동의합니다.</p></details></div>
+</section>
+</div>
+</main>
+<footer class="wrap site-foot">
+<nav aria-label="프로젝트 링크"><ul><li><a href="https://github.com/Kingyoungmins/cowork-sync">저장소</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/README.ko.md">한국어 README</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.0-preview">v0.1.0-preview 릴리스</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/LICENSE.md">라이선스 (FSL-1.1-ALv2)</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/CHANGELOG.md">변경 기록</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/SECURITY.md">보안 정책</a></li><li><a href="https://kingyoungmins.github.io/cowork-sync/llms.txt">에이전트용 llms.txt</a></li></ul></nav>
+<p>cowork-sync v0.1.0-preview는 Youngmin Seo의 개인 소스 공개형 프로젝트입니다.</p><p>보안 문제는 공개 이슈가 아니라 저장소의 <a href="https://github.com/Kingyoungmins/cowork-sync/security">Security 탭</a>(“Report a vulnerability”)으로 알려 주세요.</p><p>Anthropic과 제휴하거나 Anthropic의 보증을 받은 프로젝트가 아닙니다.</p>
+</footer>
+<script>
+(function(){
+  var live=document.getElementById('copy-status');
+  function selectNode(el){try{var r=document.createRange();r.selectNodeContents(el);var s=window.getSelection();s.removeAllRanges();s.addRange(r);}catch(e){}}
+  var buttons=document.querySelectorAll('button[data-copy]');
+  for(var i=0;i<buttons.length;i++){(function(btn){
+    btn.hidden=false;
+    var label=btn.querySelector('.btn-text');
+    var idle=label.textContent;
+    btn.addEventListener('click',function(){
+      var el=document.getElementById(btn.getAttribute('data-copy'));
+      var text=el.textContent.replace(/\s+$/,'');
+      function finish(ok){
+        label.textContent=ok?btn.getAttribute('data-done'):btn.getAttribute('data-fail');
+        btn.setAttribute('data-state',ok?'done':'fail');
+        live.textContent=ok?btn.getAttribute('data-done-long'):btn.getAttribute('data-fail-long');
+        if(!ok){selectNode(el);}
+        setTimeout(function(){label.textContent=idle;btn.removeAttribute('data-state');},2200);
+      }
+      if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(text).then(function(){finish(true);},function(){finish(false);});}
+      else{finish(false);}
+    });
+  })(buttons[i]);}
+})();
+</script>
+</body>
+</html>
