@@ -1,0 +1,36 @@
+{
+ "row": "rejected",
+ "plan": 2,
+ "about": "a generic-invalid op (another peer's op id) is rejected: no event, one unknown",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Bname"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "line": "{\"id\":\"42424242424242424242424242424242/e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1/50\",\"type\":\"leave\"}"
+    }
+   ]
+  }
+ ]
+}

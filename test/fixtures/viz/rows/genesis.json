@@ -1,0 +1,19 @@
+{
+ "row": "genesis",
+ "plan": 2,
+ "about": "B0: the creator's join and caps with L0: room_open at sub 0, the join's person_enter, nothing for caps",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  }
+ ]
+}

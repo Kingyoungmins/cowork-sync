@@ -1,0 +1,47 @@
+{
+ "row": "join_back",
+ "plan": 2,
+ "about": "R-V42: leave, then a same-epoch join: person_exit ... person_enter (UI_VIZ_CARD_JOIN), its badges again",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Bname",
+     "coauthor_optin": "Bob"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "leave"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Bname",
+     "coauthor_optin": "Bob"
+    }
+   ]
+  }
+ ]
+}

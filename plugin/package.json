@@ -1,0 +1,6 @@
+{
+  "name": "cowork-sync-plugin",
+  "private": true,
+  "type": "module",
+  "license": "SEE LICENSE IN LICENSE.md"
+}

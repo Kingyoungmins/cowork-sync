@@ -1,0 +1,29 @@
+{
+ "row": "event_breach",
+ "plan": 6,
+ "about": "R-V44: event{breach}: conflict{breach, source event} on the writer's character, no desk, no line",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "breach",
+     "reason_code": "BREACH"
+    }
+   ]
+  }
+ ]
+}

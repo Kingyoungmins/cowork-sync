@@ -1,0 +1,55 @@
+{
+ "row": "rules_change",
+ "plan": 2,
+ "about": "R-V45: a step-6 teamRegionSpec switch with no join flips the rules badge at sub 1,002 (a leave, then a ghosting)",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Bname",
+     "regionSpec": "rs-2"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "leave"
+    }
+   ]
+  },
+  {
+   "writer": "D",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Dname",
+     "regionSpec": "rs-3"
+    }
+   ]
+  },
+  {
+   "writer": "D",
+   "repeat": 199
+  },
+  {
+   "writer": "B",
+   "repeat": 1
+  }
+ ]
+}

@@ -1,0 +1,29 @@
+{
+ "row": "join_version",
+ "plan": 2,
+ "about": "a same-epoch re-announce with another plugin_version: person_badge{version}",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Aname",
+     "plugin_version": "0.0.1"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,25 @@
+{
+ "row": "publish_nocs",
+ "plan": 2,
+ "about": "a changed ordinary live commit with no Cowork-CS trailer: the writer's character publishes at the big table",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "code": {
+    "shape": "ordinary"
+   }
+  }
+ ]
+}

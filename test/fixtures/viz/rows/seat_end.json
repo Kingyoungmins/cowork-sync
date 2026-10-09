@@ -1,0 +1,37 @@
+{
+ "row": "seat_end",
+ "plan": 5,
+ "about": "seat_end: pet_poof with its owner",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "seat_start",
+     "seat": "S1"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "seat_end",
+     "seat": "S1"
+    }
+   ]
+  }
+ ]
+}

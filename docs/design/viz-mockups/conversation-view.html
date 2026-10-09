@@ -1,0 +1,71 @@
+<h2>대화는 어떻게 보여줄까요?</h2>
+<p class="subtitle">배치는 3번(지도 + 사무실 확대)으로 확정. 볼 수 있는 대화는 Claude끼리 보드에 남긴 요청·답변·쪽지(최대 280자)와 충돌 알림입니다. 두 가지 화면 구성을 비교해 주세요.</p>
+
+<style>
+  .page { display:grid; gap:6px; background:#15151c; padding:6px; border-radius:8px; font-family: sans-serif }
+  .page canvas { image-rendering: pixelated; width:100%; display:block; border-radius:4px }
+  .side { background:#1f1f29; border-radius:4px; padding:6px; font-size:11px; color:#ddd; overflow:hidden }
+  .side h4 { margin:0 0 6px; font-size:11px; color:#f0a07e }
+  .msg { background:#2a2a36; border-left:3px solid #888; padding:4px 6px; margin-bottom:5px; border-radius:3px; line-height:1.35 }
+  .msg b { color:#fff } .msg .t { color:#889; font-size:10px; float:right }
+  .chip { display:inline-block; background:#333344; border-radius:8px; padding:1px 6px; margin:0 3px 4px 0; font-size:10px }
+  .scrub { background:#1f1f29; border-radius:4px; padding:5px 8px; font-size:10px; color:#aab; display:flex; align-items:center; gap:8px }
+  .scrub .bar { flex:1; height:6px; background:#333344; border-radius:3px; position:relative }
+  .scrub .bar i { position:absolute; left:0; top:0; bottom:0; width:62%; background:#D97757; border-radius:3px }
+  .chatline { font: 11px monospace; color:#ddd; line-height:1.5 }
+  .pop { position:absolute; right:14px; top:30px; width:150px; background:#fff; color:#222; border-radius:6px; padding:6px; font-size:10px; box-shadow:0 2px 6px #0008 }
+</style>
+
+<div class="cards">
+  <div class="card" data-choice="sidebar" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="page" style="grid-template-columns: 2fr 1fr; grid-template-rows: auto auto">
+        <canvas id="c1" width="360" height="210"></canvas>
+        <div class="side">
+          <h4>대화 기록 · cowork-sync</h4>
+          <span class="chip">전체</span><span class="chip">민수</span><span class="chip">publish.ts</span>
+          <div class="msg" style="border-color:#D97757"><span class="t">14:02</span><b>민수 → 지연</b> 먼저 해도 될까요? publish.ts의 <code>publishStep</code>, 약 5분</div>
+          <div class="msg" style="border-color:#5FB3A7"><span class="t">14:02</span><b>지연</b> 수락 — 끝나면 알려주세요</div>
+          <div class="msg" style="border-color:#9B7BD4"><span class="t">13:58</span><b>Alex</b> 쪽지: fold.ts 체크포인트 형식 바꿨어요</div>
+          <div class="msg" style="border-color:#c44"><span class="t">13:51</span><b>⚠ 같은 줄 충돌</b> Sora ↔ 민수, README.md (나중 쪽은 보관함에)</div>
+        </div>
+        <div class="scrub" style="grid-column: 1 / span 2">▶ 실시간 <div class="bar"><i></i></div> 되감기·다시보기</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. 오른쪽 대화 기록 + 아래 되감기 막대 (추천)</h3>
+      <p>대화가 시간순 카드로 쌓이고 사람·파일로 걸러 볼 수 있습니다. 장면 속에서는 말풍선이 잠깐 떴다 사라지고, 기록은 오른쪽에 남습니다. 아래 막대로 지난 장면을 다시 재생(데모·GIF 만들기에도 이용). 캐릭터를 클릭하면 그 사람 대화만 걸러집니다.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="gamechat" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="page" style="grid-template-columns: 1fr; position:relative">
+        <canvas id="c2" width="360" height="210"></canvas>
+        <div class="pop"><b>지연</b> · 헤드폰<br>잡은 곳: publish.ts › publishStep<br>최근: 민수 요청 수락 (14:02)</div>
+        <div class="side chatline">[14:02] 민수 → 지연: 먼저 해도 될까요? publishStep, 약 5분<br>[14:02] 지연: 수락 — 끝나면 알려주세요<br>[13:58] Alex: 쪽지 — fold.ts 체크포인트 형식 바꿨어요</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. 게임식 채팅창 + 캐릭터 클릭 팝업</h3>
+      <p>화면 아래 게임 채팅창처럼 한 줄씩 흐르고, 캐릭터를 클릭하면 그 사람의 현재 작업·최근 대화가 팝업으로. 장면이 넓게 보이지만 기록을 걸러 보거나 되감기는 약합니다.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var A = ["................",".....oooooo.....","...oobbbbbboo...","..obbhhbbbbbbo..","..obhhbbbbbbbo..",".obbbbbbbbbbbbo.",".obbwkbbbbwkbbo.",".obbwkbbbbwkbbo.",".obcbbbbbbbbcbo.",".obbbbbkkbbbbbo.","..obbbbbbbbbbo..","..obbbbbbbbbbo..","...oobbbbbboo...","....ofo..ofo....","....ooo..ooo....","................"];
+  var ACC = { beanie:{0:"......aaaa......",1:"....aaaaaaaa....",2:"...AAAAAAAAAA..."}, phones:{1:".....AAAAAA.....",5:"aa............aa",6:"aA............Aa",7:"aA............Aa",8:"aa............aa"}, shades:{6:"...AllAAAAllA...",7:"....ll....ll...."}, scarf:{10:"..aaaaaaaaaaaa..",11:"..........aa....",12:"..........aA...."} };
+  var P = [ { b:'#D97757', h:'#F0A07E', o:'#5A2A1A', acc:'beanie', a:'#3E7CB1', A:'#2A5578' }, { b:'#5FB3A7', h:'#94D6CC', o:'#1F4A44', acc:'phones', a:'#E4E4E4', A:'#333344' }, { b:'#9B7BD4', h:'#C3ADEB', o:'#3B2A5E', acc:'shades', a:'#222', A:'#222', l:'#59C3FF' }, { b:'#E7B84F', h:'#F6D88F', o:'#5E4512', acc:'scarf', a:'#C8463D', A:'#8E2E28' } ];
+  function sprite(g,p,x,y,s){ var pal={o:p.o,b:p.b,h:p.h,w:'#fff',k:'#1A1A1A',c:'#F2B49A',f:p.o,a:p.a,A:p.A,l:p.l||p.a}; function put(rows){ for(var yy in rows){ var r=rows[yy]; for(var xx=0;xx<16;xx++){ var ch=r[xx]; if(ch&&ch!=='.'&&pal[ch]){ g.fillStyle=pal[ch]; g.fillRect(x+xx*s,y+(+yy)*s,s,s);} } } } var base={}; A.forEach(function(r,i){base[i]=r}); put(base); put(ACC[p.acc]); }
+  function floor(g,w,h,c1,c2){ for(var y=0;y<h;y+=12) for(var x=0;x<w;x+=12){ g.fillStyle=((x/12+y/12)%2)?c1:c2; g.fillRect(x,y,12,12);} }
+  function desk(g,x,y,label,hot){ g.fillStyle='#6B4A2E'; g.fillRect(x,y,64,20); g.fillStyle='#8A6440'; g.fillRect(x,y,64,5); g.fillStyle='#2B2B38'; g.fillRect(x+22,y-12,20,12); g.fillStyle=hot?'#7FE0A0':'#59C3FF'; g.fillRect(x+24,y-10,16,8); g.fillStyle='#EDE6D8'; g.font='9px monospace'; g.fillText(label,x+2,y+30); }
+  function bubble(g,x,y,text){ g.font='10px sans-serif'; var w=g.measureText(text).width+12; g.fillStyle='#fff'; g.fillRect(x,y,w,18); g.fillRect(x+8,y+18,6,4); g.strokeStyle='#1A1A1A'; g.strokeRect(x+.5,y+.5,w-1,17); g.fillStyle='#1A1A1A'; g.fillText(text,x+6,y+13); }
+  function walk(t,x0,x1){ var u=(t%4000)/4000; u=u<.5?u*2:1; return x0+(x1-x0)*u; }
+  function room(g,t){ floor(g,360,210,'#3A3346','#342E40'); [['loop.ts',30,60],['publish.ts',140,60],['apply.ts',250,60],['README.md',30,150],['canon.ts',140,150],['fold.ts',250,150]].forEach(function(d,i){ desk(g,d[1],d[2],d[0],i<2); }); sprite(g,P[1],150,28,2); sprite(g,P[2],262,118,2); sprite(g,P[3],40,118,2); sprite(g,P[0],walk(t,40,112),28,2); if((t%4000)>2000) bubble(g,70,4,'먼저 해도 될까요? (5분)'); }
+  var g1=document.getElementById('c1').getContext('2d'), g2=document.getElementById('c2').getContext('2d');
+  function tick(t){ room(g1,t); room(g2,t); requestAnimationFrame(tick); }
+  requestAnimationFrame(tick);
+})();
+</script>

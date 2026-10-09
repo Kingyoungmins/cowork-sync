@@ -1,0 +1,80 @@
+{
+ "row": "save",
+ "plan": 7,
+ "about": "a save completion Ls (base move plus an effective save op): only save, with the desks published since the previous save",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "cs": [
+    {
+     "human": "A",
+     "n": 1,
+     "files": [
+      "src/a.ts"
+     ]
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "cs": [
+    {
+     "human": "A",
+     "n": 2,
+     "files": [
+      "src/b.ts",
+      "test/c.ts"
+     ]
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "save"
+    }
+   ],
+   "code": {
+    "shape": "base_move",
+    "base": "dddddddddddddddddddddddddddddddddddddddd"
+   }
+  },
+  {
+   "writer": "A",
+   "cs": [
+    {
+     "human": "A",
+     "n": 3,
+     "files": [
+      "src/b.ts"
+     ]
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "save"
+    }
+   ],
+   "code": {
+    "shape": "base_move",
+    "base": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+   }
+  }
+ ]
+}

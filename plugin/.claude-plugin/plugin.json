@@ -1,0 +1,12 @@
+{
+  "name": "cowork-sync",
+  "version": "0.1.0-preview",
+  "description": "Live sync of one git branch's working tree between teammates' clones, through the project's own git remote. Preview: the sync engine with /cowork-sync:cowork start, status, stop and view.",
+  "author": {
+    "name": "Youngmin Seo"
+  },
+  "homepage": "https://github.com/Kingyoungmins/cowork-sync",
+  "repository": "https://github.com/Kingyoungmins/cowork-sync",
+  "license": "FSL-1.1-ALv2",
+  "keywords": ["git", "sync", "collaboration", "pair-programming"]
+}

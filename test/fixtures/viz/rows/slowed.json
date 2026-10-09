@@ -1,0 +1,33 @@
+{
+ "row": "slowed",
+ "plan": 2,
+ "about": "event{health, HOST_THROTTLED}: person_slowed{until: height + 180}",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "repeat": 4
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "health",
+     "reason_code": "HOST_THROTTLED"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,29 @@
+{
+ "row": "incident",
+ "plan": 2,
+ "about": "R-V17: event{incident} makes no scene event and counts in unknown",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "incident",
+     "reason_code": "INCIDENT"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,29 @@
+{
+ "row": "publish_big",
+ "plan": 2,
+ "about": "a change-set of more than 256 paths has no Cowork-CS-Paths: publish at the big table with paths [] and n",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "cs": [
+    {
+     "human": "A",
+     "n": 1,
+     "count": 300
+    }
+   ]
+  }
+ ]
+}

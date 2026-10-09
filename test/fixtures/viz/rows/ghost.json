@@ -1,0 +1,36 @@
+{
+ "row": "ghost",
+ "plan": 2,
+ "about": "derived: a live peer leaves rankedSet (200 heights without a commit): person_ghost; back in rankedSet: person_unghost",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Bname"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "repeat": 200
+  },
+  {
+   "writer": "B",
+   "repeat": 1
+  }
+ ]
+}

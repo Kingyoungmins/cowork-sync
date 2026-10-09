@@ -1,0 +1,29 @@
+{
+ "row": "health_other",
+ "plan": 3,
+ "about": "event{health} with another code: person_badge{health, code}",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "health",
+     "reason_code": "BRANCH_ESCAPE"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,110 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Two jobs per os x node leg, side by side on two runners (no `needs:`), together exactly the gates of `npm run ci` in
+# its order: `test` runs lint … sim:smoke, `sim` runs the real-engine seeds (R-33 amendment, Task 19 fix round 1: the
+# budgets were measured on the reference PC, the Task 19 report records them, and the timeouts below carry a 1.5x
+# margin; the seeds no longer share one job with npm test).
+jobs:
+  test:
+    name: ${{ matrix.os }} / node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    # npm test sets per-test timeouts up to 60 min (the 200-apply BOM+CRLF test, Task 17's carry), and every one must end
+    # before the job does: 1.5 x 60 min. Measured on the reference PC under load: npm test 15.0 min (that BOM+CRLF test
+    # is its longest, 14.9 min), so the job's measured gates take far less than 90 min.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20.x = newest Node 20, which meets the >=20.6 dev-tooling floor (package.json engines).
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        node: ['20.x', '24.x']
+    steps:
+      # Windows legs use the Git for Windows checkout profile (11-testing TST-13); set it before checkout.
+      - name: core.autocrlf=true (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Tool versions
+        run: |
+          git --version
+          node --version
+          npm --version
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      # Plan 1 budget (11-testing §3.11): 10 fixed seeds x 3 peers x 20 ops with the NaiveEngine.
+      - name: SIM smoke (NaiveEngine, 10 seeds)
+        run: npm run sim:smoke
+
+  sim:
+    name: ${{ matrix.os }} / node ${{ matrix.node }} / SIM seeds
+    runs-on: ${{ matrix.os }}
+    # Measured on the reference PC (Task 19 fix round 1, under heavy load from other worktrees), one leg = one run-seeds
+    # call cut into 4 slices of 25 seeds: Node 20 legs 104.9 min, Node 24 legs 117.9 min (the slowest slice, from the
+    # per-seed times of the ranges edits 0-79: 67.7 min, faults 80-99: 24.1 min, edits 100-179: 74.0 min, faults
+    # 180-199: 28.0 min, each at --parallel 4). The run's deadline is 1.5 x 117.9 = 177 -> 180 min, then the step's, then
+    # the job's (checkout, npm ci and the report upload around it).
+    timeout-minutes: 200
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        node: ['20.x', '24.x']
+        # R-33: distinct seed ranges per Node leg (Node 20: 0-99, Node 24: 100-199), so each OS runs 200 seeds per PR.
+        include:
+          - node: '20.x'
+            edits_from: 0
+            faults_from: 80
+          - node: '24.x'
+            edits_from: 100
+            faults_from: 180
+    steps:
+      # Windows legs use the Git for Windows checkout profile (11-testing TST-13); set it before checkout.
+      - name: core.autocrlf=true (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Tool versions
+        run: |
+          git --version
+          node --version
+      - run: npm ci
+      # Plan 2 (R-31, R-33): the real engine with the six exit oracles, both profiles in one call, so a red edits group
+      # never hides the faults results. The runner's own deadline (1.5 x the measured leg) ends it before this step's and
+      # the job's, so its report and every lost seed's rerun command survive; a seed still running after 20 min (over
+      # twice the slowest measured seed, 545 s) fails as TIMEOUT with its partial op-log and trace; failed seeds'
+      # artifacts are copied to sim-kept/ for the upload.
+      - name: SIM seeds (real engine, 80 edits + 20 faults)
+        timeout-minutes: 190
+        run: npm run sim:seeds -- --profile edits --seeds 80 --from ${{ matrix.edits_from }} --profile faults --seeds 20 --from ${{ matrix.faults_from }} --parallel 4 --timeout-min 180 --seed-timeout-min 20 --keep-dir sim-kept --report sim-seeds.json
+      - name: SIM report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-seeds-${{ matrix.os }}-node${{ matrix.node }}
+          path: |
+            sim-seeds.json
+            sim-kept/
+          if-no-files-found: ignore

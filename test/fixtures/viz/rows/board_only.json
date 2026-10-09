@@ -1,0 +1,46 @@
+{
+ "row": "board_only",
+ "plan": 2,
+ "about": "R-V19: a board-only publish names the previous live commit again: no code event, nothing unknown",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "cs": [
+    {
+     "human": "A",
+     "n": 1,
+     "files": [
+      "src/a.ts"
+     ]
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "cs": [
+    {
+     "human": "A",
+     "n": 1,
+     "files": [
+      "src/a.ts"
+     ]
+    }
+   ],
+   "code": {
+    "changed": false
+   }
+  }
+ ]
+}

@@ -1,0 +1,26 @@
+{
+ "row": "base_move",
+ "plan": 7,
+ "about": "a base-move live commit without an effective save: room_sign{branch_moved}",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "code": {
+    "shape": "base_move",
+    "base": "dddddddddddddddddddddddddddddddddddddddd"
+   }
+  }
+ ]
+}

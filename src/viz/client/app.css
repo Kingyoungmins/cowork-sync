@@ -1,0 +1,356 @@
+/* The page's chrome (12-visualizer §3.6 "Environment palette", §3.7 "Rendering", §3.8 "Panel", §3.11 "Accessibility"), served as
+   /app.css from dist/viz.js. One light and one dark token set (prefers-color-scheme); every text colour is a --fg token and every
+   --fg token reads at >= 4.5:1 on every --bg token of its theme; the apricot accent (#D97757, both themes) marks the selected
+   room, the live pill, the rewind progress and the focus ring, and is never a text colour. The scene keeps its own palette in both
+   themes (the canvases). Every class here is a value of the page's enum map (client/a11y.ts CLS), and that map names no other. */
+
+:root {
+  color-scheme: light;
+  --bg: #F4F2EE;
+  --bg-panel: #FFFFFF;
+  --bg-quote: #ECE8E2;
+  --bg-chip: #E7E3DD;
+  --fg: #1C1B22;
+  --fg-muted: #4A4754;
+  --accent: #D97757;
+  --border: #BDB7C2;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #141319;
+    --bg-panel: #1C1B23;
+    --bg-quote: #2A2833;
+    --bg-chip: #302E3A;
+    --fg: #EEECF3;
+    --fg-muted: #B7B3C2;
+    --accent: #D97757;
+    --border: #4A4756;
+  }
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.4 system-ui, sans-serif;
+}
+
+/* Layout: header; the map, the office and the 340 px log side by side; the rewind bar and the controls below. */
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  height: 100vh;
+}
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 6px 12px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+.banner {
+  padding: 2px 8px;
+  border: 2px solid var(--accent);
+  border-radius: 4px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.status {
+  font-weight: 600;
+  color: var(--fg);
+}
+.notice {
+  color: var(--fg-muted);
+}
+.lamp {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-chip);
+}
+.lamp-ok { background: #5CC86A; }
+.lamp-warn { background: #F2C14E; }
+.lamp-down { background: #9AA0AE; }
+
+.main {
+  display: grid;
+  grid-template-columns: auto 1fr 340px;
+  min-height: 0;
+}
+.map {
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+}
+.rooms {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.room {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+}
+.office {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  min-width: 0;
+  min-height: 0;
+  background: #22222C;
+}
+.scroll {
+  overflow: auto;
+  min-height: 0;
+}
+.caption {
+  min-height: 1.4em;
+  padding: 4px 12px;
+  background: var(--bg-panel);
+  color: var(--fg);
+  border-top: 1px solid var(--border);
+}
+
+/* Every canvas: integer art pixels, never smoothed (12 §3.7). */
+.pixel {
+  display: block;
+  image-rendering: pixelated;
+}
+
+/* The log (12 §3.8): DOM, so text is selectable and read by screen readers. */
+.log {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.filter {
+  font: inherit;
+  padding: 2px 8px;
+  color: var(--fg);
+  background: var(--bg-chip);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.filter[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.cards {
+  position: relative;
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px 8px 32px;
+  list-style: none;
+}
+.card {
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.card-system {
+  color: var(--fg-muted);
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+.hue-0 { background: #d97757; }
+.hue-1 { background: #e69f00; }
+.hue-2 { background: #56b4e9; }
+.hue-3 { background: #009e73; }
+.hue-4 { background: #f0e442; }
+.hue-5 { background: #0072b2; }
+.hue-6 { background: #cf7caa; }
+.name {
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+  color: var(--fg);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.text {
+  margin: 2px 0;
+}
+/* Teammate free text: a visually distinct quoted frame, never styled as the viewer's own text (VIZ-25). */
+.quote {
+  margin: 4px 0;
+  padding: 4px 8px;
+  font-style: italic;
+  color: var(--fg);
+  background: var(--bg-quote);
+  border-left: 3px solid var(--border);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.chip {
+  font: 12px/1.4 ui-monospace, monospace;
+  padding: 0 6px;
+  color: var(--fg);
+  background: var(--bg-chip);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.meta {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.answers {
+  list-style: none;
+  margin: 4px 0 0 12px;
+  padding: 0;
+}
+.new-pill {
+  position: sticky;
+  bottom: 4px;
+  left: 50%;
+  font: inherit;
+  padding: 2px 12px;
+  color: var(--fg);
+  background: var(--bg-panel);
+  border: 2px solid var(--accent);
+  border-radius: 12px;
+}
+
+/* The rewind bar and the controls (12 §3.9.1, §3.11): reachable by Tab after the log. */
+.rewind,
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+}
+.track {
+  flex: 1 1 320px;
+  min-width: 200px;
+}
+.ticks {
+  width: 100%;
+  height: 8px;
+}
+.slider {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.position {
+  min-width: 5em;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.control {
+  font: inherit;
+  padding: 2px 10px;
+  color: var(--fg);
+  background: var(--bg-chip);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.control[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+.live-pill {
+  font: inherit;
+  padding: 2px 12px;
+  color: var(--fg);
+  background: var(--bg-chip);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+}
+.live-on {
+  border-color: var(--accent);
+}
+/* Reconnecting: muted text and a dashed border, never an opacity (a composite would draw the text below 4.5:1, VIZ-40). */
+.live-off {
+  color: var(--fg-muted);
+  border-style: dashed;
+}
+
+/* Visually hidden, still read by screen readers; shown while one of its buttons has focus (focus is always visible). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.people:focus-within,
+.rooms:focus-within {
+  position: static;
+  width: auto;
+  height: auto;
+  clip-path: none;
+  white-space: normal;
+}
+.people {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.person {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Reduced motion (12 §3.11): the page's own toggle or the OS setting; nothing in the chrome moves. */
+[data-motion="reduced"] * {
+  transition: none;
+  animation: none;
+  scroll-behavior: auto;
+}
+
+/* Below 1,100 px the log is a drawer under the office (12 §3.8). */
+@media (max-width: 1099px) {
+  .main {
+    grid-template-columns: auto 1fr;
+    grid-template-rows: 1fr minmax(160px, 38vh);
+  }
+  .log {
+    grid-column: 1 / -1;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+}

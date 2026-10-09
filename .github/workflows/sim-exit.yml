@@ -1,0 +1,87 @@
+name: sim-exit
+
+# Roadmap row 2's exit criterion (rulings R-31, R-33): 1,000 `edits` seeds per OS with the real engine and the six exit
+# oracles (INV-FF, INV-OID, INV-FIRSTPARENT, INV-BASE, INV-PUSHED-IS-MERGE, INV-CONVERGE), in 10 shards of 100, and one
+# verdict per OS. This workflow holds nothing else: the long SIM tests and the real-remote rehearsal are sim-long.yml, so
+# a run of this one is the exit artifact alone. Manual dispatch and nightly only: never part of the per-push ci.yml.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 2 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sim-exit-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  shard:
+    name: ${{ matrix.os }} / edits seeds shard ${{ matrix.shard }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 160
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      # Windows uses the Git for Windows checkout profile (11-testing TST-13); set it before checkout.
+      - name: core.autocrlf=true (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: npm
+      - name: Tool versions
+        run: |
+          git --version
+          node --version
+      - run: npm ci
+      # Seeds edits-<shard>00 … edits-<shard>99, 25 per process: about 91 min at the reference PC's measured 3.6 min per
+      # edits seed (Task 19 fix round 1), so the runner's deadline is 1.5 x 91 -> 140 min; it ends the run before the
+      # step's and the job's, so its report and the rerun command of every lost seed survive; failed seeds' artifacts are
+      # copied to sim-kept/ for the upload.
+      - name: 100 edits seeds
+        shell: bash
+        timeout-minutes: 150
+        run: npm run sim:seeds -- --profile edits --seeds 100 --from $(( ${{ matrix.shard }} * 100 )) --parallel 4 --timeout-min 140 --seed-timeout-min 30 --keep-dir sim-kept --report sim-exit-${{ matrix.os }}-${{ matrix.shard }}.json
+      - name: Report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-exit-${{ matrix.os }}-${{ matrix.shard }}
+          path: |
+            sim-exit-*.json
+            sim-kept/
+          if-no-files-found: error
+
+  summary:
+    name: ${{ matrix.os }} / 1,000 edits seeds
+    needs: shard
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sim-exit-${{ matrix.os }}-*
+          merge-multiple: true
+          path: reports
+      # The seeds reported are exactly edits-0 … edits-999, each once, every one passed, nothing lost (the ledger records
+      # the run URL and this line's per-OS seed and failure counts). Tested as a script: test/unit/exit-verdict.test.ts.
+      - name: Seeds and failures
+        run: npx tsx tools/sim/exit-verdict.ts --reports reports --profile edits --from 0 --seeds 1000 --label ${{ matrix.os }}

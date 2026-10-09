@@ -1,0 +1,49 @@
+name: sim-long
+
+# The long SIM tests (nightly and on demand), kept out of sim-exit.yml so its runs stay the exit artifact alone: the
+# mutation matrix (TC-TST-02 form), the crash matrix over every Plan 2 crashpoint (TST-06, 01-engine test 26), the
+# 20 edits + 10 faults exit seeds, the long crash-rate run (Task 18), Task 9's diskEq test (it catches M18, whose SIM
+# pair is not demonstrable), and the real-remote rehearsal (Task 20), which runs even when the long SIM tests fail.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '47 3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sim-long-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  long:
+    name: ${{ matrix.os }} / long SIM tests and the real-remote rehearsal
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - name: core.autocrlf=true (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: npm
+      - run: npm ci
+      - name: Long SIM tests
+        timeout-minutes: 180
+        env:
+          COWORK_SIM_LONG: '1'
+        run: npx tsx --test test/integration/sim.engine.test.ts test/integration/sim.oracles.plan2.test.ts test/integration/sim.crash.test.ts test/integration/diskEq.test.ts
+      # Task 20 (R-34): genesis, join and the three scenarios against a file:// remote holding .cowork-test-repo.
+      - name: Real-remote rehearsal
+        if: ${{ !cancelled() }}
+        timeout-minutes: 45
+        env:
+          COWORK_REAL_REHEARSAL: '1'
+        run: npx tsx --test test/integration/real.twoclone.test.ts

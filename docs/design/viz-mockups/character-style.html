@@ -1,0 +1,131 @@
+<h2>캐릭터 스타일 — 어느 쪽이 좋으세요?</h2>
+<p class="subtitle">계정마다 색·소품만 다르게 한 4명씩 보여드립니다. 실제 화면에서는 이 캐릭터들이 저장소 테이블 사이를 걸어 다닙니다. 마음에 드는 쪽을 클릭해 주세요.</p>
+
+<style>
+  .sprite-row { display:flex; gap:22px; justify-content:center; align-items:flex-end; padding:18px 8px 10px;
+    background: repeating-linear-gradient(0deg,#2b2b38 0 12px,#30303f 12px 24px); border-radius:8px; }
+  .sprite-row canvas { image-rendering: pixelated; animation: bob 1.2s ease-in-out infinite; }
+  .sprite-row canvas:nth-child(2){ animation-delay:.3s } .sprite-row canvas:nth-child(3){ animation-delay:.6s } .sprite-row canvas:nth-child(4){ animation-delay:.9s }
+  @keyframes bob { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-4px) } }
+  .names { display:flex; gap:22px; justify-content:center; font: 11px monospace; color:#9aa; margin-top:4px }
+  .names span { width:96px; text-align:center }
+  .warn { background:#3a2a1a; color:#f5c38a; padding:10px 12px; border-radius:6px; font-size:13px; line-height:1.5 }
+</style>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="sprite-row" id="rowA"></div>
+      <div class="names"><span>민수</span><span>지연</span><span>Alex</span><span>Sora</span></div>
+    </div>
+    <div class="card-body">
+      <h3>A. 오리지널 말랑 캐릭터 (추천)</h3>
+      <p>Claude 특유의 따뜻한 주황 느낌을 살린 우리만의 동글한 도트 생물. 계정별로 몸 색 + 소품(비니·헤드폰·선글라스·목도리)이 다릅니다. 공개·홍보해도 상표 걱정이 없습니다.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="sprite-row" id="rowB"></div>
+      <div class="names"><span>민수</span><span>지연</span><span>Alex</span><span>Sora</span></div>
+    </div>
+    <div class="card-body">
+      <h3>B. 도트 사람 + 주황 반짝 마크</h3>
+      <p>귀여운 2등신 사람 캐릭터. 셔츠에 주황 반짝 마크를 달아 Claude 느낌을 줍니다. 머리색·옷색이 계정마다 다릅니다. "사람이 일하는 사무실" 느낌.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="warn">공식 마스코트 그대로 쓰기 (그림 생략)<br>
+      팀 내부에서만 쓰면 문제없지만, 공개 오픈소스·홍보 영상에 쓰면 Anthropic 상표·저작권 문제가 생길 수 있습니다. 프로젝트 이름에서 'Claude'를 뺀 것과 같은 이유로 비추천합니다.</div>
+    </div>
+    <div class="card-body">
+      <h3>C. 공식 마스코트 (비추천)</h3>
+      <p>가장 "Claude다운" 모습이지만 공개 배포 시 위험.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var A = [
+    "................",
+    ".....oooooo.....",
+    "...oobbbbbboo...",
+    "..obbhhbbbbbbo..",
+    "..obhhbbbbbbbo..",
+    ".obbbbbbbbbbbbo.",
+    ".obbwkbbbbwkbbo.",
+    ".obbwkbbbbwkbbo.",
+    ".obcbbbbbbbbcbo.",
+    ".obbbbbkkbbbbbo.",
+    "..obbbbbbbbbbo..",
+    "..obbbbbbbbbbo..",
+    "...oobbbbbboo...",
+    "....ofo..ofo....",
+    "....ooo..ooo....",
+    "................"
+  ];
+  var ACC = {
+    beanie: ["......aaaa......", "....aaaaaaaa....", "...AAAAAAAAAA..."],
+    phones: { 1: ".....AAAAAA.....", 5: "aa............aa", 6: "aA............Aa", 7: "aA............Aa", 8: "aa............aa" },
+    shades: { 6: "...AllAAAAllA...", 7: "....ll....ll...." },
+    scarf: { 10: "..aaaaaaaaaaaa..", 11: "..........aa....", 12: "..........aA...." }
+  };
+  var B = [
+    "................",
+    ".....hhhhhh.....",
+    "....hhhhhhhh....",
+    "...hhhhhhhhhh...",
+    "...hhsssssshh...",
+    "...hssssssssh...",
+    "...hskssssksh...",
+    "....ssssssss....",
+    ".....sskkss.....",
+    "....tttttttt....",
+    "...ttttxxtttt...",
+    "...tttxxxxttt...",
+    "...stttxxttts...",
+    "....pppppppp....",
+    "....pp....pp....",
+    "....ff....ff...."
+  ];
+  function draw(map, pal, overlay) {
+    var c = document.createElement('canvas'); c.width = 16; c.height = 16;
+    c.style.width = '96px'; c.style.height = '96px';
+    var g = c.getContext('2d');
+    function put(rows) {
+      Object.keys(rows).forEach(function (y) {
+        var row = rows[y];
+        for (var x = 0; x < 16; x++) { var ch = row[x]; if (ch && ch !== '.' && pal[ch]) { g.fillStyle = pal[ch]; g.fillRect(x, +y, 1, 1); } }
+      });
+    }
+    var base = {}; map.forEach(function (r, i) { base[i] = r; }); put(base);
+    if (overlay) put(Array.isArray(overlay) ? Object.assign({}, overlay) : overlay);
+    return c;
+  }
+  var blob = [
+    { b: '#D97757', h: '#F0A07E', o: '#5A2A1A', c: '#F2B49A', acc: 'beanie', a: '#3E7CB1', A: '#2A5578' },
+    { b: '#5FB3A7', h: '#94D6CC', o: '#1F4A44', c: '#F2B49A', acc: 'phones', a: '#E4E4E4', A: '#333344' },
+    { b: '#9B7BD4', h: '#C3ADEB', o: '#3B2A5E', c: '#F2B49A', acc: 'shades', a: '#222', A: '#222', l: '#59C3FF' },
+    { b: '#E7B84F', h: '#F6D88F', o: '#5E4512', c: '#F2B49A', acc: 'scarf', a: '#C8463D', A: '#8E2E28' }
+  ];
+  var rowA = document.getElementById('rowA');
+  blob.forEach(function (p) {
+    var pal = { o: p.o, b: p.b, h: p.h, w: '#FFFFFF', k: '#1A1A1A', c: p.c, f: p.o, a: p.a, A: p.A, l: p.l || p.a };
+    rowA.appendChild(draw(A, pal, ACC[p.acc]));
+  });
+  var people = [
+    { h: '#2B2B2B', s: '#F3C9A8', t: '#3E7CB1', T: '#2A5578', p: '#3A3A4A' },
+    { h: '#7A3E1E', s: '#F6D3B8', t: '#5FB3A7', T: '#3C7F75', p: '#2E2E3A' },
+    { h: '#E8C766', s: '#EBC1A0', t: '#9B7BD4', T: '#6C51A0', p: '#3A3A4A' },
+    { h: '#C8463D', s: '#F3C9A8', t: '#E7B84F', T: '#B48A2A', p: '#2E2E3A' }
+  ];
+  var rowB = document.getElementById('rowB');
+  people.forEach(function (p) {
+    var pal = { h: p.h, s: p.s, w: '#fff', k: '#1A1A1A', t: p.t, T: p.T, x: '#D97757', p: p.p, f: '#222' };
+    rowB.appendChild(draw(B, pal));
+  });
+})();
+</script>

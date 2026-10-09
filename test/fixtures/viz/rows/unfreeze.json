@@ -1,0 +1,39 @@
+{
+ "row": "unfreeze",
+ "plan": 2,
+ "about": "event{unfreeze}: person_thaw",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "freeze",
+     "reason_code": "EPOCH"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "unfreeze",
+     "reason_code": "EPOCH"
+    }
+   ]
+  }
+ ]
+}

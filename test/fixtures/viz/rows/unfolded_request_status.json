@@ -1,0 +1,38 @@
+{
+ "row": "unfolded_request_status",
+ "plan": 6,
+ "about": "request_status is unfolded in Plan 2: no event, one unknown",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Bname"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "request_status",
+     "req_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+     "status": "asked"
+    }
+   ]
+  }
+ ]
+}

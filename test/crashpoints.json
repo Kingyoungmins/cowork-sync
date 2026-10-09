@@ -1,0 +1,22 @@
+[
+  "adopt.index_renamed",
+  "adopt.lock",
+  "adopt.ref",
+  "apply.between_groups",
+  "apply.group.mid",
+  "apply.group.phase1",
+  "apply.group.phase2",
+  "apply.intent",
+  "apply.state",
+  "deny.prerecord",
+  "join.first_apply",
+  "publish.landed",
+  "publish.out_built",
+  "publish.sent",
+  "recover.displaced",
+  "recover.reanchor",
+  "registry.cas",
+  "save.branch_pushed",
+  "snapshot.index_written",
+  "stop.flushed"
+]

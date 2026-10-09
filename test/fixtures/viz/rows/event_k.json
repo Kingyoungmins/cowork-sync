@@ -1,0 +1,39 @@
+{
+ "row": "event_k",
+ "plan": 2,
+ "about": "event{K1..K7}, if ever folded: conflict{generic} with its cid",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "K4",
+     "reason_code": "CONFLICT_K4"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "K7",
+     "reason_code": "CONFLICT_K7"
+    }
+   ]
+  }
+ ]
+}

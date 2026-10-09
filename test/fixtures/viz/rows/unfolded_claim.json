@@ -1,0 +1,38 @@
+{
+ "row": "unfolded_claim",
+ "plan": 4,
+ "about": "claim is unfolded in Plan 2: no event, one unknown",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Bname"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "claim",
+     "path": "src/a.ts",
+     "claim_id": "abcdefghijklmnop"
+    }
+   ]
+  }
+ ]
+}

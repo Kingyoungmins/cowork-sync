@@ -1,0 +1,46 @@
+{
+ "row": "seat_footprint",
+ "plan": 5,
+ "about": "R-V18: seat footprints (Cowork-Seat, a seat cs_id) spawn their pets at sub 1,001 before the publishes",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "code": {
+    "shape": "ordinary",
+    "seats": [
+     "human",
+     "S2"
+    ]
+   },
+   "cs": [
+    {
+     "human": "A",
+     "n": 1,
+     "files": [
+      "src/a.ts"
+     ]
+    },
+    {
+     "seat": "S1",
+     "turn": 1,
+     "files": [
+      "src/b.ts"
+     ],
+     "state": "checkpoint"
+    }
+   ]
+  }
+ ]
+}

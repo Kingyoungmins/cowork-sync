@@ -1,0 +1,39 @@
+{
+ "row": "join_rules",
+ "plan": 2,
+ "about": "regionSpec != teamRegionSpec after a join: person_badge{rules, on} at the join's line, then off at a re-announce",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Bname",
+     "regionSpec": "rs-2"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Bname",
+     "regionSpec": "rs-1"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,15 @@
+{"row":"board_full_event","plan":2,"unknown":[],
+"events":[
+{"height":0,"k":0,"kind":"room_open","seed":3846463404,"sub":0},
+{"height":0,"k":0,"kind":"person_enter","peer":"41414141414141414141414141414141","seed":695470251,"sub":1},
+{"height":3,"k":0,"kind":"room_badge","level":"full","seed":1640211370,"sub":1},
+{"height":4,"k":0,"kind":"room_badge","level":"none","seed":3095597264,"sub":1002},
+{"height":5,"k":0,"kind":"room_badge","level":"full","seed":801875297,"sub":1},
+{"height":7,"k":0,"kind":"room_badge","level":"none","seed":1296328880,"sub":1002}
+],
+"cards":[
+{"actor":null,"at":{"height":0,"k":0,"sub":0},"code":"UI_VIZ_CARD_ROOM_OPEN","desks":[],"detail":null,"displayId":null,"group":"system","id":"0.0.0","label":null,"n":0,"parent":null,"paths":[],"target":null,"text":null},
+{"actor":{"peer":"41414141414141414141414141414141"},"at":{"height":0,"k":0,"sub":1},"code":"UI_VIZ_CARD_JOIN","desks":[],"detail":null,"displayId":null,"group":"conversation","id":"0.1.0","label":null,"n":0,"parent":null,"paths":[],"target":null,"text":null},
+{"actor":null,"at":{"height":3,"k":0,"sub":1},"code":"UI_VIZ_CARD_BOARD_FULL","desks":[],"detail":null,"displayId":null,"group":"system","id":"3.1.0","label":null,"n":0,"parent":null,"paths":[],"target":null,"text":null},
+{"actor":null,"at":{"height":5,"k":0,"sub":1},"code":"UI_VIZ_CARD_BOARD_FULL","desks":[],"detail":null,"displayId":null,"group":"system","id":"5.1.0","label":null,"n":0,"parent":null,"paths":[],"target":null,"text":null}
+]}

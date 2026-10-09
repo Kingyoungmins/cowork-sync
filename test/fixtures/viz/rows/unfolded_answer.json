@@ -1,0 +1,38 @@
+{
+ "row": "unfolded_answer",
+ "plan": 6,
+ "about": "answer is unfolded in Plan 2: no event, one unknown",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Bname"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "answer",
+     "req_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+     "verb": "accept"
+    }
+   ]
+  }
+ ]
+}

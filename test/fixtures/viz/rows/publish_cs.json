@@ -1,0 +1,42 @@
+{
+ "row": "publish_cs",
+ "plan": 2,
+ "about": "one publish per Cowork-CS trailer of a changed ordinary live commit, at its target desk with planes to the others",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "cs": [
+    {
+     "human": "A",
+     "n": 1,
+     "files": [
+      "src/b.ts",
+      "src/a.ts",
+      "test/t.ts",
+      "src/c.ts"
+     ]
+    },
+    {
+     "human": "A",
+     "n": 2,
+     "files": [
+      "docs/x.md"
+     ],
+     "checks": "fail"
+    }
+   ]
+  }
+ ]
+}

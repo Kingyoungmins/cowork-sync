@@ -1,0 +1,27 @@
+{
+ "row": "unknown_type",
+ "plan": 2,
+ "about": "an op of an unknown type is malformed (rejected): no event, one unknown",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "line": "{\"id\":\"41414141414141414141414141414141/e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1/9\",\"type\":\"zzz\"}"
+    }
+   ]
+  }
+ ]
+}

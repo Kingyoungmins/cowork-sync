@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.build/
+*.tsbuildinfo
+__pycache__/
+*.pyc
+cowork-sync-scratch/
+# plugin/: the release commit adds these with git add -f (RELEASING.md)
+/plugin/LICENSE.md
+/plugin/README.md

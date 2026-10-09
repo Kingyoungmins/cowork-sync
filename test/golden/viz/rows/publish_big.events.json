@@ -1,0 +1,11 @@
+{"row":"publish_big","plan":2,"unknown":[],
+"events":[
+{"height":0,"k":0,"kind":"room_open","seed":3846463404,"sub":0},
+{"height":0,"k":0,"kind":"person_enter","peer":"41414141414141414141414141414141","seed":695470251,"sub":1},
+{"actor":{"peer":"41414141414141414141414141414141"},"checks":"pass","height":1,"k":0,"kind":"publish","n":300,"origin":"human","others":[],"paths":[],"seed":4043618086,"state":"closed","sub":1001,"target":0}
+],
+"cards":[
+{"actor":null,"at":{"height":0,"k":0,"sub":0},"code":"UI_VIZ_CARD_ROOM_OPEN","desks":[],"detail":null,"displayId":null,"group":"system","id":"0.0.0","label":null,"n":0,"parent":null,"paths":[],"target":null,"text":null},
+{"actor":{"peer":"41414141414141414141414141414141"},"at":{"height":0,"k":0,"sub":1},"code":"UI_VIZ_CARD_JOIN","desks":[],"detail":null,"displayId":null,"group":"conversation","id":"0.1.0","label":null,"n":0,"parent":null,"paths":[],"target":null,"text":null},
+{"actor":{"peer":"41414141414141414141414141414141"},"at":{"height":1,"k":0,"sub":1001},"code":"UI_VIZ_CARD_PUBLISH","desks":[0],"detail":null,"displayId":null,"group":"activity","id":"1.1001.0","label":null,"n":300,"parent":null,"paths":[],"target":null,"text":null}
+]}

@@ -1,0 +1,28 @@
+{
+ "row": "join_new",
+ "plan": 2,
+ "about": "a peer with no PeerRec joins: person_enter at its op line",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Bname"
+    }
+   ]
+  }
+ ]
+}

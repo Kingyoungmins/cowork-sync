@@ -1,0 +1,38 @@
+{
+ "row": "unfolded_note",
+ "plan": 6,
+ "about": "note is unfolded in Plan 2: no event, one unknown",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Bname"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "note",
+     "target": null,
+     "text": "hi"
+    }
+   ]
+  }
+ ]
+}

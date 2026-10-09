@@ -1,0 +1,41 @@
+{
+ "row": "join_epoch",
+ "plan": 2,
+ "about": "a known peer joins with a new epoch: person_respawn, then pet_poof per retired seat in ascending seat key",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "seat_start",
+     "seat": "S2"
+    },
+    {
+     "type": "seat_start",
+     "seat": "S1"
+    }
+   ]
+  },
+  {
+   "writer": "A@2",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Aname"
+    }
+   ]
+  }
+ ]
+}

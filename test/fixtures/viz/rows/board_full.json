@@ -1,0 +1,212 @@
+{
+ "row": "board_full",
+ "plan": 2,
+ "about": "record_count 4,000 / 5,000 with BOARD_FULL / 4,500 / below 4,000: room_badge near_full, full, near_full, none (events created late, so the large fold states stay few)",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "incident",
+     "reason_code": "INCIDENT",
+     "times": 250
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "incident",
+     "reason_code": "INCIDENT",
+     "times": 250
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "repeat": 506
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "incident",
+     "reason_code": "INCIDENT",
+     "times": 250
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "incident",
+     "reason_code": "INCIDENT",
+     "times": 250
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "incident",
+     "reason_code": "INCIDENT",
+     "times": 250
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "incident",
+     "reason_code": "INCIDENT",
+     "times": 250
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "repeat": 244
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "incident",
+     "reason_code": "INCIDENT",
+     "times": 350
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "incident",
+     "reason_code": "INCIDENT",
+     "times": 350
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "incident",
+     "reason_code": "INCIDENT",
+     "times": 350
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "incident",
+     "reason_code": "INCIDENT",
+     "times": 350
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "incident",
+     "reason_code": "INCIDENT",
+     "times": 350
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "incident",
+     "reason_code": "INCIDENT",
+     "times": 350
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "incident",
+     "reason_code": "INCIDENT",
+     "times": 350
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "incident",
+     "reason_code": "INCIDENT",
+     "times": 350
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "incident",
+     "reason_code": "INCIDENT",
+     "times": 350
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "incident",
+     "reason_code": "INCIDENT",
+     "times": 349
+    },
+    {
+     "type": "event",
+     "kind": "health",
+     "reason_code": "BOARD_FULL"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "repeat": 258
+  }
+ ]
+}

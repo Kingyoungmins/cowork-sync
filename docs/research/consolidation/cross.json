@@ -1,0 +1,309 @@
+{
+ "contradictions": [
+  {
+   "between": "engine ENG-26 vs lifecycle LIFE-10(2)",
+   "issue": "LIFE-10 checks restart .old files with `hash-object --path=p tmp/<n>.old` == S_disk[p]. ENG-07 VERIFIED that this misreports i/crlf files (a40da32 vs 32315a1), and ENG CI lint forbids it. LIFE-10 also restores per path, while ENG-26 rolls back whole groups (INV-GROUP).",
+   "fix": "Delete LIFE-10 step 2 and reference ENG-26: group rollback, with every comparison done through DISK_EQ. Apply the same rule to every `clean(disk[p]) ==` test in LIFE-06 T2, LIFE-08 and LIFE-14 (P3, P6)."
+  },
+  {
+   "between": "claude CCI-12 / INV-CI-NO-REWRITE vs coordination CN-05 (K2 restore) vs holds CS-05 (pure-breach PARK)",
+   "issue": "There are three policies for a post-hoc foreign-symbol hit. CCI-12 never writes disk. CN-05 runs a 3-way restore of the whole call effect on every affected path. CS-05 restores only pure-breach paths.",
+   "fix": "Keep CCI-12: record first, then one whole-CS PIN, with no disk write. Delete CN-05 steps 2-3 and CS-05(2); the T1 'posthoc' variant becomes 'kept on this PC, not shared' (P1, P3, P4)."
+  },
+  {
+   "between": "holds HS-11 vs lifecycle LIFE-06 vs engine ENG-12 (index.lock, logs/HEAD)",
+   "issue": "HS-11 turns index.lock held > 30 s and any logs/HEAD growth into a SNAPSHOT freeze with a board event. LIFE-06 says neither ever freezes: index.lock only skips the loop plus one notice, and logs/HEAD only marks the next delta as git-op-caused. HS-11 also cites an engine '10 s pause' that ENG-12 does not have.",
+   "fix": "Use LIFE-06, because a commit-message editor legitimately holds index.lock for minutes. Remove the index.lock and logs/HEAD triggers from HS-11 (P2, P3)."
+  },
+  {
+   "between": "engine ENG-12 (SNAPSHOT record in registry) vs lifecycle LIFE-07 (FREEZE reason set in state meta) vs holds HS-11",
+   "issue": "Two stores hold the same freeze. Their release paths and allowed actions also differ: ENG-12 forbids base moves while frozen, but LIFE-07 allows R3 and LIFE-06 T2 depends on it. ENG-12 publishes new claims board-only while frozen, but LIFE-07 keeps them local.",
+   "fix": "Use one FREEZE reason set in state meta (LIFE-07) and drop the SNAPSHOT hold kind. Allow R3 while frozen, since it reads only remote trees. Allow board-only claim publication while frozen, since U4 publishes claims at the next push (P3)."
+  },
+  {
+   "between": "engine ENG-12 release list vs lifecycle LIFE-06 T2",
+   "issue": "ENG-12 has no automatic release when a human runs `git pull` / ff-merge onto a teammate's branch commit (H_adopt < HEAD <= Hr). Under ENG-12 the branch stays frozen until /cowork resume; LIFE-06 T2 reconciles it automatically.",
+   "fix": "Add T2 to ENG-12's release conditions: H_adopt := HEAD after live_base(TIP) >= HEAD, and A[p] := TIP[p] where DISK_EQ."
+  },
+  {
+   "between": "engine ENG-26 / ENG-12 resume vs lifecycle LIFE-08",
+   "issue": "ENG-12/ENG-26 '/cowork resume' rebuilds A for every path. LIFE-08 rebuilds only the paths that differ from snap_pre_freeze, refuses T3/T4/T5, and accepts the new stash.",
+   "fix": "Make LIFE-08 the single resume definition, with ENG-26 LOST-STATE as the per-path primitive it calls (P3)."
+  },
+  {
+   "between": "engine ENG-16 ('ready capture published unchanged') vs holds CS-03 (ready pair rebased at every apply)",
+   "issue": "CS-03 VERIFIED (X1) that an unrebased R drops a peer's fix with merge-tree rc 0 while the asserts pass. ENG-16 stores (R, A_R) in the journal and publishes it unchanged.",
+   "fix": "ENG-16 adopts CS-03: at every apply that changes A[p], R[p] := merge-file(A_new, A_cap, R) and A_R := A_new. The journal stores the rebased pair, and INV-READY joins the engine oracle set (P6)."
+  },
+  {
+   "between": "engine ENG-22(iii) exact-match base B' vs lifecycle OUT ('v2: R3 per-path base = newest live blob equal to K[p]')",
+   "issue": "The engine ships the REASONED exact-match base in v1. Lifecycle defers it to v2 and v1 blocks saves instead ('revert it on the branch').",
+   "fix": "Use v1: refuse. A base-move conflict creates holds and blocks save, per LIFE OUT. Defer B' until it is VERIFIED (P4, P6)."
+  },
+  {
+   "between": "engine INV-NOLOSS vs holds INV-NOLOSS-H vs engine INV-NOCLOBBER vs coordination INV-CN-NOLOSS",
+   "issue": "These are four definitions of 'not lost', with different allowed locations. ENG INV-NOLOSS (the TST-03 acceptance gate) would fail on every open CS sitting on the author's disk and on LOCAL-ONLY secret holds. INV-NOLOSS-H omits undisplaced edits on the author's disk. INV-NOCLOBBER counts the .old ring, which HS-00(1) forbids as a store.",
+   "fix": "Use one invariant. Every byte is in live tip, the saved branch, a remote-reachable record, a LOCAL-ONLY record on disk, an undisplaced edit on the author's disk, or a human RESOLVED_DISCARD event. A .old late write becomes a registry record at once (P1, P3)."
+  },
+  {
+   "between": "engine INV-CONVERGE K=10 vs holds INV-CONVERGE-H K=5 vs security TST-03 K=20",
+   "issue": "Three convergence bounds are given for the same oracle.",
+   "fix": "Use one K (20) defined in TST-03 and referenced by the other two."
+  },
+  {
+   "between": "engine ENG-19 vs security SEC-14(3)",
+   "issue": "ENG-19 stops all pushes on a non-retryable rejection; the human may retry once with resume. SEC-14(3) automatically rebuilds the segment with the offending path held and retries once.",
+   "fix": "Use ENG-19: stop, show the host message, PIN the named paths, and retry only on human /cowork resume (P2, P4)."
+  },
+  {
+   "between": "engine ENG-28 vs lifecycle LIFE-16(a) vs security REL-03",
+   "issue": "For proto < minWriter: ENG-28 and REL-03 continue applying and stop only publishing, while LIFE-16(a) sets FREEZE(VERSION), which stops applying. On raising minWriter: LIFE-16(b) raises proto and minWriter automatically, REL-03 raises minWriter only by human `/cowork protocol`, and ENG-28 does not say.",
+   "fix": "For proto < minWriter, publish nothing but keep applying (not a FREEZE reason). minWriter is raised only by the human verb (REL-03)."
+  },
+  {
+   "between": "engine ENG-05 vs security SEC-12(2)",
+   "issue": "ENG-05 trusts 'the literal pinned URL' and checks drift only through `remote get-url`. SEC-12 VERIFIED (x2/x2c) that a literal URL is still rewritten by url.*.insteadOf, so an insteadOf added later redirects pushes without changing get-url.",
+   "fix": "ENG-05 drift check adopts SEC-12(2): on any config mtime/size change and at least every 60 s, refuse when an insteadOf/pushInsteadOf value prefixes P."
+  },
+  {
+   "between": "lifecycle LIFE-03 step 4 vs security SEC-12(1) vs engine ENG-05 (remote and repo identity)",
+   "issue": "LIFE-03 uses branch.<b>.remote and defaults to origin; SEC-12 never assumes origin (fork workflows). Repo identity is defined three ways: roots reachable from Hb, roots of fetched refs/heads/<b>, and roots of the default branch.",
+   "fix": "Use SEC-12(1) remote selection. Define identity as the sorted root oids of fetched refs/heads/<b> (the branch being made live)."
+  },
+  {
+   "between": "engine ENG-04 vs security SEC-01 (both 'the ONE git wrapper')",
+   "issue": "The two specs give different flag sets: SEC-01 adds protocol.ext.allow=never, transfer.fsckObjects, core.askPass=, commit.gpgSign=false and SSH_ASKPASS_REQUIRE. The hooksPath dir differs (gitdir/cowork vs CLAUDE_PLUGIN_DATA). Watchdogs differ: push 90 s vs 45 s, and a local 120 s kill vs 'local mutating plumbing never killed'. LIFE-10 core.fsync is in neither.",
+   "fix": "Write one wrapper spec. Use SEC-01 flags plus LIFE-10 fsync on ref updates. Use an empty hooks dir under gitdir/cowork, which survives CLAUDE_PLUGIN_DATA loss. Watchdogs: fetch 45 s, push 90 s, and 120 s only for read/hash commands (add, cat-file --filters), never for update-ref, update-index or commit-tree."
+  },
+  {
+   "between": "engine refs (refs/cowork/<b>) vs lifecycle LIFE-02 enc ('%'->'%25','/'->'%2F') vs security SEC-13 enc (every byte outside [A-Za-z0-9_-])",
+   "issue": "Three branch encodings are used. Any two peers built from different catalogs would address different refs.",
+   "fix": "Use one enc(), the SEC-13 form, which is VERIFIED x4 and avoids D/F conflicts, '..' and '.lock'. Apply it in every ENG ref name; the probe ref becomes refs/cowork/probe-<peer_id> everywhere."
+  },
+  {
+   "between": "engine ENG-05 fetch (board + code mirror + branch) vs security SEC-13(1) (board + branch only)",
+   "issue": "ENG-17 needs the fetched mirror value as its lease, but SEC-13 never fetches the mirror.",
+   "fix": "Keep the ENG-05 three refspecs and amend SEC-13(1). The mirror is fetched only as a lease value and is never a decision input."
+  },
+  {
+   "between": "engine INV-OID / ENG-06 (no remote deletion outside probe) vs lifecycle LIFE-18 /cowork end and security REL-04 (--remote-refs, /cowork gc)",
+   "issue": "The engine forbids deleting cowork board/code refs, while lifecycle and security delete them.",
+   "fix": "Defer end, gc and --remote-refs to v2 (see YAGNI), which keeps INV-OID intact. If kept, deletion is a separate human-CLI-only function, and INV-OID is amended."
+  },
+  {
+   "between": "claude CCI-02 (one command file, every command disable-model-invocation) vs security SEC-08(1) / UX-01 (resolve and review model-invocable for some forms)",
+   "issue": "Per-flag model invocability is impossible with one command file that has disable-model-invocation: true.",
+   "fix": "Make every slash verb human-only. Claude's resolve and show paths are only the MCP tools (cowork_resolve(id,'restore'), cowork_show, cowork_handoff)."
+  },
+  {
+   "between": "claude CCI-25 vs coordination CN-17 (override)",
+   "issue": "CCI-25 keys the token by (seat, symbol, 15 min). CN-17 keys it by (seat, rid, that turn) and uses a y/N terminal prompt for PIN records, which a `!`-preprocessed slash command has no TTY for.",
+   "fix": "Cut override from v1 (see YAGNI and U6). If kept, key it by rid and use the LIFE-01 preview plus --confirm instead of a terminal prompt."
+  },
+  {
+   "between": "claude CCI-25 vs lifecycle LIFE-01 vs security SEC-08(5) (save confirm)",
+   "issue": "Three confirmation syntaxes and semantics are given: `/cowork save confirm <code>` bound to the seat, `--confirm=<6-hex digest of shown state>`, and `--confirm <nonce>` valid 5 min.",
+   "fix": "Use LIFE-01: a state-digest preview id, re-previewed when stale. Human evidence comes from SEC-08(4)."
+  },
+  {
+   "between": "claude CCI-25 (UserPromptExpansion executes the verb) vs security SEC-08(1) / LIFE-01 (`!` preprocessing executes the CLI)",
+   "issue": "Two execution paths are given for human verbs. SEC-08(4b) evidence timing depends on which one runs.",
+   "fix": "Use one path, `!` preprocessing plus the SEC-08(4) evidence gate. Keep UserPromptExpansion only for pause and resume in the loader (CCI-03(3))."
+  },
+  {
+   "between": "coordination CN-13 ('holder seat ended releases its claims') vs claude CCI-06 (dead seat's claims adopted by a resumed process within 5 min)",
+   "issue": "CN-13 releases claims immediately, so CCI-06 adoption has nothing left to adopt.",
+   "fix": "Choose one rule. Either release on seat end with no adoption (see YAGNI), or keep adoption and release only after the 5-min local grace."
+  },
+  {
+   "between": "claude CCI-19 (team cap <= 12/h 'recorded on the board') vs coordination CN-19 (per-PC share max(2, floor(12/|R|)))",
+   "issue": "CCI-19 uses a cross-machine time window, which violates P5. CN-19 also omits CCI-19's prompt-cache-TTL condition.",
+   "fix": "Use the CN-19 per-PC share. Add CCI-19's cache-TTL condition to CN-19 (P5)."
+  },
+  {
+   "between": "claude CCI-20 vs coordination CN-20 (wake-turn origin)",
+   "issue": "CCI-20 decides by prompt_id, so a racing doorbell inside a human turn is not treated as a wake. CN-20 treats any hook while pending_wake and IDLE as a wake.",
+   "fix": "Use CCI-20 as the single rule, because it handles the race."
+  },
+  {
+   "between": "Text caps across claude CCI-16/21, coordination CN-22/23, holds CS-05/CS-07, security SEC-11/I18N-01",
+   "issue": "The caps conflict. Stop block: 1,500 vs 1,200. First deny: 1,200 (CCI) vs T1 1,050 (CN) vs deny truncation 800 (SEC-11/I18N-01), which would cut the measured 850-1,027 char T1. HELD_CS/PostToolUse: 1,500 vs 1,000+600 vs 800.",
+   "fix": "Keep one cap table in I18N-01, taken from CN-23: T1 1,050, other denies 800, PostToolUse event 1,000 plus attribution 600, Stop 1,200. sanitize() truncates placeholders, never whole rendered templates."
+  },
+  {
+   "between": "claude CCI-21 vs coordination CN-27 (standing rules) and CN-03",
+   "issue": "Two different RULES texts each claim to be the SessionStart text. CCI-21 permits 'violation' when the claim was visible, while CN-03 says the word never appears. CCI-21 and CN-24 make ko the default language, while CFG-02 uses user > team > OS locale > en.",
+   "fix": "One template owner (coordination) and one RULES text. Never use 'violation'. Language follows CFG-02, and the pilot team gets ko through CFG-03."
+  },
+  {
+   "between": "holds CS-04(a) (foreign claim vs 'this PC's claim') vs region REG-12 (seat-level foreignness; own-daemon seats exempt only for human hunks)",
+   "issue": "CS-04 tests at PC level, so it would let one local Claude seat publish into another local seat's claim. CN-02 treats same-daemon seats as conflicting.",
+   "fix": "CS-04 calls REG-12 gate() verbatim, with seat-level foreignness."
+  },
+  {
+   "between": "holds HS-02 (H0 = A[p] at record time) vs coordination CN-04 / holds CS-06 (H0 = disk clean blob at first deny) vs claude CCI-13 (per-(seat,symbol) shadow) vs region REG-19 (key (seat, claim_id, path))",
+   "issue": "With H0 = A[p], H1 also carries the requester's unrelated unpublished edits on that path, which are handed to the holder and applied on accept. Shadow keys also differ in four ways.",
+   "fix": "For deny shadows, H0 = disk clean blob at first deny, and the key is (seat, claim_id, path) per REG-19. Use one composition algorithm, CS-06 'apply denied edits in order to the shadow'."
+  },
+  {
+   "between": "region REG-01/REG-06 (claims are line ranges and claim_ids; no names or byte offsets) vs coordination CN-02(c)/CN-12 ('key', byte-range fallback) vs lifecycle LIFE-16(f) (stored-form byte range) vs claude CCI-09 ('raw offsets'), CCI-25 override <sym>, cowork_release(symbol)",
+   "issue": "Claim identity and overlap are specified three ways, and INV-REG-COORD forbids byte offsets.",
+   "fix": "Claim identity = claim_id, and overlap = the REG-07 touch test. Delete the byte-range fallback in CN-02(c) and LIFE-16(f). The tool/CLI 'key' argument resolves to claim_ids."
+  },
+  {
+   "between": "region OUT vs claude CCI-09 (NotebookEdit maps by cell id)",
+   "issue": "The region catalog makes notebooks whole-file in v1 with cell-level in v2, but CCI-09 maps NotebookEdit by cell id.",
+   "fix": "Use whole-file for .ipynb in v1."
+  },
+  {
+   "between": "security CFG-01 (save check default 600 s, max 1,800) vs engine ENG-23 / lifecycle LIFE-11 (T1 300 s per candidate, 15 min total)",
+   "issue": "Two save timeouts are specified.",
+   "fix": "Use one: saveTimeoutSec default 300, max 1,800, plus LIFE-11's 15-min total cap."
+  },
+  {
+   "between": "lifecycle LIFE-12 vs security UX-04 (save attribution)",
+   "issue": "Cowork-Symbol cap: 300 lines plus Cowork-Symbol-More vs 100 lines plus Cowork-Symbols-Omitted. Co-authored-by: opt-in, default off vs included unless declined.",
+   "fix": "Use one trailer spec, LIFE-12, with Co-authored-by opt-in (privacy default)."
+  },
+  {
+   "between": "claude CCI-02 (Claude Code >= 2.1.270) vs security REL-01 (README minimum 2.1.139)",
+   "issue": "Two Claude Code floors are given.",
+   "fix": "Use 2.1.270 everywhere."
+  },
+  {
+   "between": "claude CCI-23 (on plugin or key loss, push nothing new) vs lifecycle LIFE-15(b) / security REL-04(2) (flush outbox, publish leave)",
+   "issue": "CCI-23 strands non-durable records on one disk, which breaks P1.",
+   "fix": "Use LIFE-15(b): remove live markers, then make one push of captured ready trees, outbox, seat_end and leave, then exit."
+  },
+  {
+   "between": "engine ENG-13 ('one loop per branch') vs lifecycle LIFE-02(g) (at most one live branch per clone)",
+   "issue": "The engine allows multiple live branch loops per clone; lifecycle allows only one live branch.",
+   "fix": "Use one live branch per clone in v1 (the main worktree has one HEAD anyway)."
+  },
+  {
+   "between": "region REG-18 / coordination CN-09 (fork note in v1, different similarity metrics) vs holds OUT (fork detector is v2)",
+   "issue": "Two v1 fork detectors with different metrics conflict with a v2 deferral.",
+   "fix": "Defer to v2 (see YAGNI)."
+  },
+  {
+   "between": "lifecycle LIFE-19(c) / security UX-02(2) (opt-in chaining statusLine in v1) vs claude OUT (chaining statusLine is v2)",
+   "issue": "The v1/v2 status of the chaining statusLine conflicts.",
+   "fix": "Defer it to v2. status.json, systemMessage and OS notifications cover P2."
+  }
+ ],
+ "interface_mismatches": [
+  "Engine has no LOCAL-ORIGIN writer entry point. ENG-14's writer only applies M_disk with pre-image S_raw. Many callers need writeLocal(path, expected clean blob|ABSENT, new blob|DELETE) with the same CAS, lock, round-trip and defer handling: HS-07 PARK/RESTORE, LIFE-14 CLEAN, LIFE-08/HS-11 --restore, SEC-07 review --accept, CN-14 go-first merge, the ENG-14 ring merge-back and ENG-22 resolve --restore. Without it, P1 holds only for apply.",
+  "Quarantine and save-only paths have no MASK step. ENG-08 snapshots tracked stat-dirty .gitattributes, CLAUDE.md, .github/workflows/* and .cowork/config.json into S_disk, and ENG-09 excludes only untracked files. Assert ENG-16(h) then aborts EVERY push with a doctor record. Fix: S_pub[p] := A[p] for the SEC-07 quarantine set and the save-only set inside MASK (HS-08), plus a status reason 'quarantine: commit with git'.",
+  "Quarantine set lists differ. CCI-10(h)/CN-11 omit .husky, .githooks, core.hooksPath, .cowork/**, .gitlab-ci.yml, azure-pipelines*, bitbucket-pipelines and new 120000/160000 entries, all of which SEC-07 lists. CCI-10(h) also says 'stays until this user accepts it', but SEC-07/ENG-16(h) offer no outgoing accept (git commit only). Export one list from SEC-07.",
+  "MCP tool set: CCI-26 has 8 tools, CN-28 has 9 (adds cowork_resolve) and SEC-08(2)/UX-01 have 7 (no release, no resolve). Signatures also differ: go_first vs go-first; reason vs note; cowork_release(symbol|all) vs (key). The ≤3,000-char schema budget must be re-measured.",
+  "Verb registry: UX-01 claims an exact list, but other catalogs use verbs it lacks: queue and done (CN, HS), 'hold show' (HS), end (LIFE) and eol (CCI-14). CCI-14(d)'s advisory deny list must match one registry.",
+  "Hook loader protocol: CCI-03(5) sends one request and exits on the first reply line, but CN-18 needs a second frame, printed{batch_id}, after the stdout flush.",
+  "holds CS-10 closes TXNs on PermissionDenied and consumes that event, but CCI hooks.json registers no PermissionDenied hook. INFLIGHT leases and TXNs on denied calls then linger up to 120 s and block applies.",
+  "Hold schema vocabulary: ENG lists record kinds 'INCOMING, PIN, CONFLICTED, SNAPSHOT, base-move, restart', but HS defines kinds PATCH|PIN|SNAPSHOT|INCOMING, with CONFLICTED as a state and base-move/restart as guards. The 'base-move' guard is missing from the HS-04 guard table, so readers treat it as an unknown DECISION guard. CN-10 uses one merged state machine (OFFERED/ACCEPTED/RETURNED as states), but HS-06 splits residence, state and offer.",
+  "Board ops duplicate bytes. CN request op carries base_blob/proposed_blob, and HS-14 hold op carries held/<id>/{h0,h1} with req_id == hold_id. Drop the blob fields from request (P3).",
+  "region identityCheck(A, S_pub, OUT) and gate(A, S_disk, ...) take A/S_pub, but the publish merge is merge(A_R, R, TIP) (ENG-11/16). The apply-side identity check on M_disk (ENG-11) has no REG API. Signatures must take (base, ours, out).",
+  "B1 gate inputs: REG-12 gate() reads only claims from the fold, but coordination grants (CN-14 go-first for exactly one CS), reservations (CN-12 reserved_for_req) and overrides (CN-17) change admission. The REG-06 claim op has no reserved_for_req field, and REG-20's fold has no rule for it.",
+  "Live commit trailers: ENG-01 writes Cowork-Writer <peer>/<epoch>/<seq>, while UX-04/SEC-14 expect Cowork-Peer and Cowork-Seat and an author '<display> <peer_id@cowork.invalid>'. LIFE-12 attribution reads Cowork-Writer. Pick one set.",
+  "Probe result destination: ENG-27 records it in the join op, but SEC-14(4) uses a board CAPS op. Probe steps also differ: LIFE-03 has 3, ENG-27 has 5 and SEC-14 has up to 6 pushes.",
+  "status.json schema: the writer (ENG-29) uses {ok, degraded, offline, frozen, incident, nonretryable, version-paused, lost-state}. Readers expect {ok|degraded|offline|stalled|paused} (CCI-24) and {...|refused} (UX-02). Freeze reasons (LIFE-19) have no field in ENG-29.",
+  "Engine events (FROZEN, INCIDENT, NONRETRYABLE, LOST_STATE, PHANTOM, DEFERRED, ADOPT_BLOCKED, BASE_MOVE_CONFLICT, DISK_LOW, VERSION_PAUSED) have no template in the CCI-21/CN-24 enumerated event types, so Claude-facing wording for them is undefined.",
+  "EPOCH_BASE: ENG/LIFE-09 define it as live_base(LA_C), while CFG-01 defines it as live_base(live_code(board tip)) and claims it is 'the same on every peer'. Use LA_C, which matches disk and attr.tree, and drop the cross-peer equality claim.",
+  "NO-HOOKS (CCI-07) and SEC-16 refusal pause the checkout, but NOHOOKS is not a LIFE-07 FREEZE reason, so resume and status have no path for it.",
+  "CCI-03: a paused repo emits zero output, but LIFE-07 promises each live seat an additionalContext per freeze episode, including PAUSED. That notice cannot reach Claude.",
+  "SUSPECT handling: CCI-05 extends the deadline to 7 s and runs one fetch, while CN-08 waits 5 s for a fresh fetch. A fetch is watchdogged at 45 s, so neither bound guarantees a completed fetch.",
+  "Mapper version: REG-05 says a mapper change bumps proto and minWriter because the fold depends on it, but REL-03 raises minWriter only by human verb. Until the human acts, mixed-mapper peers fold claims differently, which breaks INV-REG-FOLD."
+ ],
+ "yagni_cuts": [
+  {
+   "item": "/cowork override (CCI-25, CN-17, T-OVERRIDE/T-OVERRIDE_ASK, override.ts, the only 'ask' path)",
+   "why_safe_to_defer": "Override only lets bytes leave earlier; the bytes are already durable in a SHADOW or PIN record. Dropping it removes the only 'ask' path and the U6 tension.",
+   "v1_replacement": "The causer's human uses /cowork queue to see the request. The T-AGE notification at 30 min tells both humans, who agree out of band. The holder's side answers with release, and unreachable holders hit presume_absent."
+  },
+  {
+   "item": "K2 post-hoc restore (CN-05) and the CS-05 pure-breach PARK restore",
+   "why_safe_to_defer": "Not rewriting disk cannot lose bytes, and B1 still never publishes the hunk. This removes a local-origin write racing the user's editor.",
+   "v1_replacement": "CCI-12: record first, then a whole-CS PIN, then a PostToolUse block saying 'kept here, not shared'."
+  },
+  {
+   "item": "Possible-fork detector (REG-18, CN-09 fork advisory, T-FORK, event kind fork_suspect)",
+   "why_safe_to_defer": "It is advisory only and never holds or preserves bytes.",
+   "v1_replacement": "Standing rules text ('does not copy or rename that code'), plus the CS-04 dependency bundle."
+  },
+  {
+   "item": "Wait-for cycle detection with automatic cycle=true go_first (CN-16, T-CYCLE, INV-CN-CYCLE)",
+   "why_safe_to_defer": "Nothing is auto-granted anyway, and bytes stay in records. A cycle only means both sides wait, which T-AGE surfaces at 30 min.",
+   "v1_replacement": "T-AGE notifications to both humans. Either side's release or decline breaks the cycle."
+  },
+  {
+   "item": "ENG-22(iii) exact-match base B' (REASONED)",
+   "why_safe_to_defer": "Refusing creates base-move holds and blocks save, so no bytes are lost.",
+   "v1_replacement": "Treat it as a base-move conflict: hold, block save, and tell the committer to revert on the branch (LIFE OUT)."
+  },
+  {
+   "item": "/cowork end, /cowork gc, uninstall --remote-refs, refs/cowork-archive, and the LIFE-18(a)/(c) archive lookup",
+   "why_safe_to_defer": "Leaving remote refs costs only space, and keeping them preserves history (P1). It also keeps INV-OID intact.",
+   "v1_replacement": "Refs stay. The README documents a manual `git push --delete` once nobody is live, and a vanished board is a plain incident."
+  },
+  {
+   "item": "Manual relaxed '/cowork adopt' (ENG-24 MANUAL, LIFE-13 second caller)",
+   "why_safe_to_defer": "The branch simply stays where it was; files are untouched.",
+   "v1_replacement": "Status names the blocking paths. The human saves, publishes or resolves them, and the automatic strict adopt then runs."
+  },
+  {
+   "item": "New-process seat adoption via transcript_path (CCI-06)",
+   "why_safe_to_defer": "A new process is a new seat. The old seat's claims are released when its pid dies, and its bytes stay on disk, so any later overlap becomes an ordinary K3 hold.",
+   "v1_replacement": "Release on seat end (CN-13). The resumed session re-claims on its next edit."
+  },
+  {
+   "item": "OFFLINE_RECONCILE batching (CN-06)",
+   "why_safe_to_defer": "It is a wording optimization; the per-conflict T1s are still coalesced by the 10 s per-seat window.",
+   "v1_replacement": "Ordinary per-CS T1 with CN-23 coalescing."
+  },
+  {
+   "item": "SNAPSHOT hold kind (HS-01/HS-11)",
+   "why_safe_to_defer": "FREEZE reasons in state meta already gate both directions. The --restore path already creates OFF_DISK PATCH records.",
+   "v1_replacement": "LIFE-07 FREEZE reasons plus one board health event (P3)."
+  },
+  {
+   "item": "FREEZE(DISK) reason with 256/512 MiB hysteresis (LIFE-07)",
+   "why_safe_to_defer": "ENG-15 already defers each apply below 2x bytes plus 256 MB, with a loud notice. Publish does not write the worktree.",
+   "v1_replacement": "Only the ENG-15 per-apply free-space check."
+  },
+  {
+   "item": "Opt-in sub-block claims (REG-08(d)), REG-15 rename aliases, CCI-18(b) tool_response file:line attribution",
+   "why_safe_to_defer": "These are display or opt-in features. Coarser claims err toward more conflicts (P2).",
+   "v1_replacement": "Whole-unit claims, plain labels, and attribution only for read-set applies."
+  },
+  {
+   "item": "Automatic proto raise, the checkpoint cross-proto rule and the /cowork protocol verb (LIFE-16(b)(d), REL-03)",
+   "why_safe_to_defer": "v1 is the first protocol. Any mismatch is handled by the minReader/minWriter floors, which refuse rather than handle.",
+   "v1_replacement": "Fixed proto=1. A board proto != own pauses with 'update cowork-sync'."
+  },
+  {
+   "item": "Chaining statusLine (LIFE-19(c), UX-02(2))",
+   "why_safe_to_defer": "It is a pure display surface.",
+   "v1_replacement": "status.json, hook systemMessage on transitions, and OS notifications."
+  }
+ ],
+ "approved_decision_violations": [
+  "U2: refs/cowork/<b>/code is a mirror that lags one publish (ENG-17 sets it to live_code(previous board tip)), so it is not 'the live code ref'. Keep it, because it guards against a non-atomic push leaving the mirror on a commit that never became live. NEEDS USER SIGN-OFF: Is it OK that refs/cowork/<b>/code shows the shared code one publish (a few seconds) behind, while the board ref is the true pointer?",
+  "U2: CS-02 publishes only at turn end or a green checkpoint (p50 30-36 s, Stop-only p50 165-195 s), so the tree is not continuously 'synced both ways'. Quarantine paths (CLAUDE.md, .github/workflows, .vscode settings, .gitattributes) never sync live. The holds sign-off is carried; also add: NEEDS USER SIGN-OFF: Is it OK that Claude's edits reach teammates only when a turn ends or tests pass, and that settings and CI files go only through a normal git commit?",
+  "U6: /cowork override (CCI-25, CN-17) lets the causer's human publish into a held function without the holder's consent, which is outside the three approved causer options (wait, ask to go first, handoff). Cut to v2, or NEEDS USER SIGN-OFF: Should a user be able to push their change into a teammate's held function without that teammate agreeing, after confirming it themselves?",
+  "U6/U5: CN-15 presume_absent makes all of a holder's claims STALE after 120 s without an op from that holder. A laptop sleeping through lunch then loses every claim, which amounts to preemption without asking. NEEDS USER SIGN-OFF: When a teammate's computer stops answering, how long should cowork-sync wait before their claimed functions are no longer blocked (proposed 2 minutes; 30 minutes is safer for sleeping laptops)?",
+  "U7: CN-19/CCI-19 never doorbell seats in auto, bypassPermissions or dontAsk mode by default. The pilot team uses auto mode, so real-time delivery is effectively off for them. NEEDS USER SIGN-OFF: Should teammate notices wake a session running in auto mode (within the hourly limits), or only show at its next action?",
+  "U9: human-typed relaxed /cowork adopt (ENG-24 MANUAL, LIFE-13) moves HEAD and the index when files are not equal to the saved content, but U9 allows touching HEAD and the index only for the safe adopt. Cut to v2, or NEEDS USER SIGN-OFF: May a user deliberately move their branch to the saved commit when their files contain extra local edits on those paths?",
+  "U11 (confirm): U11 lists a 'SessionStart command hook', but the design depends on 14 hook events (PreToolUse gating, PostToolUse attribution, Stop asks). NEEDS USER SIGN-OFF: Is it OK for cowork-sync to install hooks on every tool call and turn end, not only at session start?"
+ ],
+ "top_risks_remaining": [
+  "Unreviewed owners: data-handling (canon, the one conflict function, insertion-concat, scope), protocol (fold, governor, checkpoints, claim lifecycle 10b/11) and messaging-security (T1-T5, MSG-DATA, EXEC-SURFACE) are referenced by every catalog but were not in this cross-check. The most-used interfaces are therefore unverified.",
+  "Hot-file lockout: with hub.py, publication groups close transitively by path (CS-02) and later CSs in a pinned path join the PIN (CS-04). One claim race on the 1.3 MB file can therefore withhold all of this PC's later work on it until the holder answers. Each seat also holds 300 s READ leases, back-to-back Bash TXNs suspend snapshot and apply, and applies are coalesced, so incoming changes to that file may rarely land during active turns. Divergence and conflict rate compound. The soak needs a 'max per-path apply lag' and a 'held bytes per hour' gate.",
+  "Mechanism volume vs a 3-4 person v1: about 100 rules, three NOLOSS definitions and several duplicated subsystems (git wrapper x2, freeze x2, resume x2, restart x2, templates x2). Implementation drift between duplicates is the most likely source of real data-loss bugs. Merge the duplicates before coding.",
+  "False-positive holds: T0/REG-14 relative tripwires, the identity check and the group-name rule on valid C# (#if, partials) or Python can PIN whole CSs. Claude keeps building on unshared code while held bytes accumulate, which never loses data but stops collaboration. The hold rate needs to be measured on the pilot team's real repo.",
+  "Host behaviour is unmeasured: the governor latency and budget figures are MODEL only (gov_sim). Fetch polling at about 1.6/s from 4 peers, GCM token refresh under GIT_TERMINAL_PROMPT=0, GitHub secondary rate limits, and humans' own pushes counted against the same 6/min guidance have not been tested on GitHub.",
+  "Windows file contention: the ENG-08 residual save failures (9/140 back-to-back) pass only if the soak shows ≤1/1,000. The hard-link writer, Defender, Excel and editor locks, and the 2-4 ms mapping window on the 1.3 MB BOM+CRLF file are proven only in sweeps, not under a 4-seat load.",
+  "Human-verb authority rests on SEC-08(4b), which depends on UserPromptSubmit firing for slash commands before the `!`-preprocessed CLI starts (TST-07(e) not yet run). If that fails, every human verb becomes TTY-only, and slash commands then cannot save or start.",
+  "Mixed versions: a mapper or regionSpec change splits the fold (INV-REG-FOLD) until a human raises minWriter. The checkpoint mismatch alert would then fire constantly.",
+  "Clean/smudge filter interplay: canon, attr.tree at EPOCH_BASE (LA_C), required=true aborting the whole `git add` (VERIFIED), and LOCAL-ONLY holds. A filter failure on a frequently edited file silently stops that file being shared until it is noticed, and has not been exercised against the pilot team's actual filter on Windows.",
+  "Save signing on Windows (GPG4Win or ssh via commit-tree -S from a non-TTY CLI) is unverified; protected-branch refusal is still pending user sign-off."
+ ]
+}

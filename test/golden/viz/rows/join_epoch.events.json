@@ -1,0 +1,17 @@
+{"row":"join_epoch","plan":2,"unknown":[],
+"events":[
+{"height":0,"k":0,"kind":"room_open","seed":3846463404,"sub":0},
+{"height":0,"k":0,"kind":"person_enter","peer":"41414141414141414141414141414141","seed":695470251,"sub":1},
+{"height":1,"k":0,"kind":"pet_spawn","owner":"41414141414141414141414141414141","seat":"41414141414141414141414141414141/e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1/52525252525252525252525252525252","seed":1162357675,"sub":1},
+{"height":1,"k":0,"kind":"pet_spawn","owner":"41414141414141414141414141414141","seat":"41414141414141414141414141414141/e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1/51515151515151515151515151515151","seed":818867469,"sub":2},
+{"height":2,"k":0,"kind":"person_respawn","peer":"41414141414141414141414141414141","seed":2936427896,"sub":1},
+{"height":2,"k":1,"kind":"pet_poof","owner":"41414141414141414141414141414141","seat":"41414141414141414141414141414141/e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1/51515151515151515151515151515151","seed":1262137965,"sub":1},
+{"height":2,"k":2,"kind":"pet_poof","owner":"41414141414141414141414141414141","seat":"41414141414141414141414141414141/e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1/52525252525252525252525252525252","seed":3103526558,"sub":1}
+],
+"cards":[
+{"actor":null,"at":{"height":0,"k":0,"sub":0},"code":"UI_VIZ_CARD_ROOM_OPEN","desks":[],"detail":null,"displayId":null,"group":"system","id":"0.0.0","label":null,"n":0,"parent":null,"paths":[],"target":null,"text":null},
+{"actor":{"peer":"41414141414141414141414141414141"},"at":{"height":0,"k":0,"sub":1},"code":"UI_VIZ_CARD_JOIN","desks":[],"detail":null,"displayId":null,"group":"conversation","id":"0.1.0","label":null,"n":0,"parent":null,"paths":[],"target":null,"text":null},
+{"actor":{"seat":"41414141414141414141414141414141/e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1/52525252525252525252525252525252"},"at":{"height":1,"k":0,"sub":1},"code":"UI_VIZ_CARD_SEAT_START","desks":[],"detail":null,"displayId":null,"group":"conversation","id":"1.1.0","label":null,"n":0,"parent":null,"paths":[],"target":null,"text":null},
+{"actor":{"seat":"41414141414141414141414141414141/e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1/51515151515151515151515151515151"},"at":{"height":1,"k":0,"sub":2},"code":"UI_VIZ_CARD_SEAT_START","desks":[],"detail":null,"displayId":null,"group":"conversation","id":"1.2.0","label":null,"n":0,"parent":null,"paths":[],"target":null,"text":null},
+{"actor":{"peer":"41414141414141414141414141414141"},"at":{"height":2,"k":0,"sub":1},"code":"UI_VIZ_CARD_REJOIN","desks":[],"detail":null,"displayId":null,"group":"conversation","id":"2.1.0","label":null,"n":0,"parent":null,"paths":[],"target":null,"text":null}
+]}

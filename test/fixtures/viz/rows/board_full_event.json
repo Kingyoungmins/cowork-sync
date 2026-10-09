@@ -1,0 +1,60 @@
+{
+ "row": "board_full_event",
+ "plan": 2,
+ "about": "event{health, BOARD_FULL} with record_count far below 4,000 (the event's posting plan is PRO-06's; the Plan 2 fold applies event): room_badge full at the event's own line, held through that frame only, none at sub 1,002 of the next frame; a second BOARD_FULL in the same frame, or in the next frame while the room is still full, makes no second room_badge",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "repeat": 2
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "health",
+     "reason_code": "BOARD_FULL"
+    }
+   ]
+  },
+  {
+   "writer": "A"
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "health",
+     "reason_code": "BOARD_FULL",
+     "times": 2
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "event",
+     "kind": "health",
+     "reason_code": "BOARD_FULL"
+    }
+   ]
+  },
+  {
+   "writer": "A"
+  }
+ ]
+}

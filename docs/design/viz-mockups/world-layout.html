@@ -1,0 +1,102 @@
+<h2>세상 배치 — 어떤 구조가 좋으세요?</h2>
+<p class="subtitle">캐릭터는 A안(말랑이)으로 확정. 이제 "어디에서 일하는지"를 어떻게 보여줄지 고릅니다. 장면 속 주황 말랑이(민수)가 지연에게 걸어가 부탁하는 모습이 반복됩니다.</p>
+
+<style>
+  .scene { display:block; width:100%; image-rendering: pixelated; border-radius:6px; background:#22222c }
+</style>
+
+<div class="cards">
+  <div class="card" data-choice="room" onclick="toggleSelect(this)">
+    <div class="card-image"><canvas class="scene" id="s1" width="360" height="210"></canvas></div>
+    <div class="card-body">
+      <h3>1. 저장소 = 사무실, 파일 = 책상</h3>
+      <p>저장소 하나가 사무실 한 칸. 책상마다 파일(또는 폴더) 이름표. 누가 어떤 파일의 어느 함수를 잡고 있는지 책상 위치로 바로 보입니다. 팀이 저장소 하나로 일할 때 가장 직관적.</p>
+    </div>
+  </div>
+  <div class="card" data-choice="plaza" onclick="toggleSelect(this)">
+    <div class="card-image"><canvas class="scene" id="s2" width="360" height="210"></canvas></div>
+    <div class="card-body">
+      <h3>2. 광장 + 저장소별 큰 테이블</h3>
+      <p>말씀하신 그대로: 광장에 저장소마다 큰 테이블. 누가 어느 저장소에서 일하는지는 잘 보이지만, 같은 저장소 안에서 누가 어느 파일을 잡았는지는 말풍선으로만 보입니다.</p>
+    </div>
+  </div>
+  <div class="card" data-choice="map" onclick="toggleSelect(this)">
+    <div class="card-image"><canvas class="scene" id="s3" width="360" height="210"></canvas></div>
+    <div class="card-body">
+      <h3>3. 지도 + 사무실 확대 (추천)</h3>
+      <p>왼쪽 작은 지도에 저장소마다 방이 하나씩(내 PC에 있는 cowork 저장소들), 오른쪽은 고른 방을 1번처럼 크게. 저장소 여러 개도, 파일 단위 움직임도 다 담깁니다.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var A = ["................",".....oooooo.....","...oobbbbbboo...","..obbhhbbbbbbo..","..obhhbbbbbbbo..",".obbbbbbbbbbbbo.",".obbwkbbbbwkbbo.",".obbwkbbbbwkbbo.",".obcbbbbbbbbcbo.",".obbbbbkkbbbbbo.","..obbbbbbbbbbo..","..obbbbbbbbbbo..","...oobbbbbboo...","....ofo..ofo....","....ooo..ooo....","................"];
+  var ACC = {
+    beanie: {0:"......aaaa......",1:"....aaaaaaaa....",2:"...AAAAAAAAAA..."},
+    phones: {1:".....AAAAAA.....",5:"aa............aa",6:"aA............Aa",7:"aA............Aa",8:"aa............aa"},
+    shades: {6:"...AllAAAAllA...",7:"....ll....ll...."},
+    scarf: {10:"..aaaaaaaaaaaa..",11:"..........aa....",12:"..........aA...."}
+  };
+  var P = [
+    { name:'민수', b:'#D97757', h:'#F0A07E', o:'#5A2A1A', acc:'beanie', a:'#3E7CB1', A:'#2A5578' },
+    { name:'지연', b:'#5FB3A7', h:'#94D6CC', o:'#1F4A44', acc:'phones', a:'#E4E4E4', A:'#333344' },
+    { name:'Alex', b:'#9B7BD4', h:'#C3ADEB', o:'#3B2A5E', acc:'shades', a:'#222', A:'#222', l:'#59C3FF' },
+    { name:'Sora', b:'#E7B84F', h:'#F6D88F', o:'#5E4512', acc:'scarf', a:'#C8463D', A:'#8E2E28' }
+  ];
+  function sprite(g, p, x, y, s) {
+    var pal = { o:p.o, b:p.b, h:p.h, w:'#fff', k:'#1A1A1A', c:'#F2B49A', f:p.o, a:p.a, A:p.A, l:p.l||p.a };
+    function put(rows){ for (var yy in rows){ var r=rows[yy]; for (var xx=0; xx<16; xx++){ var ch=r[xx]; if(ch&&ch!=='.'&&pal[ch]){ g.fillStyle=pal[ch]; g.fillRect(x+xx*s, y+(+yy)*s, s, s);} } } }
+    var base={}; A.forEach(function(r,i){base[i]=r}); put(base); put(ACC[p.acc]);
+  }
+  function floor(g, w, h, c1, c2) { for (var y=0;y<h;y+=12) for (var x=0;x<w;x+=12){ g.fillStyle=((x/12+y/12)%2)?c1:c2; g.fillRect(x,y,12,12);} }
+  function desk(g, x, y, label, hot) {
+    g.fillStyle='#6B4A2E'; g.fillRect(x, y, 64, 20); g.fillStyle='#8A6440'; g.fillRect(x, y, 64, 5);
+    g.fillStyle='#2B2B38'; g.fillRect(x+22, y-12, 20, 12); g.fillStyle=hot?'#7FE0A0':'#59C3FF'; g.fillRect(x+24, y-10, 16, 8);
+    g.fillStyle='#EDE6D8'; g.font='9px monospace'; g.fillText(label, x+2, y+30);
+  }
+  function bubble(g, x, y, text) {
+    g.font='10px sans-serif'; var w=g.measureText(text).width+12;
+    g.fillStyle='#FFFFFF'; g.fillRect(x, y, w, 18); g.fillRect(x+8, y+18, 6, 4);
+    g.strokeStyle='#1A1A1A'; g.lineWidth=1; g.strokeRect(x+.5, y+.5, w-1, 17);
+    g.fillStyle='#1A1A1A'; g.fillText(text, x+6, y+13);
+  }
+  function walk(t, x0, x1) { var u=(t%4000)/4000; u = u<.5? u*2 : 1; return x0 + (x1-x0)*u; }
+
+  var s1=document.getElementById('s1').getContext('2d');
+  var s2=document.getElementById('s2').getContext('2d');
+  var s3=document.getElementById('s3').getContext('2d');
+
+  function room(g, ox, oy, w, h, t, small) {
+    floor(g, w, h, '#3A3346', '#342E40');
+    var desks=[['loop.ts',30,60],['publish.ts',140,60],['apply.ts',250,60],['README.md',30,150],['canon.ts',140,150],['fold.ts',250,150]];
+    desks.forEach(function(d,i){ desk(g, ox+d[1], oy+d[2], d[0], i===0||i===1); });
+    sprite(g, P[1], ox+150, oy+28, 2);         // 지연 at publish.ts
+    sprite(g, P[2], ox+262, oy+118, 2);        // Alex at canon? (fold)
+    sprite(g, P[3], ox+40, oy+118, 2);         // Sora at README
+    var mx = walk(t, ox+40, ox+112);            // 민수 walks from loop.ts toward 지연
+    sprite(g, P[0], mx, oy+28, 2);
+    if ((t%4000) > 2000) bubble(g, ox+70, oy+4, 'publish.ts 5분만 먼저 써도 될까요?');
+  }
+  function plaza(g, t) {
+    floor(g, 360, 210, '#2F3A2F', '#2A352A');
+    var tables=[['cowork-sync',60,70],['demo-app',200,70],['docs',130,150]];
+    tables.forEach(function(tb){ g.fillStyle='#6B4A2E'; g.beginPath(); g.ellipse(tb[1]+40, tb[2]+12, 46, 16, 0, 0, 7); g.fill(); g.fillStyle='#EDE6D8'; g.font='10px monospace'; g.fillText(tb[0], tb[1]+8, tb[2]+42); });
+    sprite(g, P[1], 230, 40, 2); sprite(g, P[2], 160, 120, 2); sprite(g, P[3], 60, 40, 2);
+    var mx = walk(t, 100, 196); sprite(g, P[0], mx, 40, 2);
+    if ((t%4000) > 2000) bubble(g, 150, 8, 'publish.ts 먼저 써도 될까요?');
+  }
+  function mapView(g, t) {
+    g.fillStyle='#1B1B24'; g.fillRect(0,0,360,210);
+    var rooms=[['cowork-sync',8,14,true],['demo-app',8,84,false],['docs',8,154,false]];
+    rooms.forEach(function(r){ g.fillStyle=r[3]?'#4A3F5C':'#2E2A38'; g.fillRect(r[1], r[2], 84, 52); g.strokeStyle=r[3]?'#D97757':'#555'; g.strokeRect(r[1]+.5, r[2]+.5, 83, 51); g.fillStyle='#EDE6D8'; g.font='9px monospace'; g.fillText(r[0], r[1]+4, r[2]+12); });
+    [[22,40,'#D97757'],[48,40,'#5FB3A7'],[70,48,'#9B7BD4'],[30,110,'#E7B84F']].forEach(function(d){ g.fillStyle=d[2]; g.fillRect(d[0], d[1], 6, 6); });
+    g.save(); g.translate(104,0); g.scale(0.71,1); room(g, 0, 0, 360, 210, t); g.restore();
+  }
+  function tick(t) {
+    room(s1, 0, 0, 360, 210, t); plaza(s2, t); mapView(s3, t);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();
+</script>

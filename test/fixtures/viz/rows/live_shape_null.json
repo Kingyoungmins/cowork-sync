@@ -1,0 +1,26 @@
+{
+ "row": "live_shape_null",
+ "plan": 2,
+ "about": "R-V19: a not_commit or commit_too_large live read gives shape null: no code event, one unknown",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "code": {
+    "changed": true,
+    "shape": null
+   }
+  }
+ ]
+}

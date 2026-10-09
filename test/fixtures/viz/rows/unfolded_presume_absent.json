@@ -1,0 +1,37 @@
+{
+ "row": "unfolded_presume_absent",
+ "plan": 6,
+ "about": "presume_absent is unfolded in Plan 2: no event, one unknown",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Bname"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "presume_absent",
+     "peer": "42424242424242424242424242424242"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,29 @@
+{
+ "row": "join_credit",
+ "plan": 2,
+ "about": "join.coauthor_optin != false: person_badge{credit}",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Bname",
+     "coauthor_optin": "Bob <bob@example.com>"
+    }
+   ]
+  }
+ ]
+}

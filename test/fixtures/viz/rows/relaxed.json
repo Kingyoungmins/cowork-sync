@@ -1,0 +1,51 @@
+{
+ "row": "relaxed",
+ "plan": 2,
+ "about": "derived: pose_relaxed 64 heights after the actor's last publish, never twice without a publish between",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "cs": [
+    {
+     "human": "A",
+     "n": 1,
+     "files": [
+      "src/a.ts"
+     ]
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "repeat": 69
+  },
+  {
+   "writer": "A",
+   "cs": [
+    {
+     "human": "A",
+     "n": 2,
+     "files": [
+      "src/a.ts"
+     ]
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "repeat": 70
+  }
+ ]
+}

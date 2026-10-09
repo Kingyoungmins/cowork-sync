@@ -1,0 +1,14 @@
+{"row":"board_full","plan":2,"unknown":[[1,250],[2,250],[509,250],[510,250],[511,250],[512,250],[757,350],[758,350],[759,350],[760,350],[761,350],[762,350],[763,350],[764,350],[765,350],[766,349]],
+"events":[
+{"height":0,"k":0,"kind":"room_open","seed":3846463404,"sub":0},
+{"height":0,"k":0,"kind":"person_enter","peer":"41414141414141414141414141414141","seed":695470251,"sub":1},
+{"height":764,"k":0,"kind":"room_badge","level":"near_full","seed":4194938223,"sub":1002},
+{"height":766,"k":0,"kind":"room_badge","level":"full","seed":3088878783,"sub":350},
+{"height":768,"k":0,"kind":"room_badge","level":"near_full","seed":1254883264,"sub":1002},
+{"height":1024,"k":0,"kind":"room_badge","level":"none","seed":3220699580,"sub":1002}
+],
+"cards":[
+{"actor":null,"at":{"height":0,"k":0,"sub":0},"code":"UI_VIZ_CARD_ROOM_OPEN","desks":[],"detail":null,"displayId":null,"group":"system","id":"0.0.0","label":null,"n":0,"parent":null,"paths":[],"target":null,"text":null},
+{"actor":{"peer":"41414141414141414141414141414141"},"at":{"height":0,"k":0,"sub":1},"code":"UI_VIZ_CARD_JOIN","desks":[],"detail":null,"displayId":null,"group":"conversation","id":"0.1.0","label":null,"n":0,"parent":null,"paths":[],"target":null,"text":null},
+{"actor":null,"at":{"height":766,"k":0,"sub":350},"code":"UI_VIZ_CARD_BOARD_FULL","desks":[],"detail":null,"displayId":null,"group":"system","id":"766.350.0","label":null,"n":0,"parent":null,"paths":[],"target":null,"text":null}
+]}

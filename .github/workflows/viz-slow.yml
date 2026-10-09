@@ -1,0 +1,79 @@
+name: viz-slow
+
+# The viewer's slow suites (Plan 8a Global Constraints, "CI wall time"; 12-visualizer §7): T-VIZ-perf (≈ 3 min, Windows and Linux),
+# T-VIZ-golden-board (and T-VIZ-golden-sim once Plan 8a Task 18 lands it), and T-VIZ-contention (Windows). Each reports SKIPPED in
+# `npm test` unless COWORK_VIZ_SLOW=1, which this workflow sets. Every pull request that touches the viewer, the board or their tools
+# and tests runs it; its green run (both jobs, every leg) is part of the 8a exit (roadmap row 8).
+# T-VIZ-contention has a floor of 2 phases x 3,000 writes x 100 ms = 10 min of writer sleep before any fetch is counted (1,476 s
+# measured on a loaded PC), so it runs in a Windows job of its own (Task 15 fix round 1 ruling) beside the three perf legs: it never
+# loads a runner while T-VIZ-perf measures time and CPU, and neither shares the other's budget.
+on:
+  pull_request:
+    paths:
+      - 'src/viz/**'
+      - 'src/board/**'
+      - 'tools/viz/**'
+      - 'test/**/viz/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: viz-slow-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  slow:
+    name: ${{ matrix.os }} / viewer slow suites (perf, golden board)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      # Windows legs use the Git for Windows checkout profile (11-testing TST-13); set it before checkout.
+      - name: core.autocrlf=true (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: npm
+      - name: Tool versions
+        run: |
+          git --version
+          node --version
+      - run: npm ci
+      # One file at a time. T-VIZ-perf builds its own dist/viz.js into a temp folder (buildDistOnce), so no build step runs here.
+      - name: Viewer slow suites (perf, golden board)
+        env:
+          COWORK_VIZ_SLOW: '1'
+        run: npx tsx --test --test-concurrency=1 test/integration/viz/perf.test.ts test/integration/viz/golden.board.test.ts
+
+  contention:
+    name: windows-latest / viewer slow suite (contention)
+    runs-on: windows-latest
+    # The test's own timeout is 35 min; checkout and npm ci take the rest.
+    timeout-minutes: 40
+    steps:
+      # The Git for Windows checkout profile (11-testing TST-13); set it before checkout.
+      - name: core.autocrlf=true (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: npm
+      - name: Tool versions
+        run: |
+          git --version
+          node --version
+      - run: npm ci
+      - name: Viewer slow suite (contention)
+        env:
+          COWORK_VIZ_SLOW: '1'
+        run: npx tsx --test test/integration/viz/contention.test.ts

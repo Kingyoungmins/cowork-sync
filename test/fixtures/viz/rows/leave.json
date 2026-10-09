@@ -1,0 +1,49 @@
+{
+ "row": "leave",
+ "plan": 7,
+ "about": "leave: person_exit, then pet_poof per seat in ascending seat key",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Bname"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "seat_start",
+     "seat": "S2"
+    },
+    {
+     "type": "seat_start",
+     "seat": "S1"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "leave"
+    }
+   ]
+  }
+ ]
+}
