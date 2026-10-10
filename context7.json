@@ -1,7 +1,7 @@
 {
   "$schema": "https://context7.com/schema/context7.json",
   "projectTitle": "cowork-sync",
-  "description": "Claude Code plugin (v0.1.0-preview, source-available, FSL-1.1-ALv2) that keeps the working tree of one git branch in sync between teammates' clones through the project's own git remote. No server.",
+  "description": "Claude Code plugin (v0.1.1-preview, source-available, FSL-1.1-ALv2) that keeps the working tree of one git branch in sync between teammates' clones through the project's own git remote. No server.",
   "excludeFolders": [
     "docs/superpowers",
     "docs/research",
