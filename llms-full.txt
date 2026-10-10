@@ -2,18 +2,18 @@
 
 > Saved edits reach every teammate's clone through git. cowork-sync is a Claude Code plugin that keeps the working tree of one git branch in sync between teammates' clones, in real time, using only the project's own git remote and no server.
 
-- Version: 0.1.0-preview, a GitHub pre-release published on 2026-10-09. It is a preview, not a finished product: use it on a test repository only, and back up anything you care about.
+- Version: 0.1.1-preview, a GitHub pre-release published on 2026-10-09. It is a preview, not a finished product: use it on a test repository only, and back up anything you care about.
 - Licence: FSL-1.1-ALv2 (Functional Source License 1.1, with the Apache License 2.0 as the future licence). The project is source-available.
 - Author: Youngmin Seo, a personal project. Not affiliated with or endorsed by Anthropic or any company or employer.
 - Repository: https://github.com/Kingyoungmins/cowork-sync
-- Release: https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.0-preview
+- Release: https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.1-preview
 - Website: https://kingyoungmins.github.io/cowork-sync/ (Korean: https://kingyoungmins.github.io/cowork-sync/ko/)
 
 ## What it is
 
 cowork-sync is for a small team that edits one repository at the same time, each person on their own PC, in their own clone, with their own Claude Code session. A background process in each clone, the daemon, picks up the files you save, publishes them to two custom refs on your existing private git remote, and writes teammates' saved edits into your working tree, never over an edit you just saved. There is no server: the git remote is the only transport, and your branch itself is not pushed to.
 
-Version 0.1.0-preview contains the sync engine and a minimal `/cowork-sync:cowork` command (start, status, stop, view, help). In this preview Claude does not know about the sync, there is no step that turns the shared work into a commit, and the remote is not checked for being private.
+Version 0.1.1-preview contains the sync engine and a minimal `/cowork-sync:cowork` command (start, status, stop, view, help). In this preview Claude does not know about the sync, there is no step that turns the shared work into a commit, and the remote is not checked for being private.
 
 ## The problem it addresses
 
@@ -74,7 +74,7 @@ When a command refuses, it prints the reason with a code, and a `next:` line wit
 Help output of the preview:
 
 ```text
-cowork-sync 0.1.0-preview: live sync of one git branch between clones, through the git remote.
+cowork-sync 0.1.1-preview: live sync of one git branch between clones, through the git remote.
   /cowork-sync:cowork start [--branch <b>] [--publish=all|none]  start sync in this clone; the daemon keeps running in the background
   /cowork-sync:cowork status                                     show the sync state of this clone
   /cowork-sync:cowork stop                                       stop the daemon; your files stay as they are
@@ -136,7 +136,7 @@ What leaves your PC:
 - **What stays on your PC:** `.git/cowork/status.json`, the daemon log (`.git/cowork/log/daemon-0.jsonl`), hold records, and the optional read-only viewer, which listens on 127.0.0.1 only.
 - The design rules out telemetry, crash reporting, update checks and analytics, and a source lint bans Node network modules everywhere except the viewer’s local server. This is a design rule plus a lint, not an independent audit.
 
-## What works in v0.1.0-preview
+## What works in v0.1.1-preview
 
 - Live sync of one branch’s working tree between several clones, through the git remote only.
 - One daemon per clone. The first PC creates the shared board and later PCs join it. After a crash or a stop, the next `start` resumes from the saved state and rebuilds lost local state.

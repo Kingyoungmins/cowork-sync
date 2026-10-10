@@ -1,6 +1,6 @@
 # cowork-sync
 
-> cowork-sync is a Claude Code plugin that keeps the working tree of one git branch in sync between teammates' clones, in real time, using only the project's own git remote and no server. Version 0.1.0-preview is a GitHub pre-release, source-available under FSL-1.1-ALv2. Use it on a test repository only.
+> cowork-sync is a Claude Code plugin that keeps the working tree of one git branch in sync between teammates' clones, in real time, using only the project's own git remote and no server. Version 0.1.1-preview is a GitHub pre-release, source-available under FSL-1.1-ALv2. Use it on a test repository only.
 
 - Install in a Claude Code session: `/plugin marketplace add Kingyoungmins/cowork-sync`, then `/plugin install cowork-sync@cowork-sync`, then `/reload-plugins`.
 - Type the command in full as `/cowork-sync:cowork <verb>`. Verbs in this preview: `start`, `status`, `stop`, `view`, `help`.
@@ -15,7 +15,7 @@
 - [Website (Korean)](https://kingyoungmins.github.io/cowork-sync/ko/): the same page in Korean
 - [Full description for agents](https://kingyoungmins.github.io/cowork-sync/llms-full.txt): self-contained markdown with everything a user or agent needs
 - [README](https://raw.githubusercontent.com/Kingyoungmins/cowork-sync/main/README.md): install, requirements, commands, how it works, safety notes
-- [Changelog](https://raw.githubusercontent.com/Kingyoungmins/cowork-sync/main/CHANGELOG.md): what is in v0.1.0-preview and its known limitations
+- [Changelog](https://raw.githubusercontent.com/Kingyoungmins/cowork-sync/main/CHANGELOG.md): what is in v0.1.1-preview and its known limitations
 
 ## Optional
 
@@ -24,4 +24,4 @@
 - [Security policy](https://raw.githubusercontent.com/Kingyoungmins/cowork-sync/main/SECURITY.md): how to report a vulnerability (private reporting only)
 - [Contributing](https://raw.githubusercontent.com/Kingyoungmins/cowork-sync/main/CONTRIBUTING.md): CLA and how to work on the code
 - [Repository](https://github.com/Kingyoungmins/cowork-sync): source on GitHub
-- [Release v0.1.0-preview](https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.0-preview): GitHub pre-release page
+- [Release v0.1.1-preview](https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.1-preview): GitHub pre-release page

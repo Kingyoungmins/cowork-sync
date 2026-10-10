@@ -21,19 +21,19 @@
 <meta property="og:site_name" content="cowork-sync">
 <meta property="og:url" content="https://kingyoungmins.github.io/cowork-sync/">
 <meta property="og:title" content="cowork-sync">
-<meta property="og:description" content="Saved edits reach every teammate&#x27;s clone through git. A Claude Code plugin, v0.1.0-preview, source-available.">
+<meta property="og:description" content="Saved edits reach every teammate&#x27;s clone through git. A Claude Code plugin, v0.1.1-preview, source-available.">
 <meta property="og:locale" content="en_US">
 <meta property="og:locale:alternate" content="ko_KR">
 <meta property="og:image" content="https://kingyoungmins.github.io/cowork-sync/og.png">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="cowork-sync: saved edits reach every teammate&#x27;s clone through git. Preview v0.1.0-preview. github.com/Kingyoungmins/cowork-sync">
+<meta property="og:image:alt" content="cowork-sync: saved edits reach every teammate&#x27;s clone through git. Preview v0.1.1-preview. github.com/Kingyoungmins/cowork-sync">
 <meta name="twitter:image" content="https://kingyoungmins.github.io/cowork-sync/og.png">
-<meta name="twitter:image:alt" content="cowork-sync: saved edits reach every teammate&#x27;s clone through git. Preview v0.1.0-preview. github.com/Kingyoungmins/cowork-sync">
+<meta name="twitter:image:alt" content="cowork-sync: saved edits reach every teammate&#x27;s clone through git. Preview v0.1.1-preview. github.com/Kingyoungmins/cowork-sync">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="cowork-sync">
-<meta name="twitter:description" content="Saved edits reach every teammate&#x27;s clone through git. A Claude Code plugin, v0.1.0-preview, source-available.">
+<meta name="twitter:description" content="Saved edits reach every teammate&#x27;s clone through git. A Claude Code plugin, v0.1.1-preview, source-available.">
 <script type="application/ld+json">
 {
  "@context": "https://schema.org",
@@ -48,12 +48,12 @@
  "inLanguage": "en",
  "applicationCategory": "DeveloperApplication",
  "operatingSystem": "Windows, macOS, Linux",
- "softwareVersion": "0.1.0-preview",
+ "softwareVersion": "0.1.1-preview",
  "datePublished": "2026-10-09",
  "softwareRequirements": "Claude Code 2.1.270 or newer; Node.js 20 or newer; git 2.43 or newer",
  "license": "https://github.com/Kingyoungmins/cowork-sync/blob/main/LICENSE.md",
  "codeRepository": "https://github.com/Kingyoungmins/cowork-sync",
- "downloadUrl": "https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.0-preview",
+ "downloadUrl": "https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.1-preview",
  "author": {
   "@type": "Person",
   "name": "Youngmin Seo",
@@ -353,7 +353,7 @@ th{font-weight:700;color:var(--muted);border-bottom-width:2px}
 <h1 id="top">cowork-sync</h1>
 <p class="pitch">Saved edits reach every teammate’s clone through git.</p>
 <p class="lede">cowork-sync is a Claude Code plugin that keeps the working tree of one git branch in sync between teammates’ clones, in real time, using only the project’s own git remote and no server.</p>
-<p class="status-line"><span class="badge">Preview</span><span>v0.1.0-preview is a GitHub pre-release. Use it on a test repository only.</span></p>
+<p class="status-line"><span class="badge">Preview</span><span>v0.1.1-preview is a GitHub pre-release. Use it on a test repository only.</span></p>
 <h2 class="vh">Install</h2>
 <div class="install">
 <div class="snippet">
@@ -368,7 +368,7 @@ claude plugin install cowork-sync@cowork-sync</pre>
 </div>
 </div>
 <p class="after">Every PC that takes part installs the plugin and has its own clone. Run <code>/reload-plugins</code> (or restart Claude Code) to load it, then type <code>/cowork-sync:cowork start</code> in your clone.</p>
-<p class="hero-links"><a href="https://github.com/Kingyoungmins/cowork-sync">Source on GitHub</a><a href="https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.0-preview">Release notes for v0.1.0-preview</a></p>
+<p class="hero-links"><a href="https://github.com/Kingyoungmins/cowork-sync">Source on GitHub</a><a href="https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.1-preview">Release notes for v0.1.1-preview</a></p>
 <p id="copy-status" class="vh" aria-live="polite"></p>
 </section>
 
@@ -416,7 +416,7 @@ claude plugin install cowork-sync@cowork-sync</pre>
 <h2 id="status-h">What works today, and the preview’s limits</h2>
 <div class="ledger wide">
 <div class="works">
-<h3>Works in v0.1.0-preview</h3>
+<h3>Works in v0.1.1-preview</h3>
 <ul><li>Live sync of one branch’s working tree between several clones, through the git remote only.</li><li>One daemon per clone. The first PC creates the shared board and later PCs join it. After a crash or a stop, the next <code>start</code> resumes from the saved state and rebuilds lost local state.</li><li>A freeze when the board’s history is rewritten, with a <code>recover</code> step to restore it.</li><li>No overwrite of an edit you just saved; groups of files are written all or none.</li><li>Same-line conflicts keep both versions: one on the board, the other as a hold record in the clone.</li><li>Settings, hooks and CI files never sync live; new files with secret-like names are not shared.</li><li>A freeze while a git command has moved <code>HEAD</code>, lifted when <code>HEAD</code> is back.</li><li>A status file and a JSON-lines daemon log in each clone.</li><li>The <code>/cowork-sync:cowork</code> command with <code>start</code>, <code>status</code>, <code>stop</code>, <code>view</code> and <code>help</code>.</li><li>The core of a read-only viewer that draws the team’s board in a browser, started from a terminal (English only; see the <code>view</code> limit).</li></ul>
 <h4>Tested so far</h4>
 <ul><li>On a real GitHub repository with two clones: edits to different files, to the same file ten lines apart, and to the same line all ended in the same state on both clones, on one fast-forward history.</li><li>Hosted CI runs every check on Windows, macOS and Linux, each with Node 20 and Node 24, against local bare remotes and a simulator.</li></ul>
@@ -449,8 +449,8 @@ claude plugin install cowork-sync@cowork-sync</pre>
 </div>
 </main>
 <footer class="wrap site-foot">
-<nav aria-label="Project links"><ul><li><a href="https://github.com/Kingyoungmins/cowork-sync">Repository</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.0-preview">Release v0.1.0-preview</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/LICENSE.md">Licence (FSL-1.1-ALv2)</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/CHANGELOG.md">Changelog</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/SECURITY.md">Security policy</a></li><li><a href="https://kingyoungmins.github.io/cowork-sync/llms.txt">llms.txt for agents</a></li></ul></nav>
-<p>cowork-sync v0.1.0-preview is a personal source-available project by Youngmin Seo.</p><p>Report security problems through the repository’s <a href="https://github.com/Kingyoungmins/cowork-sync/security">Security tab</a> (“Report a vulnerability”), not in a public issue.</p><p>Not affiliated with or endorsed by Anthropic.</p>
+<nav aria-label="Project links"><ul><li><a href="https://github.com/Kingyoungmins/cowork-sync">Repository</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.1-preview">Release v0.1.1-preview</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/LICENSE.md">Licence (FSL-1.1-ALv2)</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/CHANGELOG.md">Changelog</a></li><li><a href="https://github.com/Kingyoungmins/cowork-sync/blob/main/SECURITY.md">Security policy</a></li><li><a href="https://kingyoungmins.github.io/cowork-sync/llms.txt">llms.txt for agents</a></li></ul></nav>
+<p>cowork-sync v0.1.1-preview is a personal source-available project by Youngmin Seo.</p><p>Report security problems through the repository’s <a href="https://github.com/Kingyoungmins/cowork-sync/security">Security tab</a> (“Report a vulnerability”), not in a public issue.</p><p>Not affiliated with or endorsed by Anthropic.</p>
 </footer>
 <script>
 (function(){
