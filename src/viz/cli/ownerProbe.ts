@@ -35,9 +35,12 @@ const WHOAMI_LINE_RE = new RegExp(`^"[^"]*","(${SID})"\\r?\\n?$`);
 /**
  * The fixed PowerShell text. Constrained-Language safe: a cmdlet, a property read and Write-Output, no .NET method call. The directory is
  * read from the environment, so no path, quote or name ever reaches the PowerShell parser. The SDDL holds SIDs, never account names, so a
- * localized Windows reads the same.
+ * localized Windows reads the same. Each cmdlet is named with its module (Microsoft.PowerShell.Security\Get-Acl,
+ * Microsoft.PowerShell.Utility\Write-Output): PowerShell then imports that module at once instead of searching the modules on its
+ * PSModulePath for the command (the plain names took 6-10 s on a hosted Windows runner; on a cold cache here the qualified text takes
+ * 0.4-0.5 s against 1.0-1.7 s), and a command of the same name from another module can no longer answer.
  */
-export const WINDOWS_ACL_COMMAND = "$ErrorActionPreference = 'Stop'; $a = Get-Acl -LiteralPath $env:COWORK_ACL_PATH; Write-Output $a.Sddl";
+export const WINDOWS_ACL_COMMAND = "$ErrorActionPreference = 'Stop'; $a = Microsoft.PowerShell.Security\\Get-Acl -LiteralPath $env:COWORK_ACL_PATH; Microsoft.PowerShell.Utility\\Write-Output $a.Sddl";
 
 /** SystemRoot from this process's environment (any spelling), when it is an absolute drive path. */
 function systemRoot(): string | null {

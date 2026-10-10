@@ -1,6 +1,6 @@
 {
   "name": "cowork-sync",
-  "version": "0.1.0-preview",
+  "version": "0.1.1-preview",
   "private": true,
   "description": "Real-time code sync between Claude Code sessions on different PCs, over a shared git remote.",
   "license": "SEE LICENSE IN LICENSE.md",
@@ -10,8 +10,8 @@
   },
   "scripts": {
     "build": "node tools/build/build.mjs",
-    "build:plugin": "node tools/release/stage-plugin.mjs",
     "viz:golden": "tsx tools/viz/golden.ts",
+    "build:plugin": "node tools/release/stage-plugin.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "test": "node tools/test/run-tests.mjs test/unit test/integration",
     "test:unit": "node tools/test/run-tests.mjs test/unit",

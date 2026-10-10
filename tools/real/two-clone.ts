@@ -39,6 +39,7 @@ import { fpOk } from '../../src/engine/incident.js';
 import { DaemonLock, Engine, runLoop, type EngineInspection, type LoopHandle } from '../../src/engine/loop.js';
 import { testNamespace } from '../../src/engine/refs.js';
 import { StartRefused } from '../../src/engine/restart.js';
+import { QUIET_MS } from '../../src/engine/snapshot.js';
 import type { StatusJson } from '../../src/engine/status.js';
 import { buildDaemonEnv } from '../../src/git/env.js';
 import { fetchRefs, lsRemote, lsRemotePrefix } from '../../src/git/fetch.js';
@@ -584,6 +585,11 @@ export async function twoCloneRun(opts: TwoCloneOptions): Promise<TwoCloneReport
       };
       p.engine = await Engine.create(deps);
     }
+
+    // Let the fresh checkouts settle first: a file younger than QUIET_MS counts as local work in a start's preview, so a start within
+    // 300 ms of the clone (a fast Linux runner) refuses START_PREVIEW{m_out: 1} for the harness's own seeded files.
+    checkInterrupt();
+    await sleep(QUIET_MS + 200, signal);
 
     // A: genesis (with the host probe); then B: join.
     for (const [p, want] of [[peers[0]!, 'genesis'], [peers[1]!, 'join']] as const) {

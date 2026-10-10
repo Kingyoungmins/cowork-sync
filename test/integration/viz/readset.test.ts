@@ -24,6 +24,7 @@ import { openStream } from '../../helpers/vizHttp.js';
 import { pubs, writeStatus } from '../../helpers/vizStore.js';
 import { apiGet, gitRoomsFixture, logLines, startTestViewer, viewerTemp, worldOf, type RoomsFixture } from '../../helpers/vizViewer.js';
 import { hashRaw, mktree } from '../../helpers/vizBatchRead.js';
+import { FIXTURE_IDENTITY } from '../../helpers/repoFixture.js';
 
 /**
  * The viewer's read set (12 §3.3.2 as amended by R-V05, R-V09, R-V10, R-V31, R-V69), one row per allowed form:
@@ -95,7 +96,8 @@ before(async () => {
     const fx = { repo: c.repo } as Parameters<typeof hashRaw>[0];
     const blob = await hashRaw(fx, 'blob', Buffer.from(`${CANARY}\n`, 'utf8'));
     const tree = await mktree(fx, [['100644', 'hold.json', blob]]);
-    const commit = parseOid((await c.repo.run(['commit-tree', tree], { stdin: Buffer.from('holds\n') })).stdout.toString('utf8').trim());
+    // An explicit identity: a host without a global git user.name/user.email (the hosted CI images) cannot commit without one.
+    const commit = parseOid((await c.repo.run(['commit-tree', tree], { stdin: Buffer.from('holds\n'), identity: FIXTURE_IDENTITY })).stdout.toString('utf8').trim());
     await c.repo.run(['update-ref', 'refs/cowork-local/main/holds', commit]);
     localObjects.push(blob, tree, commit);
     planted.push(join(c.dir, 'secret.env'), join(c.dir, 'README.md'), join(c.dir, 'src'));

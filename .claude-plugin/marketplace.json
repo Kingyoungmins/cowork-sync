@@ -11,7 +11,7 @@
         "source": "git-subdir",
         "url": "https://github.com/Kingyoungmins/cowork-sync.git",
         "path": "plugin",
-        "ref": "v0.1.0-preview"
+        "ref": "v0.1.1-preview"
       },
       "description": "Live sync of one git branch's working tree between teammates' clones, through the project's own git remote. Preview: the sync engine with /cowork-sync:cowork start, status, stop and view.",
       "category": "development",

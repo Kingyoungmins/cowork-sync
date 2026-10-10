@@ -14133,7 +14133,7 @@ function realScheduler(clock) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.1.0-preview";
+var PLUGIN_VERSION = "0.1.1-preview";
 
 // src/daemon/run.ts
 var DAEMON_USAGE = [
@@ -14421,8 +14421,8 @@ function remoteRefusalNext(refuse4, params, args, platform = process.platform) {
   }
   const file = word(String(params["file"]), "config file", platform);
   const key = params["key_redacted"] === false ? shellQuote(String(params["key"]), platform) : null;
-  if (key !== null) return `remove the rewrite rule: git config --file ${file} --unset-all ${key}, then: ${self(args.cmd)}`;
-  return `remove the rewrite rule ${String(params["key"])} (its URL's userinfo is not shown) from the file: git config --file ${file} --edit, then: ${self(args.cmd)}`;
+  if (key !== null) return `remove the rewrite rule: git config --file ${file} --unset-all ${key} — then: ${self(args.cmd)}`;
+  return `remove the rewrite rule ${String(params["key"])} (its URL's userinfo is not shown) from the file: git config --file ${file} --edit — then: ${self(args.cmd)}`;
 }
 function startRefusalNext(code, params, args, url, platform = process.platform) {
   const self = selfCommand(args, platform);
@@ -14434,13 +14434,13 @@ function startRefusalNext(code, params, args, url, platform = process.platform) 
     case "START_HEAD_STATE":
       return `git switch ${branch} and finish or abort any operation in progress, then: ${self(args.cmd)}`;
     case "START_HEAD_BEHIND":
-      return `git pull --ff-only, then: ${self(args.cmd)}`;
+      return `git pull --ff-only — then: ${self(args.cmd)}`;
     case "START_HEAD_AHEAD":
       return `git push your commits to ${branch} first (base moves arrive in a later plan), then: ${self(args.cmd)}`;
     case "START_REMOTE":
       switch (params["reason"]) {
         case "local_ref_update":
-          return `the remote answered, but a ref under .git/refs/cowork-remote could not be updated (another git process, or a stale .lock file there): check git for-each-ref refs/cowork-remote/, then: ${self(args.cmd)}`;
+          return `the remote answered, but a ref under .git/refs/cowork-remote could not be updated (another git process, or a stale .lock file there): check git for-each-ref refs/cowork-remote/ — then: ${self(args.cmd)}`;
         case "board_malformed":
           return `the cowork board of ${branch} on ${remote} is not one this plugin can read; a teammate whose cowork runs on ${branch} can run: node dist/daemon.js recover --repo <their clone> --branch ${branch}; then: ${self(args.cmd)}`;
         case "genesis_push_failed":
@@ -14450,7 +14450,7 @@ function startRefusalNext(code, params, args, url, platform = process.platform) 
       }
     case "START_BRANCH_NOT_ON_REMOTE": {
       const name = typeof params["remote"] === "string" ? word(params["remote"], "remote", platform) : "<remote>";
-      return `git push -u ${name} ${branch}, then: ${self(args.cmd)}`;
+      return `git push -u ${name} ${branch} — then: ${self(args.cmd)}`;
     }
     case "GENESIS_BOARD_MISSING":
       return `the cowork board of ${branch} is gone while its code is still there: a teammate whose cowork has state for ${branch} runs: node dist/daemon.js recover --repo <their clone> --branch ${branch}; then: ${self(args.cmd)}`;
@@ -14465,7 +14465,7 @@ function startRefusalNext(code, params, args, url, platform = process.platform) 
       return `the host does not enforce git push --force-with-lease, so cowork cannot publish there safely; use a host that does, then: ${self(args.cmd)}`;
     case "START_BRANCH_NAME": {
       const why = params["reason"] === "case_fold" && typeof params["other"] === "string" ? `the branch ${word(params["other"], "other branch", platform)} of this clone has cowork refs under the same name but for case` : "its encoded name is longer than 150 bytes";
-      return `use a different branch name (${why}): git branch -m <new name>, then: node dist/daemon.js ${args.cmd} --repo ${word(args.repo, "repo path", platform)} --branch <new name>`;
+      return `use a different branch name (${why}): git branch -m <new name> — then: node dist/daemon.js ${args.cmd} --repo ${word(args.repo, "repo path", platform)} --branch <new name>`;
     }
     case "START_REPO_SHAPE":
       if (params["reason"] === "tmp_volume") {

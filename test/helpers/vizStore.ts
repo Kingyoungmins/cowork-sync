@@ -18,6 +18,7 @@ import { TimelineBuilder, type Carry, type Timeline } from '../../src/viz/model/
 import type { Tick } from '../../src/viz/server/models.js';
 import { RoomStore, type StoreDeps } from '../../src/viz/server/store.js';
 import { nullVizLog } from '../../src/viz/server/vizLog.js';
+import { PLUGIN_VERSION } from '../../src/version.js';
 import { realBoundedReader } from '../../src/viz/source/boundedRead.js';
 import { GitRoomSource } from '../../src/viz/source/git.js';
 import type { RoomSource, RoomSpec } from '../../src/viz/source/roomSource.js';
@@ -27,8 +28,12 @@ import type { RepoFixture } from './repoFixture.js';
 import { collect, sourceOf, vizRunner, type VizCall } from './vizSource.js';
 import { statusBytes } from './vizStatus.js';
 
-/** The viewer version every test store runs as (a status.json plugin_version other than this is version skew). */
-export const VIEWER_VERSION = '0.0.0';
+/**
+ * The viewer version every test store runs as (a status.json plugin_version other than this is version skew): the build's own
+ * PLUGIN_VERSION, as test/helpers/vizViewer.ts gives the in-process viewer and dist/viz.js has, so writeStatus's default status.json
+ * is skew-free for both (it was the literal '0.0.0', which only matched while PLUGIN_VERSION was 0.0.0).
+ */
+export const VIEWER_VERSION: string = PLUGIN_VERSION;
 const END = Number.MAX_SAFE_INTEGER;
 /** The last position of height h (12 §3.3.5: every event of h). */
 export const end = (h: number): Position => ({ height: h, sub: END, k: END });
@@ -115,12 +120,13 @@ export function gitRoom(fx: RepoFixture, ref: string, o: { clock: Clock; n?: num
 }
 
 let stamp = 1_700_000_000;
-/** <gitdir>/cowork/status.json: a Plan 2 status.json with `over` merged, its mtime moved forward on every write (coarse clocks). */
+/** <gitdir>/cowork/status.json: a Plan 2 status.json with `over` merged, its mtime moved forward on every write (coarse clocks);
+ *  its plugin_version is VIEWER_VERSION unless `over` names one (a skew test passes its own). */
 export function writeStatus(gitDir: string, over: Record<string, unknown> = {}): void {
   const dir = join(gitDir, 'cowork');
   mkdirSync(dir, { recursive: true });
   const p = join(dir, 'status.json');
-  writeFileSync(p, statusBytes(over));
+  writeFileSync(p, statusBytes({ plugin_version: VIEWER_VERSION, ...over }));
   stamp += 10;
   utimesSync(p, stamp, stamp);
 }

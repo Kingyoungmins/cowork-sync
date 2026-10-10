@@ -1,10 +1,10 @@
 // Starting the viewer process and its ready handshake (12-visualizer section 3.2 items 2-3, VIZ-02; R-V12, R-V13).
 // The CLI spawns `process.execPath --max-old-space-size=<150 + 16 per room beyond 8> <plugin root>/dist/viz.js serve …` without a
 // shell, detached and hidden, with cwd = the data directory, the builder environment and <data dir>/log/viz-stderr.txt as its stderr,
-// reads at most 512 bytes within 5 s, and accepts exactly one schema-valid line; anything else kills the child's whole process tree.
-// No bare executable name is ever spawned. One of the three viz files allowed child_process (R-V34); the one viz file whose POSIX
-// process-group kill `process.kill(-pgid, …)` (VIZ-02) L-PID-KILL allows, and it signals no bare pid; and, besides ownerProbe.ts and
-// boundedRead.ts, the viz file allowed node:fs, only to open that stderr file (Task 15 fix round 2 ruling).
+// reads at most 512 bytes within 5 s (15 s on Windows), and accepts exactly one schema-valid line; anything else kills the child's
+// whole process tree. No bare executable name is ever spawned. One of the three viz files allowed child_process (R-V34); the one viz
+// file whose POSIX process-group kill `process.kill(-pgid, …)` (VIZ-02) L-PID-KILL allows, and it signals no bare pid; and, besides
+// ownerProbe.ts and boundedRead.ts, the viz file allowed node:fs, only to open that stderr file (Task 15 fix round 2 ruling).
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { closeSync, constants, lstatSync, mkdirSync, openSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
@@ -18,6 +18,13 @@ export interface ViewerArgs {
 }
 export type ReadyLine = { port: number; launch: string } | { refuse: string; line?: number };
 export const READY_TIMEOUT_MS = 5_000, READY_MAX_BYTES = 512;
+/**
+ * The ready window on Windows (ruling 2026-10-10, hosted-CI round): the viewer repeats the SEC-20 owner and ACL check inside the window,
+ * and on Windows that check starts Windows PowerShell (ownerProbe.ts), whose cold start took 6-10 s on a hosted runner.
+ */
+export const READY_TIMEOUT_WIN32_MS = 15_000;
+/** How long the CLI waits for the ready line: READY_TIMEOUT_WIN32_MS on win32, READY_TIMEOUT_MS elsewhere. */
+export const readyTimeoutMs = (platform: NodeJS.Platform): number => (platform === 'win32' ? READY_TIMEOUT_WIN32_MS : READY_TIMEOUT_MS);
 export const READY_REFUSE_CODES: ReadonlySet<string> = new Set([
   'RF_VIZ_START_FAILED', 'RF_VIZ_BIND_FAILED', 'RF_VIZ_NO_ROOMS', 'RF_VIZ_REPO_NOT_LIVE', 'RF_VIZ_DEMO_INVALID', 'START_TOOL_VERSION',
 ]);
@@ -174,7 +181,8 @@ export interface SpawnDeps {
  * spawn(execPath, viewerArgv(a), { shell: false, detached: true, windowsHide: true, stdio: ['ignore', 'pipe', <stderr>], env: a.env, cwd: a.dataDir }),
  * <stderr> = the descriptor of <data dir>/log/viz-stderr.txt (openViewerStderr; the CLI closes its own copy right after the spawn), or
  * 'ignore' when that file cannot be opened;
- * ≤ 512 bytes within 5 s; then destroy the pipe and unref(); a timeout, a bad line or an early exit → killTree and { refuse: 'RF_VIZ_START_FAILED' }.
+ * ≤ 512 bytes within readyTimeoutMs(a.platform) (5 s; 15 s on win32); then destroy the pipe and unref(); a timeout, a bad line or an
+ * early exit → killTree and { refuse: 'RF_VIZ_START_FAILED' }.
  * The line is judged at its LF (bytes after it make it invalid), or once the pipe has ended and the child has exited. After a refusal the
  * tree is killed, also once the child has exited on POSIX: the child leads its own process group (detached), a group id is not reused
  * while any member lives, and a grandchild the child left behind keeps that group (killTree ignores ESRCH and never signals the bare
@@ -230,7 +238,7 @@ export function spawnViewerWith(a: ViewerArgs, d: SpawnDeps): Promise<ReadyLine>
       void (kill ? d.killTree(child, a.platform, a.systemRoot) : Promise.resolve()).then(() => resolve(START_FAILED));
     };
     const judge = (): void => finish(parseReadyLine(Buffer.concat(chunks)));
-    const timer = setTimeout(() => finish(null), READY_TIMEOUT_MS);
+    const timer = setTimeout(() => finish(null), readyTimeoutMs(a.platform));
     child.on('error', () => finish(null));
     child.on('exit', () => {
       exited = true;

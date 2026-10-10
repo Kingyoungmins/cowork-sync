@@ -6,6 +6,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 preview versions carry a `-preview` suffix.
 
+## [0.1.1-preview] - 2026-10-10
+
+Fixes for the test suite on GitHub's Linux, macOS and Windows runners, and three
+small product changes. Still a preview: use it on a test repository only.
+
+### Changed
+
+- `view` on Windows: the data-folder owner check calls its PowerShell cmdlets by
+  their full module names (so a same-named cmdlet elsewhere cannot stand in), and the CLI waits
+  up to 15 seconds for the viewer to report ready on Windows (5 seconds on Linux
+  and macOS).
+- Refusal hints no longer glue a comma to a git command you would copy: they say
+  `<command> — then: <next step>`.
+
+### Fixed
+
+- Test suite on hosted runners: viewer tests now use the plugin's own version;
+  fresh clones settle before a test starts sync; the POSIX owner-probe fake and a
+  test commit's git identity match real machines; on Node 20 the test launcher
+  gives each test file its own time budget and keeps test output on macOS.
+
+### Known limitations
+
+- Starting sync within a fraction of a second after a fresh checkout can be
+  refused as local work on a fast machine; start it again a moment later.
+
 ## [0.1.0-preview] - 2026-10-09
 
 The first preview. It contains the sync engine and the core of the read-only
@@ -59,4 +85,5 @@ viewer. Use it on a test repository only.
 - The real test against GitHub runs both clones' engines in one process. A run
   of the daemon on two separate machines against GitHub is still to do.
 
+[0.1.1-preview]: https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.1-preview
 [0.1.0-preview]: https://github.com/Kingyoungmins/cowork-sync/releases/tag/v0.1.0-preview

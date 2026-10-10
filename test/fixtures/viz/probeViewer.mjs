@@ -3,7 +3,7 @@
 // ViewerArgs.env; through runView the builder environment drops it, so the default applies):
 //   ready (default)    a valid ready line {"v":1,"port":41234,"launch":<64 hex>}, then exit
 //   refuse:<code>[:n]  a refusal ready line, then exit
-//   sleep              a grandchild, then nothing for 6 s, then a valid line
+//   sleep              a grandchild, then nothing for 6 s (16 s on Windows: past the CLI's ready window), then a valid line
 //   malformed          a grandchild, then a schema-invalid line, then stays alive
 //   oversized          a grandchild, then a 600-byte line, then stays alive
 //   garbage            a grandchild, then non-JSON bytes, then stays alive
@@ -66,7 +66,7 @@ if (mode === 'ready') {
   const [, code, line] = mode.split(':');
   process.stdout.write(line === undefined ? `{"v":1,"refuse":"${code}"}\n` : `{"v":1,"refuse":"${code}","line":${line}}\n`);
 } else if (mode === 'sleep') {
-  setTimeout(() => { process.stdout.write(VALID); stay(); }, 6_000);
+  setTimeout(() => { process.stdout.write(VALID); stay(); }, process.platform === 'win32' ? 16_000 : 6_000);
 } else if (mode === 'malformed' || mode === 'group-children' || mode === 'stubborn') {
   process.stdout.write(MALFORMED);
   stay();

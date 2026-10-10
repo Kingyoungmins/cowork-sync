@@ -14,7 +14,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import type { Fs } from '../../../src/ports/fs.js';
 import { realOwnerProbe } from '../../../src/viz/cli/ownerProbe.js';
 import {
-  killTree, killTreeWith, parseReadyLine, READY_MAX_BYTES, READY_REFUSE_CODES, READY_TIMEOUT_MS, spawnViewer, spawnViewerWith, viewerArgv,
+  killTree, killTreeWith, parseReadyLine, READY_MAX_BYTES, READY_REFUSE_CODES, READY_TIMEOUT_MS, READY_TIMEOUT_WIN32_MS, readyTimeoutMs, spawnViewer,
+  spawnViewerWith, viewerArgv,
   viewerOldSpaceMb, VIEWER_MAX_OLD_SPACE_MB, VIEWER_OLD_SPACE_BASE_ROOMS, VIEWER_OLD_SPACE_ROOM_MB, VIEWER_ROOMS_MAX,
   openViewerStderr, VIEWER_STDERR_FILE, VIEWER_STDERR_MAX_BYTES, type KillDeps, type KillTarget, type SpawnDeps, type ViewerArgs,
 } from '../../../src/viz/cli/spawn.js';
@@ -99,6 +100,53 @@ test('parseReadyLine: one LF-terminated JSON object by schema; "line" only with 
   assert.deepEqual(viewerArgv({ ...base, demo: true, git: '/usr/bin/git' }).slice(9), ['--demo']);
 });
 
+/** A child for a spy spawn that stays silent until `say` writes to its stdout (pid 4242; never exits on its own). */
+function silentViewer(): { child: ChildProcess; say(line: string): void } {
+  const stdout = new PassThrough();
+  const child = Object.assign(new EventEmitter(), {
+    pid: 4242, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null, stdout, unref: () => {}, kill: () => true,
+  });
+  return { child: child as unknown as ChildProcess, say: (line) => { if (!stdout.destroyed) stdout.write(line); } };
+}
+
+test('the ready window is 5 s, and 15 s on Windows, where the viewer runs its own SEC-20 check (a PowerShell start) inside it: a child that answers after 6 s is accepted on win32 and refused elsewhere; a silent one is refused when its window ends (spy spawn, mocked timers, both legs on every host)', async (t) => {
+  assert.equal(READY_TIMEOUT_MS, 5_000);
+  assert.equal(READY_TIMEOUT_WIN32_MS, 15_000);
+  for (const p of ['linux', 'darwin', 'freebsd'] as const) assert.equal(readyTimeoutMs(p), READY_TIMEOUT_MS, p);
+  assert.equal(readyTimeoutMs('win32'), READY_TIMEOUT_WIN32_MS);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const turn = (): Promise<void> => new Promise((r) => setImmediate(r));   // setImmediate is not mocked
+  const valid = `{"v":1,"port":${PROBE_PORT},"launch":"${PROBE_LAUNCH}"}\n`;
+  for (const platform of ['linux', 'darwin', 'win32'] as const) {
+    const systemRoot = platform === 'win32' ? 'C:\\Windows' : null;
+    const kills: NodeJS.Platform[] = [];
+    const deps = (v: ReturnType<typeof silentViewer>): SpawnDeps => ({ spawn: () => v.child, killTree: async (_c, p) => { kills.push(p); } });
+    // Answers 6 s after the spawn.
+    const late = silentViewer();
+    const answered = spawnViewerWith(args('/data', {}, { platform, systemRoot }), deps(late));
+    t.mock.timers.tick(6_000);
+    late.say(valid);
+    if (platform === 'win32') {
+      assert.deepEqual(await answered, { port: PROBE_PORT, launch: PROBE_LAUNCH }, platform);
+      assert.deepEqual(kills, [], platform);
+    } else {
+      assert.deepEqual(await answered, { refuse: 'RF_VIZ_START_FAILED' }, platform);
+      assert.deepEqual(kills, [platform], platform);
+    }
+    // Silent: still waiting 1 ms before its window ends, refused (and killed) when it does.
+    kills.length = 0;
+    const silent = silentViewer();
+    let settled = false;
+    const refused = spawnViewerWith(args('/data', {}, { platform, systemRoot }), deps(silent)).then((r) => { settled = true; return r; });
+    t.mock.timers.tick(readyTimeoutMs(platform) - 1);
+    await turn();
+    assert.equal(settled, false, `${platform}: still inside the window`);
+    t.mock.timers.tick(1);
+    assert.deepEqual(await refused, { refuse: 'RF_VIZ_START_FAILED' }, platform);
+    assert.deepEqual(kills, [platform], platform);
+  }
+});
+
 test('VIEWER_MAX_OLD_SPACE_MB\'s rule (Task 15 fix round 2 ruling): the viewer\'s V8 old space is 150 MB up to 8 rooms and 16 MB more per room beyond 8 (32 rooms → 534 MB), by the room count the CLI knows at spawn: the --repo count (each admits at most one room, at most 32 rooms), 32 for a --demo=<file>, the base for the bundled demo', () => {
   assert.equal(VIEWER_MAX_OLD_SPACE_MB, 150);
   assert.equal(VIEWER_OLD_SPACE_ROOM_MB, 16);
@@ -139,7 +187,7 @@ test('spawnViewer refuses repos without a git before spawning anything', async (
   }
 });
 
-test('T-VIZ-handshake: a child that sleeps 6 s or prints a malformed or oversized line → RF_VIZ_START_FAILED and its whole process tree is gone', async () => {
+test('T-VIZ-handshake: a child that sleeps past the ready window (6 s; 16 s on Windows) or prints a malformed or oversized line → RF_VIZ_START_FAILED and its whole process tree is gone', async () => {
   const t = await makeTempRoot('viz-handshake');
   try {
     const run = async (mode: string): Promise<void> => {
@@ -148,7 +196,7 @@ test('T-VIZ-handshake: a child that sleeps 6 s or prints a malformed or oversize
       const started = Date.now();
       const r = await spawnViewer(args(dataDir, { COWORK_PROBE_MODE: mode }));
       assert.deepEqual(r, { refuse: 'RF_VIZ_START_FAILED' }, mode);
-      if (mode === 'sleep') assert.ok(Date.now() - started >= READY_TIMEOUT_MS - 100, 'waited for the 5 s handshake');
+      if (mode === 'sleep') assert.ok(Date.now() - started >= readyTimeoutMs(process.platform) - 100, 'waited for the whole ready window');
       const { pid, grandchild } = report(dataDir);
       assert.ok(grandchild !== null, `${mode}: the probe started a grandchild`);
       assert.ok(await gone(pid), `${mode}: the child ${pid} is gone`);

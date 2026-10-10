@@ -1150,7 +1150,7 @@ function render(code, params, channel, lang) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.1.0-preview";
+var PLUGIN_VERSION = "0.1.1-preview";
 
 // src/viz/cli/view.ts
 import { createHash } from "node:crypto";
@@ -1681,7 +1681,7 @@ var RUN_TIMEOUT_MS = 1e4;
 var RUN_MAX_BYTES = 64 * 1024;
 var SID = "S-1-[0-9]+(?:-[0-9]+)+";
 var WHOAMI_LINE_RE = new RegExp(`^"[^"]*","(${SID})"\\r?\\n?$`);
-var WINDOWS_ACL_COMMAND = "$ErrorActionPreference = 'Stop'; $a = Get-Acl -LiteralPath $env:COWORK_ACL_PATH; Write-Output $a.Sddl";
+var WINDOWS_ACL_COMMAND = "$ErrorActionPreference = 'Stop'; $a = Microsoft.PowerShell.Security\\Get-Acl -LiteralPath $env:COWORK_ACL_PATH; Microsoft.PowerShell.Utility\\Write-Output $a.Sddl";
 function systemRoot() {
   const key = Object.keys(process.env).find((k) => k.toUpperCase() === "SYSTEMROOT");
   const v = key === void 0 ? void 0 : process.env[key];
@@ -1781,6 +1781,8 @@ import { closeSync, constants, lstatSync as lstatSync2, mkdirSync, openSync } fr
 import { posix as posix5, win32 as win327 } from "node:path";
 var READY_TIMEOUT_MS = 5e3;
 var READY_MAX_BYTES = 512;
+var READY_TIMEOUT_WIN32_MS = 15e3;
+var readyTimeoutMs = (platform) => platform === "win32" ? READY_TIMEOUT_WIN32_MS : READY_TIMEOUT_MS;
 var READY_REFUSE_CODES = /* @__PURE__ */ new Set([
   "RF_VIZ_START_FAILED",
   "RF_VIZ_BIND_FAILED",
@@ -1928,7 +1930,7 @@ function spawnViewerWith(a, d) {
       void (kill ? d.killTree(child, a.platform, a.systemRoot) : Promise.resolve()).then(() => resolve2(START_FAILED));
     };
     const judge = () => finish(parseReadyLine(Buffer.concat(chunks)));
-    const timer = setTimeout(() => finish(null), READY_TIMEOUT_MS);
+    const timer = setTimeout(() => finish(null), readyTimeoutMs(a.platform));
     child.on("error", () => finish(null));
     child.on("exit", () => {
       exited = true;
@@ -2015,7 +2017,7 @@ var EN_VIZ_CLI = {
   UI_VIZ_OPEN_FAILED: { text: "Could not open a browser from here. To open the read-only viewer, run in a terminal: {cmd}", params: { cmd: "cmd" } },
   UI_VIZ_TERMINAL_ONLY: { text: "The read-only viewer opens only from a terminal. Run there: {cmd}", params: { cmd: "cmd" } },
   RF_VIZ_START_FAILED: {
-    text: "cowork-sync: the viewer did not start (no ready report within 5 seconds, or its data folder failed the owner check) [RF_VIZ_START_FAILED]\nnext: /cowork doctor"
+    text: "cowork-sync: the viewer did not start (no ready report within 5 seconds, 15 on Windows, or its data folder failed the owner check) [RF_VIZ_START_FAILED]\nnext: /cowork doctor"
   },
   RF_VIZ_BIND_FAILED: { text: "cowork-sync: the viewer could not listen on 127.0.0.1 [RF_VIZ_BIND_FAILED]\nnext: /cowork doctor" },
   RF_VIZ_NO_ROOMS: {

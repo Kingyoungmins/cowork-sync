@@ -8,6 +8,7 @@ import { commandPrefix, relayDaemonLine, runCowork, type CoworkEnv } from '../..
 import type { GitResult, GitRunner } from '../../../src/git/runner.js';
 import type { Fs } from '../../../src/ports/fs.js';
 import { realClock } from '../../../src/ports/clock.js';
+import { PLUGIN_VERSION } from '../../../src/version.js';
 
 const ROOT = '/plug';
 /** The clone's top folder as findClone resolves it on this OS. */
@@ -84,7 +85,7 @@ test('help: bare cli.js prints it on stderr and nothing on stdout (nothing at al
   assert.match(bareSlash.err.join('\n'), /\/cowork-sync:cowork start/);
   const help = fake({ slash: true });
   assert.equal(await runCowork(['help'], help.env), 0);
-  assert.match(help.out.join('\n'), /cowork-sync 0\.1\.0-preview: .*\n {2}\/cowork-sync:cowork start/);
+  assert.match(help.out.join('\n'), new RegExp(`cowork-sync ${PLUGIN_VERSION.replace(/\./g, '\\.')}: .*\\n {2}/cowork-sync:cowork start`));
 });
 
 test('usage errors: exit 2 on stderr in a terminal; exit 0 on stdout in a slash command', async () => {

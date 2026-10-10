@@ -85,6 +85,49 @@ test('npm run ci ends with sim:smoke and a 5-seed real-engine run (sim:seeds --p
   assert.equal(s['sim:exit'], 'tsx tools/sim/run-seeds.ts --profile edits --seeds 1000 --parallel 8');
 });
 
+/** tools/test/testFlags.mjs (plain JS for the launcher; imported by a computed specifier, so tsc reads it as `any` and this type says what it is). */
+interface TestFlags {
+  testTimeout(version: string, env: Record<string, string | undefined>): { ms: number | null; scope: 'test' | 'file' };
+  hasForceExit(version: string): boolean;
+  needsBlockingStdio(version: string, platform: NodeJS.Platform): boolean;
+}
+async function testFlags(): Promise<TestFlags> {
+  const href = new URL('tools/test/testFlags.mjs', REPO).href;
+  return (await import(href)) as TestFlags;
+}
+
+test('run-tests --test-timeout: on Node 24+ a 10 min limit per test; on Node 20-23, where the runner also cancels a whole test file at that time (its later tests then go unreported), a 60 min budget per file; COWORK_TEST_TIMEOUT_MS overrides either; none before 20.11', async () => {
+  const f = await testFlags();
+  for (const v of ['24.0.0', '24.21.0', '25.1.0']) assert.deepEqual(f.testTimeout(v, {}), { ms: 600_000, scope: 'test' }, v);
+  for (const v of ['20.11.0', '20.20.2', '21.2.0', '22.22.0', '23.11.1']) assert.deepEqual(f.testTimeout(v, {}), { ms: 3_600_000, scope: 'file' }, v);
+  assert.deepEqual(f.testTimeout('20.20.2', { COWORK_TEST_TIMEOUT_MS: '900000' }), { ms: 900_000, scope: 'file' });
+  assert.deepEqual(f.testTimeout('24.21.0', { COWORK_TEST_TIMEOUT_MS: '120000' }), { ms: 120_000, scope: 'test' });
+  for (const bad of ['0', '-1', 'x', '1.5']) assert.equal(f.testTimeout('24.21.0', { COWORK_TEST_TIMEOUT_MS: bad }).ms, null, bad);
+  for (const v of ['20.6.0', '20.10.0', '21.1.0']) assert.equal(f.testTimeout(v, {}).ms, null, `${v} has no --test-timeout`);
+  // --test-force-exit from 20.14 and 22.
+  assert.deepEqual(['20.13.1', '20.14.0', '21.7.3', '22.0.0', '24.21.0'].map((v) => f.hasForceExit(v)), [false, true, false, true, true]);
+  // The launcher builds its flags from these.
+  const runTests = read('tools/test/run-tests.mjs');
+  assert.match(runTests, /import \{ hasForceExit, testTimeout \} from '\.\/testFlags\.mjs';/);
+  assert.match(runTests, /testTimeout\(process\.versions\.node, process\.env\)/);
+});
+
+test('open-handles.mjs makes a test file\'s stdout and stderr blocking on POSIX before Node 22.10 (where --test-force-exit could end the file before its last results reached the runner), and reports output still unwritten at exit', () => {
+  return testFlags().then((f) => {
+    const cases: Array<[string, NodeJS.Platform, boolean]> = [
+      ['20.20.2', 'darwin', true], ['20.20.2', 'linux', true], ['22.9.0', 'darwin', true], ['21.7.3', 'linux', true],
+      ['22.10.0', 'darwin', false], ['22.22.0', 'linux', false], ['24.21.0', 'darwin', false], ['20.20.2', 'win32', false], ['24.21.0', 'win32', false],
+    ];
+    for (const [v, os, want] of cases) assert.equal(f.needsBlockingStdio(v, os), want, `${v} ${os}`);
+    const hook = read('tools/test/open-handles.mjs');
+    assert.match(hook, /import \{ needsBlockingStdio \} from '\.\/testFlags\.mjs';/);
+    assert.match(hook, /if \(needsBlockingStdio\(process\.versions\.node, process\.platform\)\) \{\n\s+for \(const s of \[process\.stdout, process\.stderr\]\) s\._handle\?\.setBlocking\?\.\(true\);/);
+    assert.match(hook, /writableLength/, 'output still queued at exit is reported');
+    const runTests = read('tools/test/run-tests.mjs');
+    assert.match(runTests, /exited with \$\{rep\.unflushed\} bytes of test output not yet written/);
+  });
+});
+
 /** Every `{ timeout: … }` a test file sets, in minutes (`<n>` ms or `<n> * 60_000`). */
 function testTimeoutsMin(): Array<{ file: string; min: number }> {
   const out: Array<{ file: string; min: number }> = [];
@@ -104,7 +147,7 @@ function testTimeoutsMin(): Array<{ file: string; min: number }> {
   return out;
 }
 
-test('each ci.yml leg runs 80 edits and 20 faults seeds with a per-Node seed offset in one sim:seeds step of its own job, under timeouts measured on the reference PC, and the job running npm test outlasts every per-test timeout; sim-exit.yml runs 1,000 edits seeds per OS in 10 shards', () => {
+test('each ci.yml leg runs 80 edits and 20 faults seeds with a per-Node seed offset in one sim:seeds step of its own job, under timeouts measured on the reference PC, and the job running npm test outlasts every per-test timeout; sim-exit.yml runs 1,000 edits seeds per OS in 10 shards', async () => {
   // R-33: Node 20 legs take seeds 0–99 (edits 0–79, faults 80–99), Node 24 legs 100–199; 4 child processes. The
   // timeouts (R-33 amendment, Task 19 fix round 1) come from the per-push ranges and npm test measured on the reference
   // PC (the Task 19 report records them) with a 1.5x margin; the job is split in two, so the gates run on two runners
@@ -137,10 +180,15 @@ test('each ci.yml leg runs 80 edits and 20 faults seeds with a per-Node seed off
   assert.ok(step !== undefined, 'the sim:seeds step has its own timeout');
   // The runner's deadline ends it first (its report and lost seeds' rerun commands survive), then the step's, then the job's.
   assert.ok(seedMin < runMin && runMin < step && step < sJob, `seed ${seedMin} < run ${runMin} < step ${step} < job ${sJob}`);
-  // Every per-test timeout is shorter than the test job's: run-tests' default (10 min) and every `{ timeout }` a test sets.
-  const runTests = read('tools/test/run-tests.mjs');
-  assert.match(runTests, /COWORK_TEST_TIMEOUT_MS \?\? 600_000/);
-  for (const t of [{ file: 'run-tests default', min: 10 }, ...testTimeoutsMin()]) assert.ok(t.min < tJob, `${t.file}: a ${t.min} min test timeout under a ${tJob} min job`);
+  // Every timeout npm test sets is shorter than the test job's: run-tests' defaults (10 min per test on Node 24+, a 60 min budget per
+  // file on Node 20-23) and every `{ timeout }` a test sets.
+  const flags = await testFlags();
+  const defaults = [
+    { file: 'run-tests per-test default (Node 24+)', min: (flags.testTimeout('24.0.0', {}).ms ?? 0) / 60_000 },
+    { file: 'run-tests per-file budget (Node 20-23)', min: (flags.testTimeout('20.20.2', {}).ms ?? 0) / 60_000 },
+  ];
+  assert.deepEqual(defaults.map((d) => d.min), [10, 60]);
+  for (const t of [...defaults, ...testTimeoutsMin()]) assert.ok(t.min < tJob, `${t.file}: a ${t.min} min test timeout under a ${tJob} min job`);
   assert.match(simJob, /^ {6}- name: SIM report\n {8}if: \$\{\{ !cancelled\(\) \}\}\n {8}uses: actions\/upload-artifact@v4$/m);
   assert.match(y, /path: \|\n {12}sim-seeds\.json\n {12}sim-kept\/$/m);
   assert.doesNotMatch(y, /--seeds 1000|COWORK_SIM_LONG/, 'the exit run and the long tests are never per-push');

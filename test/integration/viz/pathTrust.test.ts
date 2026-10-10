@@ -11,7 +11,7 @@ import { excludedRoots, filterPath, resolveGitPath, trustedExe, withTrustCache }
 import { runView } from '../../../src/viz/cli/view.js';
 import { makeTempRoot } from '../../helpers/tmp.js';
 import {
-  assertAllRendered, assertNoneStartedFrom, fakePluginRoot, findSystemGit, hostFs, programsStartedBy, recordingEnv,
+  assertAllRendered, assertNoneStartedFrom, fakePluginRoot, FAKE_EUID, findSystemGit, hostFs, passingProbe, programsStartedBy, recordingEnv,
 } from '../../helpers/vizCli.js';
 
 const WIN = process.platform === 'win32';
@@ -298,6 +298,26 @@ function identityFs(paths: readonly string[]): Fs {
     lstat: async (p: string) => (paths.includes(p) ? file : null),
   };
 }
+
+test('the view helpers answer for files as the OS does: passingProbe reports a file\'s own lstat (so POSIX trustedExe judges the real git: root-owned on Linux, the runner user\'s Homebrew git on macOS) and keeps its owner-only answer for directories; recordingEnv\'s default uid is this process\'s euid', async () => {
+  const t = await makeTempRoot('viz-helper-probe');
+  try {
+    const file = join(t.root, 'tool');
+    writeFileSync(file, '#!/bin/sh\n');
+    const dir = join(t.root, 'data');
+    mkdirSync(dir);
+    const real = await realOwnerProbe.posix(file);
+    assert.ok(real !== null && !real.isDir, 'the OS lstats the file as a file');
+    assert.deepEqual(await passingProbe.posix(file), real);
+    assert.deepEqual(await passingProbe.posix(dir), { uid: FAKE_EUID, mode: 0o40700, isDir: true, isSymlink: false });
+    assert.deepEqual(await passingProbe.posix(join(t.root, 'missing')), { uid: FAKE_EUID, mode: 0o40700, isDir: true, isSymlink: false });
+    assert.equal(passingProbe.euid(), FAKE_EUID, 'the data directory check still compares the fake owner with the fake euid');
+    const rec = recordingEnv({ pluginRoot: t.root, cwd: t.root, home: t.root, env: {} });
+    assert.equal(rec.env.uid, typeof process.geteuid === 'function' ? process.geteuid() : null);
+  } finally {
+    await t.cleanup();
+  }
+});
 
 test('filterPath and trustedExe compare realpaths case-insensitively on win32 and darwin, and exactly on Linux', async () => {
   const win = identityFs(['C:\\Repo\\BIN', 'C:\\other', 'C:\\Repo2\\bin', 'C:\\Repo\\BIN\\git.exe', 'C:\\other\\git.exe']);

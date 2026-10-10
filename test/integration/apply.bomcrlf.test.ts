@@ -19,8 +19,8 @@ function edited(base: Buffer, row: number, round: number): Buffer {
   return Buffer.concat([base.subarray(0, 3), Buffer.from(rows.join('\r\n'), 'utf8')]);
 }
 
-// Its own timeout (tools/test/run-tests.mjs sets 10 min per test): ~8 min in a full parallel CI run, 15 min on a loaded
-// machine, and past 30 min on a developer machine shared with several other full test runs.
+// Its own timeout (tools/test/run-tests.mjs sets 10 min per test on Node 24+, and 60 min per file before 24): ~8 min in a full
+// parallel CI run, 15 min on a loaded machine, and past 30 min on a developer machine shared with several other full test runs.
 test('200 one-line teammate changes to the 1.3 MB BOM+CRLF fixture on an autocrlf=true peer give 0 mismatch deferrals and 0 phantoms', { timeout: 60 * 60_000 }, async () => {
   const big = generateBigBomCrlf(26_436, seededRandom('t13-bomcrlf'));
   assert.ok(big.length > 1_200_000, 'about 1.3 MB');

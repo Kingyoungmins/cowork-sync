@@ -55,8 +55,8 @@ const CONVERGE_FILES: Record<string, Buffer> = {
   'p3.txt': buf('p3 a\np3 b\n'),
 };
 
-// Its own timeout (tools/test/run-tests.mjs sets 10 min per test): ~160 s alone, the 20 + 40 quiescence rounds of three
-// peers are in its title, and a loaded CI machine runs it several times slower.
+// Its own timeout (tools/test/run-tests.mjs sets 10 min per test on Node 24+, and 60 min per file before 24): ~160 s alone, the
+// 20 + 40 quiescence rounds of three peers are in its title, and a loaded CI machine runs it several times slower.
 test('three peers (one autocrlf=true) editing different files, disjoint bands of one file and one shared line converge within 20 rounds of the last landing, then make zero pushes for 40 rounds', { timeout: 20 * 60_000 }, async () => {
   await withEngines('loop-converge', { n: 3, files: CONVERGE_FILES, autocrlf: [false, true, false] }, async (fx) => {
     await fx.startAll();

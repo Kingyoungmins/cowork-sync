@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { render, type RenderChannel } from '../../../src/i18n/render.js';
 import type { Fs } from '../../../src/ports/fs.js';
 import { PLUGIN_VERSION } from '../../../src/version.js';
+import { verifyDataDir } from '../../../src/viz/cli/dataDir.js';
 import { realOwnerProbe, type OwnerProbe } from '../../../src/viz/cli/ownerProbe.js';
 import { READY_REFUSE_CODES, type ReadyLine } from '../../../src/viz/cli/spawn.js';
 import { runView, URL_RE, type CliEnv } from '../../../src/viz/cli/view.js';
@@ -336,6 +337,8 @@ test('T-VIZ-handshake: a data directory that fails SEC-20 → RF_VIZ_START_FAILE
       mkdirSync(wide);
       icacls([wide, '/grant', '*S-1-1-0:(R)']);
       await refused(wide, realOwnerProbe);
+      // Refused for its ACL, not because the probe gave up (a probe timeout fails closed too, and would pass the lines above).
+      assert.deepEqual(await verifyDataDir(wide, { fs: hostFs, probe: realOwnerProbe, platform: 'win32', create: false }), { ok: false, why: 'acl' });
       const target = join(f.root, 'junction target');
       mkdirSync(target);
       const junction = join(f.root, 'junction data');

@@ -11,7 +11,7 @@ export const EN_VIZ_CLI: Catalog = {
   UI_VIZ_OPEN_FAILED: { text: 'Could not open a browser from here. To open the read-only viewer, run in a terminal: {cmd}', params: { cmd: 'cmd' } },
   UI_VIZ_TERMINAL_ONLY: { text: 'The read-only viewer opens only from a terminal. Run there: {cmd}', params: { cmd: 'cmd' } },
   RF_VIZ_START_FAILED: {
-    text: 'cowork-sync: the viewer did not start (no ready report within 5 seconds, or its data folder failed the owner check) '
+    text: 'cowork-sync: the viewer did not start (no ready report within 5 seconds, 15 on Windows, or its data folder failed the owner check) '
       + '[RF_VIZ_START_FAILED]\nnext: /cowork doctor',
   },
   RF_VIZ_BIND_FAILED: { text: 'cowork-sync: the viewer could not listen on 127.0.0.1 [RF_VIZ_BIND_FAILED]\nnext: /cowork doctor' },

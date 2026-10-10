@@ -10,7 +10,7 @@ import { registerCatalog, render, type Lang, type Params, type RenderChannel } f
 import { realClock } from '../../src/ports/clock.js';
 import { realFs, type Fs } from '../../src/ports/fs.js';
 import type { OpenerCtx } from '../../src/viz/cli/opener.js';
-import type { OwnerProbe } from '../../src/viz/cli/ownerProbe.js';
+import { realOwnerProbe, type OwnerProbe } from '../../src/viz/cli/ownerProbe.js';
 import type { ReadyLine, ViewerArgs } from '../../src/viz/cli/spawn.js';
 import { EN_VIZ_CLI } from '../../src/viz/cli/strings.js';
 import type { CliEnv } from '../../src/viz/cli/view.js';
@@ -104,9 +104,16 @@ export const USER_SID = 'S-1-5-21-1111111111-2222222222-3333333333-1001';
 export const USER_ONLY_SDDL = `O:${USER_SID}G:${USER_SID}D:(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;OICIID;FA;;;${USER_SID})`;
 export const FAKE_EUID = 1000;
 
-/** Passes SEC-20 for every directory: owned by the euid with mode 0700 (POSIX), a user-only SDDL (Windows). */
+/**
+ * Passes SEC-20 for every directory: owned by the (fake) euid with mode 0700 (POSIX), a user-only SDDL (Windows). Anything that lstats as
+ * no directory (a git the CLI checks with trustedExe) gets its real lstat answer, so POSIX judges the git that is there: root-owned on
+ * Linux, the runner user's own Homebrew git on macOS (judged against CliEnv.uid, which recordingEnv takes from this process).
+ */
 export const passingProbe: OwnerProbe = {
-  posix: async () => ({ uid: FAKE_EUID, mode: 0o40700, isDir: true, isSymlink: false }),
+  posix: async (p: string) => {
+    const real = await realOwnerProbe.posix(p);
+    return real !== null && !real.isDir ? real : { uid: FAKE_EUID, mode: 0o40700, isDir: true, isSymlink: false };
+  },
   euid: () => FAKE_EUID,
   windows: async () => ({ sddl: USER_ONLY_SDDL, userSid: USER_SID }),
 };
@@ -137,7 +144,7 @@ export function recordingEnv(o: Partial<CliEnv> & Pick<CliEnv, 'pluginRoot' | 'c
     isTTY: true,
     locale: 'en-US',
     execPath: process.execPath,
-    uid: FAKE_EUID,
+    uid: typeof process.geteuid === 'function' ? process.geteuid() : null,   // what realCliEnv reads
     fs: hostFs,
     clock: realClock,
     ownerProbe: passingProbe,

@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { hasForceExit, testTimeout } from './testFlags.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -40,20 +41,21 @@ if (files.length === 0) {
   process.stdout.write(`run-tests: no *.test.ts files under ${dirs.join(', ')}\n`);
   process.exit(0);
 }
-// A per-test timeout, so a hung test fails (and names itself) instead of stalling CI: 10 min by default,
-// COWORK_TEST_TIMEOUT_MS to override; a test that needs more sets its own `{ timeout }` (the 200-apply BOM+CRLF test and
-// the three-peer convergence test do). And --test-force-exit, so a timed-out test's leftover handles (a timer, a child
-// process) cannot keep its file running — with a one-line warning per file whose handles were still open when it ended
-// (tools/test/open-handles.mjs records them), so a leak stays visible. The warning never changes the exit code.
+// --test-timeout, so a hung test fails (and names itself) instead of stalling CI (testFlags.mjs testTimeout): on Node 24+ a limit per
+// test, 10 min by default; on Node 20-23, where the runner also cancels a test file's whole run at that time, a budget per file, 60 min
+// by default. COWORK_TEST_TIMEOUT_MS overrides either (NODE_OPTIONS does not take the flag, so it stays on this command line); a test
+// that needs more than 10 min sets its own `{ timeout }` (the 200-apply BOM+CRLF test and the three-peer convergence test do). And
+// --test-force-exit, so a timed-out test's leftover handles (a timer, a child process) cannot keep its file running — with a one-line
+// warning per file whose handles were still open when it ended (tools/test/open-handles.mjs records them), so a leak stays visible, and
+// one per file that exited with test output not yet written (its last results may be missing). On POSIX before Node 22.10, where a pipe
+// is written asynchronously, open-handles.mjs makes each file's stdout and stderr blocking first, so a forced exit loses no results.
+// The warnings never change the exit code.
 // Node releases without the flags (--test-timeout before 20.11, --test-force-exit before 20.14 and on 21) run without.
-const timeoutMs = Number(process.env.COWORK_TEST_TIMEOUT_MS ?? 600_000);
-const [major, minor] = process.versions.node.split('.').map(Number);
-const hasTimeout = major > 21 || (major === 21 && minor >= 2) || (major === 20 && minor >= 11);
-const hasForceExit = major >= 22 || (major === 20 && minor >= 14);
+const timeout = testTimeout(process.versions.node, process.env);
 const handlesDir = mkdtempSync(join(tmpdir(), 'cowork-test-handles-'));
 const flags = [
-  ...(hasTimeout && Number.isSafeInteger(timeoutMs) && timeoutMs > 0 ? [`--test-timeout=${timeoutMs}`] : []),
-  ...(hasForceExit ? ['--test-force-exit'] : []),
+  ...(timeout.ms !== null ? [`--test-timeout=${timeout.ms}`] : []),
+  ...(hasForceExit(process.versions.node) ? ['--test-force-exit'] : []),
   `--import=${pathToFileURL(join(repoRoot, 'tools', 'test', 'open-handles.mjs')).href}`,
 ];
 const args = [tsxCliPath(), '--test', ...flags, ...files.map((f) => relative(repoRoot, f))];
@@ -65,7 +67,10 @@ if (r.error) {
 }
 process.exit(r.status ?? 1);
 
-/** One line per test file whose process still had handles open when it ended (force-exited), then the reports go. */
+/**
+ * One line per test file whose process still had handles open when it ended (force-exited), and one per file that exited with test
+ * output not yet written to the runner; then the reports go.
+ */
 function warnOpenHandles(dir) {
   try {
     const reports = [];
@@ -79,7 +84,12 @@ function warnOpenHandles(dir) {
     }
     reports.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
     for (const rep of reports) {
-      process.stderr.write(`run-tests: warning: ${relative(repoRoot, rep.file)} still had open handles when its tests ended (force-exited): ${rep.handles.join(', ')}\n`);
+      if (rep.handles.length > 0) {
+        process.stderr.write(`run-tests: warning: ${relative(repoRoot, rep.file)} still had open handles when its tests ended (force-exited): ${rep.handles.join(', ')}\n`);
+      }
+      if (Number.isSafeInteger(rep.unflushed) && rep.unflushed > 0) {
+        process.stderr.write(`run-tests: warning: ${relative(repoRoot, rep.file)} exited with ${rep.unflushed} bytes of test output not yet written (its last results may be missing from the report)\n`);
+      }
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

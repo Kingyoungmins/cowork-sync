@@ -39,6 +39,16 @@ test('the probe test accepts what the product accepts: every SID authority (Entr
   }
 });
 
+test('the Windows probe text names each cmdlet with its module (Microsoft.PowerShell.Security\\Get-Acl, Microsoft.PowerShell.Utility\\Write-Output): PowerShell then loads only that module instead of searching every installed one, and no same-named command elsewhere can answer', () => {
+  assert.equal(WINDOWS_ACL_COMMAND,
+    "$ErrorActionPreference = 'Stop'; $a = Microsoft.PowerShell.Security\\Get-Acl -LiteralPath $env:COWORK_ACL_PATH; Microsoft.PowerShell.Utility\\Write-Output $a.Sddl");
+  // Every command word (Verb-Noun) carries its module; the path still comes only from the environment.
+  for (const m of WINDOWS_ACL_COMMAND.matchAll(/(?:^|[\s;=])((?:[A-Za-z.]+\\)?[A-Z][a-z]+-[A-Za-z]+)\b/g)) {
+    assert.match(m[1]!, /^Microsoft\.PowerShell\.(?:Security|Utility)\\/, m[1]);
+  }
+  assert.ok(!/['"]\$env:|COWORK_ACL_PATH['"]/.test(WINDOWS_ACL_COMMAND));
+});
+
 test('the Windows owner probe runs powershell.exe by absolute path with the directory in the environment, never in command text',
   { skip: process.platform !== 'win32' ? 'Windows legs only' : false }, async () => {
     const t = await makeTempRoot('viz-probe-win');

@@ -14,6 +14,7 @@ import {
   parseDaemonArgs, remoteRefusalNext, resolveRemote, RESPAWN_LIMIT, RESPAWN_WINDOW_MS, RespawnBudget, runDaemon, sanitizeUrl, shellQuote, startRefusalNext, STOP_POLL_MS, type DaemonArgs, type DaemonIo,
 } from '../../src/daemon/run.js';
 import { STOP_REQUEST_FILE } from '../../src/engine/daemonFiles.js';
+import { QUIET_MS } from '../../src/engine/snapshot.js';
 import { VirtualClock } from '../sim/vclock.js';
 import { DaemonLock, Engine } from '../../src/engine/loop.js';
 import { machineMonoMs, realClock } from '../../src/ports/clock.js';
@@ -89,14 +90,30 @@ async function statusIn(dir: string): Promise<StatusJson | null> {
   }
 }
 
-async function waitFor<T>(what: string, f: () => Promise<T | null | undefined | false>, ms = 90_000): Promise<T> {
+async function waitFor<T>(what: string, f: () => Promise<T | null | undefined | false>, ms = 90_000, detail: () => string = () => ''): Promise<T> {
   const until = Date.now() + ms;
   for (;;) {
     const v = await f();
     if (v !== null && v !== undefined && v !== false) return v;
-    if (Date.now() > until) assert.fail(`timed out waiting for ${what}`);
+    if (Date.now() > until) assert.fail(`timed out waiting for ${what}${detail() === '' ? '' : `:\n${detail()}`}`);
     await new Promise((r) => setTimeout(r, 100));
   }
+}
+
+/**
+ * Waits for status.json's state `ok` (genesis, join, restart) on `dir`, and fails at once when the daemon's run ends first — a refusal
+ * such as START_PREVIEW then shows within about a second with the daemon's exit code and printed lines, instead of a bare timeout 90 s
+ * later; a timeout prints the lines too.
+ */
+async function waitOk(what: string, dir: string, d: { s: Session; done: Promise<number> }, ms = 90_000): Promise<void> {
+  let ended: string | null = null;
+  void d.done.then((code) => { ended = `exit ${code}`; }, (e: unknown) => { ended = `threw ${e instanceof Error ? e.message : String(e)}`; });
+  const lines = (): string => d.s.lines.join('\n');
+  await waitFor(what, async () => {
+    if ((await statusIn(dir))?.state === 'ok') return true;
+    if (ended !== null) assert.fail(`the daemon run ended (${ended}) before ${what}:\n${lines()}`);
+    return false;
+  }, ms, lines);
 }
 
 async function remoteWithClones(label: string, n: number): Promise<{ root: string; remote: BareRemote; clones: PeerClone[]; cleanup(): Promise<void> }> {
@@ -105,6 +122,9 @@ async function remoteWithClones(label: string, n: number): Promise<{ root: strin
   await seedRemote(remote, root, runner, { 'README.md': Buffer.from('# daemon\n'), 'a.txt': Buffer.from('a\n') });
   const clones: PeerClone[] = [];
   for (let i = 0; i < n; i++) clones.push(await clonePeer(remote, root, { name: `c${i + 1}`, autocrlf: false, withFilter: false }, runner));
+  // Let the fresh checkouts settle: a file younger than QUIET_MS is one an editor may still be writing, so a start's preview counts it as
+  // local work and refuses START_PREVIEW (a fast Linux runner starts the daemon within 300 ms of the checkout). A human's clone is older.
+  await new Promise((r) => setTimeout(r, QUIET_MS + 200));
   return { root, remote, clones, cleanup };
 }
 
@@ -113,6 +133,42 @@ async function git(dir: string, a: string[]): Promise<string> {
   assert.equal(r.code, 0, `git ${a.join(' ')}: ${r.stderr.toString('utf8')}`);
   return r.stdout.toString('utf8').trim();
 }
+
+test('remoteWithClones hands over settled checkouts: every checked-out file is at least QUIET_MS old by the wall clock, so a daemon started at once never counts the fresh clone as local work (START_PREVIEW within 300 ms of the checkout on a fast Linux runner)', async () => {
+  const f = await remoteWithClones('daemon-settled', 2);
+  const now = Date.now();
+  try {
+    for (const c of f.clones) {
+      for (const name of ['README.md', 'a.txt']) {
+        const age = now - (await stat(join(c.dir, name))).mtimeMs;
+        assert.ok(age >= QUIET_MS, `${join(c.dir, name)} is ${Math.round(age)} ms old, under QUIET_MS (${QUIET_MS} ms)`);
+      }
+    }
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('a genesis wait fails as soon as the daemon run ends, with its exit code and printed lines (a refusal shows within seconds, not after the 90 s wait)', async () => {
+  const f = await remoteWithClones('daemon-failfast', 1);
+  const ds = daemons();
+  try {
+    const c = f.clones[0]!;
+    const started = Date.now();
+    // A branch the clone does not have: the start refuses at once.
+    const a = ds.start(args(c.dir, { branch: 'no-such-branch' }));
+    await assert.rejects(waitOk('genesis', c.dir, a), (e: unknown) => {
+      assert.ok(e instanceof assert.AssertionError, String(e));
+      assert.match(e.message, /^the daemon run ended \(exit 1\) before genesis:\n/);
+      assert.match(e.message, /\nSTART_[A-Z_]+ /, 'its refusal line is printed');
+      return true;
+    });
+    assert.ok(Date.now() - started < 30_000, `failed after ${Date.now() - started} ms`);
+  } finally {
+    await ds.stopAll();
+    await f.cleanup();
+  }
+});
 
 test('dist/daemon.js --version prints the version', () => {
   const out = join(tmpdir(), `cowork-daemon-build-${process.pid}`);
@@ -286,11 +342,11 @@ test('run on a fresh clone performs genesis, run on a second clone joins, a stop
   try {
     const [c1, c2] = f.clones as [PeerClone, PeerClone];
     const a = ds.start(args(c1.dir, { name: 'Alice' }));
-    await waitFor('genesis', async () => (await statusIn(c1.dir))?.state === 'ok');
+    await waitOk('genesis', c1.dir, a);
     assert.ok(a.s.lines.some((l) => /\bgenesis\b/.test(l)), a.s.lines.join('\n'));
 
     const b = ds.start(args(c2.dir, { name: 'Bob' }));
-    await waitFor('join', async () => (await statusIn(c2.dir))?.state === 'ok');
+    await waitOk('join', c2.dir, b);
     assert.ok(b.s.lines.some((l) => /\bjoin\b/.test(l)), b.s.lines.join('\n'));
 
     // A change made on c2 reaches c1 through the two running daemons.
@@ -312,7 +368,7 @@ test('run on a fresh clone performs genesis, run on a second clone joins, a stop
     await assert.rejects(stat(join(c2.dir, '.git', 'cowork', 'daemon.lock')), 'the lock is released');
 
     const b2 = ds.start(args(c2.dir, { name: 'Bob' }));
-    await waitFor('restart', async () => (await statusIn(c2.dir))?.state === 'ok');
+    await waitOk('restart', c2.dir, b2);
     assert.ok(b2.s.lines.some((l) => /\brestart\b/.test(l)), b2.s.lines.join('\n'));
     b2.s.stop();
     assert.equal(await b2.done, 0);
@@ -335,7 +391,7 @@ test('cowork stop: a stop-request file drains run to status down and exit 0; a r
     await mkdir(coworkDir, { recursive: true });
     await writeFile(request, 'leftover\n');
     const a = ds.start(args(c1.dir));
-    await waitFor('genesis', async () => (await statusIn(c1.dir))?.state === 'ok');
+    await waitOk('genesis', c1.dir, a);
     let settled = false;
     void a.done.then(() => { settled = true; });
     await new Promise((r) => setTimeout(r, STOP_POLL_MS * 4));
@@ -360,7 +416,7 @@ test('a second run on the same clone refuses while the first holds daemon.lock; 
   try {
     const [c1, c2] = f.clones as [PeerClone, PeerClone];
     const a = ds.start(args(c1.dir));
-    await waitFor('genesis', async () => (await statusIn(c1.dir))?.state === 'ok');
+    await waitOk('genesis', c1.dir, a);
     // An own leftover the restart would delete (ENG-53): the refused second daemon must not touch it.
     const leftover = join(c1.dir, '.git', 'cowork', 'tmp', '1.new');
     await writeFile(leftover, 'leftover');
@@ -414,7 +470,7 @@ test('a second run on the same clone refuses while the first holds daemon.lock; 
     await mkdir(join(c2.dir, '.git', 'cowork'), { recursive: true });
     await writeFile(lockFile, `${JSON.stringify({ pid: deadPid, plugin_version: PLUGIN_VERSION, instance: 'gone' })}\n`);
     const b = ds.start(args(c2.dir));
-    await waitFor('join', async () => (await statusIn(c2.dir))?.state === 'ok');
+    await waitOk('join', c2.dir, b);
     const lock = JSON.parse(await readFile(lockFile, 'utf8')) as { pid: number; plugin_version: string; instance: string };
     assert.deepEqual([lock.pid, lock.plugin_version], [process.pid, PLUGIN_VERSION]);
     assert.notEqual(lock.instance, 'gone');
@@ -444,7 +500,7 @@ test('the daemon log queue is flushed before the command returns, and a failing 
     const s = session();
     const run = runDaemon(args(c.dir), daemonEnv(), s.io);
     try {
-      await waitFor('genesis', async () => (await statusIn(c.dir))?.state === 'ok');
+      await waitOk('genesis', c.dir, { s, done: run });
       // daemon.lock replaced by a directory: the release at exit fails (EISDIR on reading it back).
       const lockFile = join(c.dir, '.git', 'cowork', 'daemon.lock');
       await rm(lockFile);
@@ -544,7 +600,8 @@ test('SEC_REFUSE_URL_REWRITE names the exact url.<base>.insteadOf key that exist
     const r1 = refusalOf(s1.lines);
     assert.deepEqual([r1.params['key'], r1.params['file'], r1.params['key_redacted']], ['url.git@mirror.invalid:.insteadof', cfg, false], JSON.stringify(r1.params));
     assert.equal(await exists('url.git@mirror.invalid:.insteadof'), true, 'the named key exists');
-    const cmd = /(git config --file (?:"[^"]*"|'[^']*'|\S+) --unset-all (?:"[^"]*"|'[^']*'|\S+))/.exec(r1.next)?.[1];
+    // Anchored on the prose after the command: a bare POSIX word may itself hold a comma, so the key ends where " — then: " begins.
+    const cmd = /(git config --file (?:"[^"]*"|'[^']*'|\S+) --unset-all (?:"[^"]*"|'[^']*'|\S+?)) — then: /.exec(r1.next)?.[1];
     assert.ok(cmd !== undefined, r1.next);
     const run = shellRun(cmd, dir);
     assert.equal(run.status, 0, `${cmd}: ${run.stderr}`);
@@ -646,7 +703,7 @@ test('restart refusals map to a refused status and exit 1, never a crash', async
   try {
     const c = f.clones[0]!;
     const a = ds.start(args(c.dir));
-    await waitFor('genesis', async () => (await statusIn(c.dir))?.state === 'ok');
+    await waitOk('genesis', c.dir, a);
     a.s.stop();
     assert.equal(await a.done, 0);
     // A broken state ref (lost state) with a detached HEAD: the lost-state rebuild refuses START_HEAD_STATE{op: detached}.
@@ -826,13 +883,38 @@ test('final review FC minor: every start refusal prints a next step of its own (
   assert.match(startRefusalNext('START_BRANCH_NOT_ON_REMOTE', { remote: null, branch: 'main' }, a, url), /git push -u <remote> main/);
 });
 
+test('a next step never glues a comma to the command a human copies: each git command is followed by " — then: " (a bare POSIX word keeps a trailing comma, so `git pull --ff-only,` or a key ending in `,` would fail), on every OS', () => {
+  const url = 'https://example.invalid/r.git';
+  const key = 'url.git@mirror.invalid:.insteadof';
+  for (const platform of ['linux', 'darwin', 'win32'] as const) {
+    const repo = platform === 'win32' ? 'C:\\repos\\a' : '/repos/a';
+    const file = platform === 'win32' ? 'C:\\repos\\a\\.git\\config' : '/repos/a/.git/config';
+    const a = args(repo, { branch: 'main' });
+    const q = (s: string): string => shellQuote(s, platform)!;
+    const self = `node dist/daemon.js run --repo ${q(repo)} --branch main`;
+    const want: Array<[string, string]> = [
+      [remoteRefusalNext('SEC_REFUSE_URL_REWRITE', { file, key, key_redacted: false }, a, platform),
+        `remove the rewrite rule: git config --file ${q(file)} --unset-all ${q(key)} — then: ${self}`],
+      [remoteRefusalNext('SEC_REFUSE_URL_REWRITE', { file, key: 'url.https://mirror.invalid/.insteadof', key_redacted: true }, a, platform),
+        `remove the rewrite rule url.https://mirror.invalid/.insteadof (its URL's userinfo is not shown) from the file: git config --file ${q(file)} --edit — then: ${self}`],
+      [startRefusalNext('START_HEAD_BEHIND', {}, a, url, platform), `git pull --ff-only — then: ${self}`],
+      [startRefusalNext('START_REMOTE', { reason: 'local_ref_update' }, a, url, platform),
+        `the remote answered, but a ref under .git/refs/cowork-remote could not be updated (another git process, or a stale .lock file there): check git for-each-ref refs/cowork-remote/ — then: ${self}`],
+      [startRefusalNext('START_BRANCH_NOT_ON_REMOTE', { remote: 'origin', branch: 'main' }, a, url, platform), `git push -u origin main — then: ${self}`],
+      [startRefusalNext('START_BRANCH_NAME', { reason: 'too_long', other: null }, a, url, platform),
+        `use a different branch name (its encoded name is longer than 150 bytes): git branch -m <new name> — then: node dist/daemon.js run --repo ${q(repo)} --branch <new name>`],
+    ];
+    for (const [got, expected] of want) assert.equal(got, expected, platform);
+  }
+});
+
 test('final review FC minor: a stop during the respawn sleep writes status down before the daemon exits 0', async () => {
   const f = await remoteWithClones('daemon-respawn-stop', 1);
   const ds = daemons();
   try {
     const c = f.clones[0]!;
     const a = ds.start(args(c.dir));
-    await waitFor('genesis', async () => (await statusIn(c.dir))?.state === 'ok');
+    await waitOk('genesis', c.dir, a);
     a.s.stop();
     assert.equal(await a.done, 0);
     // Every start now crashes with a local error (no refusal): the rename probe's temp name is a directory.
