@@ -689,9 +689,12 @@ const CLIENT_PROGRAM_DIRS: readonly string[] = ['src/viz/client/', 'src/viz/ui/'
 const CLIENT_PROGRAM_FILES: ReadonlySet<string> = new Set([
   'src/viz/model/events.ts', 'src/viz/model/scene.ts', 'src/viz/model/layout.ts', 'src/viz/model/placement.ts', 'src/viz/model/cards.ts',
   'src/viz/model/labels.ts', 'src/viz/server/viewModel.ts', 'src/text/sanitize.ts', 'src/i18n/render.ts', 'src/viz/i18n/codes.ts',
+  // rev 2.5, F04-a (12 §3.13 module table): the area rule zone(p) that layout.ts re-exports as zoneOf.
+  'src/data/zone.ts',
 ]);
 
-/** R-V35: the client program is exactly client/**, ui/**, the six shared model files, render/**, viewModel.ts, sanitize.ts, render.ts and codes.ts. */
+/** R-V35: the client program is exactly client/**, ui/**, the six shared model files, render/**, viewModel.ts, sanitize.ts, render.ts,
+ *  codes.ts and src/data/zone.ts (F04-a). */
 function inClientProgram(rel: string): boolean {
   return CLIENT_PROGRAM_DIRS.some((d) => rel.startsWith(d)) || CLIENT_PROGRAM_FILES.has(rel);
 }

@@ -255,6 +255,22 @@ test('T-VIZ-layout (zoom): Z = max(2, ⌊panelW / worldW⌋) on open, resize or 
   assert.equal(z.coarse, true);
   z.toggleCoarse();
   assert.equal(z.coarse, false);
+  // The auto-fit Z has no upper bound (a wide panel): '+' never shrinks the office, and '−' steps to at most 8 (the manual range).
+  const wide = new ZoomState(336);
+  wide.open(3_400);
+  assert.equal(wide.z, 10);
+  wide.userZoom(+1);
+  assert.equal(wide.z, 10, "'+' above the manual range changes nothing");
+  wide.userZoom(-1);
+  assert.equal(wide.z, 8, "'\u{2212}' from 10 lands on 8");
+  wide.userZoom(+1);
+  assert.equal(wide.z, 8, "'+' at 8 changes nothing");
+  wide.userZoom(-1);
+  assert.equal(wide.z, 7);
+  wide.userZoom(+1);
+  assert.equal(wide.z, 8);
+  wide.resize(3_400);
+  assert.equal(wide.z, 10, 'a resize fits again');
 
   const f = new FollowRule();
   assert.equal(f.follow(0), true);

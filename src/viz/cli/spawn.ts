@@ -10,6 +10,7 @@ import { closeSync, constants, lstatSync, mkdirSync, openSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
 import type { Lang } from '../../i18n/render.js';
 import { isUncOrDevice } from './paths.js';
+import { VIEWER_STDERR_FILE } from './stderrFile.js';
 
 export interface ViewerArgs {
   execPath: string; vizJs: string; dataDir: string; lang: Lang; sha256: string; repos: readonly string[];
@@ -124,8 +125,10 @@ export function viewerArgv(a: ViewerArgs): string[] {
  * "heap out of memory" at the old-space cap, which no handler in the process can log. Raw text, so it is not a viewer log file: no
  * viz-*.jsonl name (the 14-day cleanup and the log readers skip it), and it may hold what such a message holds (a stack with paths).
  * Every viewer of this data directory appends to the one file; a spawn that finds it past VIEWER_STDERR_MAX_BYTES starts it over.
+ * The name lives in the leaf stderrFile.ts (the data directory check names it too) and stays importable from here.
  */
-export const VIEWER_STDERR_FILE = 'viz-stderr.txt', VIEWER_STDERR_MAX_BYTES = 1_048_576;
+export { VIEWER_STDERR_FILE };
+export const VIEWER_STDERR_MAX_BYTES = 1_048_576;
 
 /** An open descriptor for the child's stderr; close() drops the CLI's own copy once the child holds its own. */
 export interface StderrFile { fd: number; close(): void; }

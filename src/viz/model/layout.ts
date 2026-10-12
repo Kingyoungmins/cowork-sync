@@ -1,7 +1,14 @@
 // The office layout (12 §3.5.2–§3.5.3): zones, the append-only desk allocation, the page's delta form, tile coordinates and
 // blocked tiles. Desks never move and are never removed while the viewer runs (VIZ-16); every table keyed by a path, zone
-// or desk key is a Map (VIZ-37). Shared with the page (R-V35): imports only events.ts.
+// or desk key is a Map (VIZ-37). Shared with the page (R-V35): imports only events.ts and the area rule src/data/zone.ts
+// (rev 2.5, F04-a), itself a member of the client program.
+import { ROOT_ZONE, zone as zoneOf } from '../../data/zone.js';
 import type { DeskRef, PeerRef, Position } from './events.js';
+
+/** s1/s2 for a path of three or more segments, s1 for two, '·' for a root-level file: a re-export of the shared area rule zone(p). */
+export { zoneOf };
+/** '·', the root zone: the area rule's one definition (src/data/zone.ts), re-exported (F04-a final review M1). */
+export { ROOT_ZONE };
 
 /** key: zone(p) as a path key (pathKey), '…' for overflow; cells: grid cell indices. */
 export interface Zone { index: number; key: string; cells: number[]; }
@@ -23,7 +30,7 @@ export interface Tile { x: number; y: number; }
 
 export const TILE_PX = 16, GRID_COLS = 3, CELL_W = 7, CELL_H = 10, LOBBY_H = 4, OFFICE_W = 21, HOME_SPOTS = 16;
 export const ZONES_MAX = 15, CELLS_PER_ZONE = 4, SLOTS_PER_CELL = 6, FILE_DESKS_PER_ZONE = 23, VISITOR_TILES = 4;
-export const OVERFLOW_ZONE = '…', ROOT_ZONE = '·', BIG_TABLE_KEY = '⌂';
+export const OVERFLOW_ZONE = '…', BIG_TABLE_KEY = '⌂';
 export const BIG_TABLE: DeskRef = 0;
 export const DOOR: Tile = Object.freeze({ x: 1, y: 0 });
 
@@ -49,14 +56,6 @@ const BIG_TABLE_DESK: Desk = makeDesk({ ordinal: BIG_TABLE, key: BIG_TABLE_KEY, 
 /** Version 0: the big table alone, no zones, no home entries. */
 export function emptyLayout(): Layout {
   return { version: 0, zones: [], desks: [BIG_TABLE_DESK], homeOrder: [], deskOf: new Map() };
-}
-
-/** s1/s2 for a path of three or more segments, s1 for two, '·' for a root-level file. */
-export function zoneOf(p: string): string {
-  const parts = p.split('/');
-  if (parts.length >= 3) return `${parts[0]}/${parts[1]}`;
-  if (parts.length === 2) return parts[0]!;
-  return ROOT_ZONE;
 }
 
 /**

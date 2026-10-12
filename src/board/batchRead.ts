@@ -73,7 +73,8 @@ export interface BoardReadFailure { oid: Oid; height: number; malformed: BoardMa
  * the first item not read (`reads.length`; the number of items when all were read). The objects read for the prefix
  * add up to at most BATCH_READ_MAX_BYTES of `cat-file --batch` output on both paths: the one --batch of the round, or,
  * when git dies on the round (R-V74), the --batch calls of the item-by-item rounds together (an object counts once per
- * --batch that reads it; an `unreadable` item counts nothing). The prefix is never empty when there are items (one
+ * --batch that reads it; a git-fatal `unreadable` item counts nothing, a header-parse `unreadable` one counts the bytes
+ * read for it). The prefix is never empty when there are items (one
  * item's objects are at most ~13 MB by the caps). The caller continues from `next` in its next call (readBoardCommits:
  * with prevLive = the liveCode of the last read when it is a BoardRead, else null).
  */

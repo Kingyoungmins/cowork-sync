@@ -16,7 +16,7 @@ export interface CardModel { card: Card; foldedAt: number | null; }   // foldedA
 export interface PetInfo { owner: PeerRef; live: boolean; ssCode: string | null; variant: number; }
 export interface RoomDelta {
   roomId: string; kind: 'timeline' | 'snapshot'; window: { h0: number; h1: number };
-  events: SceneEvent[]; cards: CardModel[]; ticks: Tick[]; layout: LayoutDelta | null;
+  events: SceneEvent[]; cards: CardModel[]; ticks: Tick[]; layout: LayoutDelta | null;   // ticks: the newly folded heights' only, both kinds (the page appends them)
   peers: Map<PeerRef, PeerInfo>; pets: Map<SeatRef, PetInfo>;     // new or changed only
   scene: Scene | null;                                              // snapshot only: the scene at the new tip
 }
@@ -38,8 +38,8 @@ export interface PollSink { delta(d: RoomDelta): void; overlay(roomId: string, o
 /** The routes' data contract: implemented by api.ts (Task 9), consumed by http.ts (Task 10) and main.ts (Task 15). */
 export interface WorldApi {
   world(): Promise<World>;                          // waits for every store's ready; recomputed at most once per 2.5 s whatever the number of tabs
-  /** null → 404; from < h0 extends one segment (R-V29, the store's earlier()); when the page appended desks, publishes {type: 'layout', room_id, layout}
-   *  on the hub before returning (R-V49). */
+  /** null → 404; from < firstHeight(h0) (h0 + 1; 0 at genesis) extends one segment (R-V29, the store's earlier()); when the page appended desks,
+   *  publishes {type: 'layout', room_id, layout} on the hub before returning (R-V49). */
   page(roomId: string, from: number, to: number): Promise<TimelinePage | null>;
   strings(lang: string): Strings | null;            // the six codes → { lang: 'en', templates } of PAGE_CODES (R-V15); else null → 404
 }

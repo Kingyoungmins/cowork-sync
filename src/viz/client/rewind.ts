@@ -2,18 +2,17 @@
 // its ticks differ by glyph shape (a small bar for a publish, "!" for a conflict, a speech glyph for a request, a star for a save,
 // a door for joins and leaves, a snowflake for a freeze, and the page's own "caught up" marks), drawn from the art's 8×8 icons in
 // the scene palette; hovering names the height and its card. Controls: play/pause, the slider (arrow keys ±1 height, PageUp and
-// PageDown ±64), the speed selector, the live pill (back to the tip, following it; greyed while reconnecting) and "load earlier".
-// Browser only.
+// PageDown ±64; none with Ctrl, Meta or Alt; PageDown does nothing at the live tip), the speed selector, the live pill (back to the
+// tip, following it; grey and not pressed whenever the stream is not live, VIZ-42) and "load earlier". Browser only.
 import type { SceneEvent } from '../model/events.js';
 import { iconColour, rgba, blit, type Rgba } from '../render/raster.js';
 import { ICON_TONES } from '../render/palette.js';
 import { ICONS, type IconName } from '../render/sprites.js';
 import type { Tick } from '../server/viewModel.js';
-import { KEYS } from '../ui/a11y.js';
+import { keyActionFor, livePillState, modifiedKey, stepBy } from '../ui/a11y.js';
 import { SPEEDS } from '../ui/anim.js';
 import { CLS, button, el, setPressed, type Translate } from './a11y.js';
 
-export const PAGE_HEIGHTS = 64;
 const TICK_PX = 8;
 /** A publish: a small bar (2 × 6 art px) in the tick icon's main tone. */
 const BAR_W = 2, BAR_H = 6;
@@ -46,8 +45,10 @@ function bar(out: Rgba, x0: number, y0: number): void {
 }
 
 export interface RewindState {
-  h0: number; h1: number; at: number; live: boolean; playing: boolean; speed: number; reconnecting: boolean; canEarlier: boolean;
-  ticks: readonly Tick[]; caught: readonly number[];
+  h0: number; h1: number; at: number; live: boolean; playing: boolean; speed: number;
+  /** The stream is not live (ui/a11y.ts streamStale: reconnecting, stopped, a refused link or a lost session): the live pill is grey. */
+  stale: boolean;
+  canEarlier: boolean; ticks: readonly Tick[]; caught: readonly number[];
 }
 export interface RewindDeps {
   t: Translate;
@@ -66,7 +67,7 @@ export interface Rewind {
 
 export function createRewind(root: HTMLElement, deps: RewindDeps): Rewind {
   const { t } = deps;
-  let state: RewindState = { h0: 0, h1: 0, at: 0, live: true, playing: false, speed: 1, reconnecting: false, canEarlier: false, ticks: [], caught: [] };
+  let state: RewindState = { h0: 0, h1: 0, at: 0, live: true, playing: false, speed: 1, stale: false, canEarlier: false, ticks: [], caught: [] };
   let drawnKey = '';
 
   const playButton = button(CLS.control, root, () => deps.play(!state.playing));
@@ -89,11 +90,12 @@ export function createRewind(root: HTMLElement, deps: RewindDeps): Rewind {
 
   slider.addEventListener('input', () => deps.seek(Number(slider.value)));
   slider.addEventListener('keydown', (e) => {
-    const action = Object.hasOwn(KEYS, e.key) ? KEYS[e.key] : undefined;
+    const action = keyActionFor(e.key, false, modifiedKey(e));   // the slider's own keys; none with Ctrl, Meta or Alt (12 §3.11)
     if (action === 'page_back' || action === 'page_fwd') {
       e.preventDefault();
-      const to = Math.min(state.h1, Math.max(state.h0, state.at + (action === 'page_back' ? -PAGE_HEIGHTS : PAGE_HEIGHTS)));
-      deps.seek(to);
+      // ±64 within the window; PageDown at the live tip does nothing (12 §3.9.1: live already shows the tip and follows it).
+      const by = stepBy(action, state.live && state.at === state.h1);
+      if (by !== null) deps.seek(Math.min(state.h1, Math.max(state.h0, state.at + by)));
     }
   });
   speed.addEventListener('change', () => deps.speed(Number(speed.value)));
@@ -146,9 +148,8 @@ export function createRewind(root: HTMLElement, deps: RewindDeps): Rewind {
 
   const relabel = (): void => {
     playButton.textContent = t(state.playing ? 'UI_VIZ_CTRL_PAUSE' : 'UI_VIZ_CTRL_PLAY');
-    // The slider's accessible name: §3.11 has no code for the replay position yet (spec-edit list: UI_VIZ_CTRL_POSITION); the replay
-    // control's own label stands in, and aria-valuetext reads the height.
-    slider.setAttribute('aria-label', t('UI_VIZ_CTRL_PLAY'));
+    // The slider's accessible name (12 §3.9.1, the Task 14 ruling): UI_VIZ_CTRL_POSITION; aria-valuetext reads the height (#h).
+    slider.setAttribute('aria-label', t('UI_VIZ_CTRL_POSITION'));
     speed.setAttribute('aria-label', t('UI_VIZ_CTRL_SPEED'));
     livePill.textContent = t('UI_VIZ_CTRL_LIVE');
     earlier.textContent = t('UI_VIZ_CTRL_LOAD_EARLIER');
@@ -166,9 +167,11 @@ export function createRewind(root: HTMLElement, deps: RewindDeps): Rewind {
       position.textContent = `#${s.at}`;
       speed.value = String(s.speed);
       setPressed(playButton, s.playing);
-      setPressed(livePill, s.live);
-      livePill.classList.toggle(CLS.liveOn, s.live && !s.reconnecting);
-      livePill.classList.toggle(CLS.liveOff, s.reconnecting);
+      // VIZ-42: the live look and aria-pressed only on a live stream; grey whenever it is stale (ui/a11y.ts livePillState).
+      const pill = livePillState(s);
+      setPressed(livePill, pill.pressed);
+      livePill.classList.toggle(CLS.liveOn, pill.on);
+      livePill.classList.toggle(CLS.liveOff, pill.off);
       earlier.disabled = !s.canEarlier;
       relabel();
       drawTicks();

@@ -3,16 +3,18 @@
 // sorted seat-key order with the owner ownerOfSeatKey gives.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { initialFoldState, type FoldState, type PeerRec } from '../../../src/board/fold.js';
 import type { PeerRef, SceneEvent, SeatRef } from '../../../src/viz/model/events.js';
 import { settlePlaces } from '../../../src/viz/model/placement.js';
-import type { Scene } from '../../../src/viz/model/scene.js';
+import { reduceScene, type Scene } from '../../../src/viz/model/scene.js';
 import { ownerOfSeatKey, startScene } from '../../../src/viz/model/start.js';
 import { DRAFT_PROTOCOL, ev } from '../../helpers/vizEvents.js';
 import {
-  A, B, C, D2, K1, K2, K3, K4, KB, OFFICE, SA1, SA2, SA3, SB1, SC1, SD1, SEAT,
+  A, B, C, D2, K1, K2, K3, K4, KB, OFFICE, SA1, SA2, SA3, SB1, SC1, SEAT,
   idsOf, petLifeSequence, renameScene, renameValue, reversingRename, scenesAfter, variantSequence,
 } from '../../helpers/vizScene.js';
+import { fixtureFrames, fixtureTimeline, loadRowFixture, peerOf, ROW_FIXTURE_DIR, seatKeyOf } from '../../helpers/vizRows.js';
 
 const liveSeats = (s: Scene): SeatRef[] => [...s.pets].filter(([, p]) => p.live).map(([k]) => k).sort();
 
@@ -43,15 +45,14 @@ test('T-VIZ-pets (reducer): exactly one pet per seat key', () => {
   assert.equal(scenes[10]!.pets.get(SA2)!.live, false);
   assert.equal(scenes[10]!.pets.get(SA2)!.ssCode, null);
   assert.equal(scenes[11]!.pets.get(SA3)!.variant, 2, 'the third seat of A in the segment');
-  // presume_absent, leave, and the owner of a footprint-only seat becoming a ghost.
+  // presume_absent and leave. (The owner of a footprint-only seat becoming a ghost: the builder's own pet_poof, in the
+  // 'T-VIZ-pets (builder)' test below, never a hand-written one.)
   assert.equal(scenes[15]!.pets.get(SB1)!.live, false);
   assert.equal(scenes[16]!.claims.get('cl-b1')!.stale, true);
   assert.equal(scenes[20]!.pets.get(SC1)!.live, false);
   assert.equal(scenes[21]!.claims.has('cl-c1'), false);
-  assert.equal(scenes[22]!.pets.get(SD1)!.live, true);
-  assert.equal(scenes[24]!.pets.get(SD1)!.live, false);
   // The same seat spawned again: one pet, live, its variant kept.
-  assert.deepEqual(scenes[25]!.pets.get(SA1), { place: { at: 'behind', peer: A }, pose: 'idle', lastPublish: null, lastDesk: null, lastClaimOp: null, owner: A, variant: 0, live: true, ssCode: null });
+  assert.deepEqual(scenes[22]!.pets.get(SA1), { place: { at: 'behind', peer: A }, pose: 'idle', lastPublish: null, lastDesk: null, lastClaimOp: null, owner: A, variant: 0, live: true, ssCode: null });
   // A poofed pet stands nowhere: no chair, no visitor tile, never counted.
   for (const s of scenes) for (const [, p] of s.pets) if (!p.live) assert.equal(p.place.at, 'behind');
 
@@ -61,6 +62,46 @@ test('T-VIZ-pets (reducer): exactly one pet per seat key', () => {
   assert.ok(ids.seats.map((s) => r.seat(s)).every((h) => /^[0-9A-HJKMNP-TV-Z]{6}$/.test(h)));
   const renamedScenes = scenesAfter(events.map((e) => renameValue(e, r)), { ...OFFICE, homeOrder: OFFICE.homeOrder.map((p) => r.peer(p)) });
   renamedScenes.forEach((s, i) => assert.deepEqual(s, renameScene(scenes[i]!, r), `after ${i}`));
+});
+
+test('T-VIZ-pets (builder): the owner of a footprint-only seat becoming a ghost \u{2192} the timeline builder poofs that pet (VIZ-21; the derived ghost row, sub 1,002, right after person_ghost, in ascending seat key, uncarded); a seat live in the fold keeps its pet; a later footprint spawns it again', () => {
+  const fx = loadRowFixture(join(process.cwd(), ROW_FIXTURE_DIR, 'ghost_footprint.json'));
+  const { timeline: t, unknown } = fixtureTimeline(fx);
+  const PB = peerOf('B');
+  const S1 = seatKeyOf('B', 'S1'), S2 = seatKeyOf('B', 'S2'), S3 = seatKeyOf('B', 'S3');
+  const alias = new Map<string, string>([[peerOf('A'), 'A'], [PB, 'B'], [S1, 'B/S1'], [S2, 'B/S2'], [S3, 'B/S3']]);
+  const brief = (e: SceneEvent): string => {
+    const who = 'peer' in e && typeof e.peer === 'string' ? e.peer : 'seat' in e && typeof e.seat === 'string' ? e.seat : null;
+    const owner = e.kind === 'pet_spawn' || e.kind === 'pet_poof' ? ` of ${alias.get(e.owner) ?? e.owner}` : '';
+    return `${e.height}.${e.sub}.${e.k} ${e.kind}${who === null ? '' : ` ${alias.get(who) ?? who}`}${owner}`;
+  };
+  // The fixture's fold facts at the ghost height G: B's last board commit is at 3, so B leaves rankedSet at 203; S1 was never
+  // folded (a footprint only), S2 is live in the fold (seat_start), S3's folded seat ended (seat_end) before a footprint re-spawned it.
+  const G = 203;
+  const f = fixtureFrames(fx)[G]!;
+  assert.ok(f.before.peers[PB] !== undefined && !Object.hasOwn(f.after.seats, S1));
+  assert.equal(f.after.seats[S2]?.status, 'live');
+  assert.equal(f.after.seats[S3]?.status, 'ended');
+  // The builder's events: the footprint spawns, then at G the ghost and one poof per footprint-only seat, then the respawn at G + 1.
+  assert.deepEqual(t.events.filter((e) => e.kind === 'pet_spawn' || e.kind === 'pet_poof' || e.kind === 'person_ghost' || e.kind === 'person_unghost').map(brief), [
+    '2.1.0 pet_spawn B/S2 of B', '2.2.0 pet_spawn B/S3 of B', '2.1001.0 pet_spawn B/S1 of B',
+    '3.1.0 pet_poof B/S3 of B', '3.1001.0 pet_spawn B/S3 of B',
+    '203.1002.0 person_ghost B', '203.1002.1 pet_poof B/S1 of B', '203.1002.2 pet_poof B/S3 of B',
+    '204.1001.0 pet_spawn B/S1 of B', '204.1002.0 person_unghost B',
+  ]);
+  assert.deepEqual(t.events.filter((e) => e.height === G).map(brief), ['203.1002.0 person_ghost B', '203.1002.1 pet_poof B/S1 of B', '203.1002.2 pet_poof B/S3 of B']);
+  assert.deepEqual(t.cards.filter((c) => c.at.height === G), [], 'the ghost row is uncarded, its poofs too');
+  assert.deepEqual(unknown, []);
+  // The scenes: exactly one pet per seat key; at G the footprint-only pets are gone while the ghost walks home, S2 stays.
+  const end = (h: number): Scene => reduceScene(t, { height: h, sub: Number.MAX_SAFE_INTEGER, k: 0 });
+  const live = (s: Scene): string[] => [...s.pets].filter(([, p]) => p.live).map(([k]) => alias.get(k) ?? k).sort();
+  assert.deepEqual(live(end(G - 1)), ['B/S1', 'B/S2', 'B/S3']);
+  assert.equal(end(G - 1).characters.get(PB)!.ghost, false);
+  assert.deepEqual(live(end(G)), ['B/S2']);
+  assert.equal(end(G).characters.get(PB)!.ghost, true);
+  assert.deepEqual(live(end(G + 1)), ['B/S1', 'B/S2'], 'a later footprint spawns S1 again');
+  assert.equal(end(G + 1).characters.get(PB)!.ghost, false);
+  for (const h of [G - 1, G, G + 1]) assert.deepEqual([...end(h).pets.keys()].sort(), [S1, S2, S3].sort(), `one pet per seat key at ${h}`);
 });
 
 test('pet_poof puts a pet behind its owner once, idle; settling then reads nothing of a poofed pet but live, so its cost does not grow with the number of poofed pets', () => {

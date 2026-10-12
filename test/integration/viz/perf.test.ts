@@ -5,23 +5,30 @@
 //  - git processes per tick and per batch exactly as 12 §3.12 and R-V05/R-V31 count them, never two at once in a room;
 //  - 60 s idle, the viewer's CPU plus its git children's run time ≤ 2 % of one core (2×);
 //  - one room extended live by 17,280 heights (24 h at B = 12): the real viewer's settled RSS after the folds ≤ 200 MB, started
-//    as the CLI starts it (viewerArgv: a 150 MB V8 old space, the fix round 1 ruling), at most 2,048 heights held (pages above the oldest
-//    kept checkpoint fold nothing, a page below it re-folds), and a 255-commit seek within 1 s (2× the 500 ms budget).
-// RSS, the heights held and the git counts are exact (F6); only the times and CPU carry the 2× slack.
+//    as the CLI starts it (spawnViewerWith with viewerArgv: a 150 MB V8 old space, the fix round 1 ruling; the CLI's ready window),
+//    at most 2,048 heights held (pages above the oldest kept checkpoint fold nothing, a page below it re-folds), and a 255-commit seek
+//    within 1 s (2× the 500 ms budget).
+// RSS, the heights held and the git counts are exact (F6); only the times and CPU carry the 2× slack. "Settled" is the real viewer's
+// RSS right after a forced memory-reducing major GC (Plan 8a final review B2; what V8's memory reducer does on its own some time
+// after the allocation rate drops, two plain major GCs measured before it): test-only, the child runs with --expose-gc, the GC observer
+// preload (test/fixtures/viz/gcObserver.mjs, --import) and an IPC channel, the shipped viewerArgv unchanged; the OS fields beside it
+// (Linux VmRSS, RssAnon, RssFile; Windows WorkingSet64, PrivateMemorySize64) are reported for the hosted legs.
 // A second test starts the real viewer over 32 rooms × 1,024 heights under the room-scaled cap (534 MB, cli/spawn.ts
-// VIEWER_MAX_OLD_SPACE_MB's rule), its first windows built at most 4 at once (main.ts ROOM_INITS_MAX): no V8 heap OOM, every room
-// served, nothing on its stderr; its first world and its peak and settled RSS are reported (Task 15 fix round 2 ruling; 12 §3.12
-// sets an RSS budget for 8 rooms only).
+// VIEWER_MAX_OLD_SPACE_MB's rule), its admissions inside the CLI's ready window (source/rooms.ts ADMIT_POOL) and its first windows
+// built at most 4 at once (main.ts ROOM_INITS_MAX): no V8 heap OOM, every room served, nothing on its stderr; its first world and
+// its peak and settled RSS are reported (Task 15 fix round 2 ruling; 12 §3.12 sets an RSS budget for 8 rooms only).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { join, win32 } from 'node:path';
+import { join } from 'node:path';
 import { buildDaemonEnv } from '../../../src/git/env.js';
 import { realFs } from '../../../src/ports/fs.js';
 import { verifyDataDir } from '../../../src/viz/cli/dataDir.js';
 import { realOwnerProbe } from '../../../src/viz/cli/ownerProbe.js';
-import { openViewerStderr, parseReadyLine, viewerArgv, viewerOldSpaceMb, VIEWER_STDERR_FILE } from '../../../src/viz/cli/spawn.js';
+import {
+  killTree, openViewerStderr, readyTimeoutMs, spawnViewerWith, viewerArgv, viewerOldSpaceMb, VIEWER_STDERR_FILE, type ViewerArgs,
+} from '../../../src/viz/cli/spawn.js';
 import { READ_BATCH_MAX } from '../../../src/board/batchRead.js';
 import type { GitResult, GitRunner } from '../../../src/git/runner.js';
 import { realClock } from '../../../src/ports/clock.js';
@@ -31,6 +38,7 @@ import { absoluteGit, kinds, vizRunner } from '../../helpers/vizSource.js';
 import { gitRoom, pubs, type GitRoom } from '../../helpers/vizStore.js';
 import { apiGet, buildDistOnce, gitRoomsFixture, redeem, sha256Of, startTestViewer, viewerTemp, worldOf } from '../../helpers/vizViewer.js';
 import { request } from '../../helpers/vizHttp.js';
+import { GC_OBSERVER_FLAGS, mbList, memoryAfterGc, osMemoryOf } from '../../helpers/vizMemory.js';
 import type { RepoFixture } from '../../helpers/repoFixture.js';
 
 const SLOW = process.env['COWORK_VIZ_SLOW'] === '1';
@@ -42,72 +50,84 @@ function timedRunner(inner: GitRunner, total: { ms: number }): GitRunner {
   return { run: async (args, opts): Promise<GitResult> => { const r = await inner.run(args, opts); total.ms += r.durationMs; return r; } };
 }
 
-/** The resident memory of a running child, in bytes (Linux: VmRSS of /proc/<pid>/status; Windows: the working set). */
-function rssOf(child: ChildProcess): number {
-  const pid = child.pid!;
-  if (process.platform === 'linux') {
-    const m = /^VmRSS:\s+(\d+) kB$/m.exec(readFileSync(`/proc/${pid}/status`, 'utf8'));
-    assert.ok(m !== null);
-    return Number(m[1]) * 1024;
-  }
-  const root = process.env['SystemRoot'] ?? 'C:\\Windows';
-  const ps = win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-  const r = spawnSync(ps, ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${pid}).WorkingSet64`], { encoding: 'utf8', windowsHide: true, timeout: 30_000 });
-  const n = Number(r.stdout.trim());
-  assert.ok(Number.isSafeInteger(n) && n > 0, `working set: ${r.stdout} ${r.stderr}`);
-  return n;
+/** The resident memory of a running child, in bytes, as the OS reports it (Linux: VmRSS; Windows: the working set; osMemoryOf). */
+const rssOf = (child: ChildProcess): number => osMemoryOf(child.pid!).rss;
+
+/** A real viewer process (realViewer). */
+interface RealViewer {
+  port: number; session: string; child: ChildProcess; flag: string;
+  /** When it was spawned (realClock.monoMs()), and how long its ready line took from there (ms). */
+  spawnedAt: number; readyMs: number;
+  stderr(): string; stop(): Promise<void>;
 }
 
-/** The real dist/viz.js over `repos` (RSS is the viewer process's own, never this test process's), started with the CLI's own argv
- *  (viewerArgv: the V8 old-space cap, `capMb` here, then the script) and stderr file (openViewerStderr); it ends on its own when
- *  stop() presents its launch link a second time. */
-async function realViewer(repos: readonly string[], capMb: number): Promise<{ port: number; session: string; child: ChildProcess; flag: string; stderr(): string; stop(): Promise<void> }> {
+/**
+ * The real dist/viz.js over `repos` (RSS is the viewer process's own, never this test process's), started as the CLI starts it:
+ * spawnViewerWith — the CLI's own handshake, its ready window readyTimeoutMs(platform) (5 s; 15 s on Windows) included, so a start
+ * whose room admissions outlast that window fails here as it would for a user — with the CLI's argv (viewerArgv: the V8 old-space
+ * cap, `capMb` here, then the script) and stderr file (openViewerStderr). Test-only, the node flags of the GC observer go before that
+ * argv and the child gets an IPC channel (vizMemory.ts memoryAfterGc: its memory after forced major GCs; Plan 8a final review
+ * B2). It ends on its own when stop() presents its launch link a second time.
+ */
+async function realViewer(repos: readonly string[], capMb: number): Promise<RealViewer> {
   const dist = await buildDistOnce();
   const vizJs = join(dist, 'viz.js');
   const dataDir = join(viewerTemp('perf-real'), 'data dir');
   assert.deepEqual(await verifyDataDir(dataDir, { fs: realFs, probe: realOwnerProbe, platform: process.platform, create: true }), { ok: true });
   const env = buildDaemonEnv(process.env as Record<string, string | undefined>, []);
-  const argv = viewerArgv({
+  const args: ViewerArgs = {
     execPath: process.execPath, vizJs, dataDir, lang: 'en', sha256: sha256Of(vizJs), repos, demo: null, git: absoluteGit(), env,
     platform: process.platform, systemRoot: process.env['SystemRoot'] ?? null,
-  });
+  };
+  const argv = viewerArgv(args);
   assert.equal(argv[0], `--max-old-space-size=${capMb}`, 'the CLI\'s heap cap');
-  const err = openViewerStderr(dataDir, process.platform);
-  assert.ok(err !== null, 'the stderr file');
-  let child: ChildProcess;
-  try {
-    child = spawn(process.execPath, argv, { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', err.fd], cwd: dataDir, env });
-  } finally {
-    err.close();
-  }
-  const stderrFile = join(dataDir, 'log', VIEWER_STDERR_FILE);
-  const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
-  const line = await new Promise<Buffer>((resolve, reject) => {
-    let buf = Buffer.alloc(0);
-    child.stdout!.on('data', (b: Buffer) => {
-      buf = Buffer.concat([buf, b]);
-      const lf = buf.indexOf(0x0a);
-      if (lf >= 0) resolve(buf.subarray(0, lf + 1));
-    });
-    child.once('exit', () => reject(new Error('the viewer exited before its ready line')));
+  let child: ChildProcess | null = null;
+  const t0 = realClock.monoMs();
+  const ready = await spawnViewerWith(args, {
+    // The CLI's spawn with the observer's flags before its argv and an IPC channel after its stdio (test-only).
+    spawn: (exe, a, o) => (child = spawn(exe, [...GC_OBSERVER_FLAGS, ...a], { ...o, stdio: [...(o.stdio as unknown[]), 'ipc'] as SpawnOptions['stdio'] })),
+    killTree, stderr: openViewerStderr,
   });
-  const ready = parseReadyLine(line);
-  assert.ok(ready !== null && 'port' in ready, line.toString('utf8'));
+  const readyMs = realClock.monoMs() - t0;
+  assert.ok(child !== null, 'the viewer was spawned');
+  const c: ChildProcess = child;
+  assert.ok('port' in ready, `the viewer's ready line within the CLI's ${readyTimeoutMs(process.platform)} ms window (${Math.round(readyMs)} ms): ${JSON.stringify(ready)}`);
+  const exited = new Promise<void>((resolve) => {
+    if (c.exitCode !== null || c.signalCode !== null) resolve();
+    else c.once('exit', () => resolve());
+  });
   const { session } = await redeem(ready.port, ready.launch);
+  const stderrFile = join(dataDir, 'log', VIEWER_STDERR_FILE);
   return {
-    port: ready.port, session, child, flag: argv[0]!,
+    port: ready.port, session, child: c, flag: argv[0]!, spawnedAt: t0, readyMs,
     stderr: () => (existsSync(stderrFile) ? readFileSync(stderrFile, 'utf8') : ''),
     stop: async () => {
       await request(ready.port, { method: 'POST', path: '/api/v1/session', headers: { origin: `http://127.0.0.1:${ready.port}`, 'x-cowork-launch': ready.launch } }).catch(() => undefined);
       let timer: NodeJS.Timeout | undefined;
       await Promise.race([exited, new Promise<void>((r) => { timer = setTimeout(r, 15_000); })]);
       clearTimeout(timer);
-      if (child.exitCode === null && child.signalCode === null) child.kill();
+      if (c.exitCode === null && c.signalCode === null) c.kill();
+      if (c.connected) c.disconnect();
     },
   };
 }
 
-test('T-VIZ-perf (Windows and Linux legs; R-V41): 8 rooms × 1,024 heights → first /api/v1/world ≤ 6 s (2×); git processes per tick and batch exactly as counted; 60 s idle CPU including git children ≤ 2 % of one core (2×); a 255-commit seek ≤ 1 s (2×); RSS after extending one room live by 17,280 heights ≤ 200 MB with ≤ 2,048 heights retained', {
+/** process.memoryUsage()'s fields for a diagnostic line. */
+const usage = (m: NodeJS.MemoryUsage): string => mbList({ rss: m.rss, heapUsed: m.heapUsed, heapTotal: m.heapTotal, external: m.external, arrayBuffers: m.arrayBuffers });
+
+/**
+ * The viewer's settled memory: process.memoryUsage() after the observer's memory-reducing major GC (its `rss` the gate; GcMemory),
+ * with the reading after the two plain major GCs before it and the OS view right before and right after them; one diagnostic line.
+ */
+async function settledMemory(real: RealViewer): Promise<{ rss: number; line: string }> {
+  const before = osMemoryOf(real.child.pid!);
+  const m = await memoryAfterGc(real.child);
+  const after = osMemoryOf(real.child.pid!);
+  const line = `${(m.reduced.rss / MB).toFixed(1)} MB after a memory-reducing major GC (${usage(m.reduced)}); after two plain major GCs before it: ${usage(m.major)}; OS view before the GCs: ${mbList(before.fields)}; after: ${mbList(after.fields)}`;
+  return { rss: m.reduced.rss, line };
+}
+
+test('T-VIZ-perf (Windows and Linux legs; R-V41): 8 rooms × 1,024 heights → first /api/v1/world ≤ 6 s (2×); git processes per tick and batch exactly as counted; 60 s idle CPU including git children ≤ 2 % of one core (2×); a 255-commit seek ≤ 1 s (2×); the real viewer\'s RSS after extending one room live by 17,280 heights, read right after a forced memory-reducing major GC, ≤ 200 MB with ≤ 2,048 heights retained', {
   skip: !SLOW ? 'slow suite: set COWORK_VIZ_SLOW=1 (viz-slow.yml)' : process.platform === 'darwin' ? 'Windows and Linux legs' : false,
   timeout: 900_000,
 }, async (t) => {
@@ -143,10 +163,12 @@ test('T-VIZ-perf (Windows and Linux legs; R-V41): 8 rooms × 1,024 heights → f
         assert.deepEqual(items, [1, HEIGHTS], 'B0, then the window\'s 1,024 board commits in one batch');
       }
 
-      // The real viewer process over the same clones, for its own RSS after the live extension below.
+      // The real viewer process over the same clones, for its own RSS after the live extension below. Its spawn-to-first-world time
+      // is reported beside the in-process one, never asserted locally (a loaded PC measured 8.6–8.9 s in-process; final review §4a).
       const real = await realViewer(f.clones.map((c) => c.dir), 150);
       reals.push(real);
       assert.equal((await worldOf(real.port, real.session)).rooms.length, ROOMS);
+      t.diagnostic(`the real viewer: ready line ${Math.round(real.readyMs)} ms, first /api/v1/world ${Math.round(realClock.monoMs() - real.spawnedAt)} ms after its spawn (in-process: ${Math.round(firstWorld)} ms)`);
 
       // 60 s idle: no ref moves; each room runs at most one rev-parse (the 60 s safety net).
       for (const r of rooms) r.git.reset();
@@ -195,21 +217,15 @@ test('T-VIZ-perf (Windows and Linux legs; R-V41): 8 rooms × 1,024 heights → f
         await new Promise((r) => setTimeout(r, 1_000));
       }
       assert.ok((await worldOf(real.port, real.session)).rooms.some((r) => r.window.h1 === h1), 'the real viewer folded the live heights');
-      // Resident memory once the viewer is quiet again: V8 sizes its heap lazily and gives the pages of a fold's garbage back only
-      // through its memory reducer, which starts 8 s after the allocation rate drops; so the viewer is left alone (no request, no
-      // stream) for 20 s, then sampled every 2 s until two samples agree within 2 MB (at most 40 s more). The peak seen while it
-      // folded is reported beside it.
-      await new Promise((r) => setTimeout(r, 20_000));
-      const samples: number[] = [rssOf(real.child)];
-      for (let i = 0; i < 20; i++) {
-        await new Promise((r) => setTimeout(r, 2_000));
-        samples.push(rssOf(real.child));
-        const [a, b] = samples.slice(-2) as [number, number];
-        if (Math.abs(a - b) <= 2 * MB) break;
-      }
-      const rss = samples.at(-1)!;
-      t.diagnostic(`the viewer's RSS after ${LIVE} live heights in one of 8 rooms: ${(rss / MB).toFixed(1)} MB settled; ${(peak / MB).toFixed(1)} MB at most while folding; samples ${samples.map((x) => (x / MB).toFixed(0)).join(' ')}`);
-      assert.ok(rss <= 200 * MB, `RSS ${(rss / MB).toFixed(1)} MB`);
+      // The settled RSS (12 §3.12 row 1, VIZ-41; Plan 8a final review B2): the resident memory right after a forced memory-reducing
+      // major GC in the real viewer, read by the GC observer, so the reading never depends on when V8's own GC runs (the heap it
+      // committed for the folds' garbage stayed resident ≈ 96 s before V8's memory reducer gave it back, whenever a sampler happened to
+      // look; two plain major GCs free the garbage but keep that heap: 250.4 MB, heapUsed 37.4 MB, heapTotal 170.3 MB on Windows). The
+      // reading after the plain GCs, the OS view before and after (Linux VmRSS, RssAnon, RssFile; Windows WorkingSet64,
+      // PrivateMemorySize64) and the peak while it folded are reported beside it.
+      const settled = await settledMemory(real);
+      t.diagnostic(`the viewer's RSS after ${LIVE} live heights in one of 8 rooms: ${settled.line}; ${(peak / MB).toFixed(1)} MB at most while folding`);
+      assert.ok(settled.rss <= 200 * MB, `RSS ${(settled.rss / MB).toFixed(1)} MB after a forced memory-reducing major GC`);
       // At most 2,048 heights held: pages above the oldest kept checkpoint at or above h1 − 2,048 fold nothing; the segment below it
       // was dropped and re-folds (a 255-commit seek: ≤ 255 folds before its page, within 1 s).
       const lo = 256 * Math.ceil((h1 - RETAIN_HEIGHTS) / 256);
@@ -237,7 +253,7 @@ test('T-VIZ-perf (Windows and Linux legs; R-V41): 8 rooms × 1,024 heights → f
   }
 });
 
-test('T-VIZ-perf (32 rooms; Task 15 fix round 2 ruling): a 32-room start (32 × 1,024 heights) under the room-scaled cap (534 MB) builds every first window without a V8 heap OOM: the real viewer serves all 32 rooms at h1 = 1,023, is still running and has nothing on its stderr; its first world and peak and settled RSS are reported', {
+test('T-VIZ-perf (32 rooms; Task 15 fix round 2 ruling): a 32-room start (32 × 1,024 heights) under the room-scaled cap (534 MB) admits every room within the CLI\'s ready window and builds every first window without a V8 heap OOM: the real viewer serves all 32 rooms at h1 = 1,023, is still running and has nothing on its stderr; its first world and peak and settled RSS are reported', {
   skip: !SLOW ? 'slow suite: set COWORK_VIZ_SLOW=1 (viz-slow.yml)' : process.platform === 'darwin' ? 'Windows and Linux legs' : false,
   timeout: 1_200_000,
 }, async (t) => {
@@ -270,18 +286,9 @@ test('T-VIZ-perf (32 rooms; Task 15 fix round 2 ruling): a 32-room start (32 × 
       }
       const firstWorld = realClock.monoMs() - t0;
       assert.deepEqual(world.rooms.map((r) => r.window), Array.from({ length: N }, () => ({ h0: 0, h1: HEIGHTS - 1 })));
-      // Settled as the 8-room test measures it: 20 s alone, then every 2 s until two samples agree within 2 MB (at most 40 s more).
-      await new Promise((r) => setTimeout(r, 20_000));
-      const samples: number[] = [rssOf(real.child)];
-      for (let i = 0; i < 20; i++) {
-        await new Promise((r) => setTimeout(r, 2_000));
-        samples.push(rssOf(real.child));
-        const [a, b] = samples.slice(-2) as [number, number];
-        if (Math.abs(a - b) <= 2 * MB) break;
-      }
-      const rss = samples.at(-1)!;
-      peak = Math.max(peak, ...samples);
-      t.diagnostic(`32 rooms × ${HEIGHTS} heights under ${real.flag}: first /api/v1/world ${Math.round(firstWorld)} ms; RSS ${(rss / MB).toFixed(1)} MB settled, ${(peak / MB).toFixed(1)} MB at most while folding; samples ${samples.map((x) => (x / MB).toFixed(0)).join(' ')}`);
+      // Settled as the 8-room test measures it: right after a forced memory-reducing major GC (settledMemory; final review B2).
+      const settled = await settledMemory(real);
+      t.diagnostic(`32 rooms × ${HEIGHTS} heights under ${real.flag}: ready line ${Math.round(real.readyMs)} ms (window ${readyTimeoutMs(process.platform)} ms), first /api/v1/world ${Math.round(firstWorld)} ms; RSS ${settled.line}; ${(peak / MB).toFixed(1)} MB at most while folding`);
       assert.equal(real.child.exitCode, null, 'the viewer is still running');
       assert.equal(real.child.signalCode, null, 'the viewer is still running');
       assert.equal((await worldOf(real.port, real.session)).rooms.length, N);

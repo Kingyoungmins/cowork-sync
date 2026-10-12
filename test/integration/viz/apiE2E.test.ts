@@ -138,7 +138,7 @@ test('T-VIZ-api (end to end): every response of every route and every stream pay
     }
 
     // Live: three commits in p1 (a timeline), 65 in p2 (one room_snapshot: a small window, so the snapshot fits one message; a
-    // window's snapshot carries all its ticks), p2's status.json changed (overlay, version skew: a room).
+    // snapshot carries the ticks of its newly folded heights), p2's status.json changed (overlay, version skew: a room).
     await f.clones[0]!.writer.commitMany(pubs(3, 'live'));
     await f.clones[1]!.writer.commitMany(pubs(65, 'snap'));
     writeStatus(f.clones[1]!.paths.gitDir, { plugin_version: 'skewed-9.9.9', state: 'degraded', heartbeat_mono_ms: machineMonoMs() });

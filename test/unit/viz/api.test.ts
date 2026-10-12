@@ -20,7 +20,7 @@ import type { PeerInfo } from '../../../src/viz/server/models.js';
 import { VirtualClock } from '../../sim/vclock.js';
 import { ev } from '../../helpers/vizEvents.js';
 import {
-  cardOf, deltaOf, FakeStore, layoutOf, PA, PATHS4, PB, PC, PEERS4, peerInfo, ROOM_ID, sceneAfter, snapshotOf, SPEC,
+  allKindsEvents, cardOf, deltaOf, FakeStore, layoutOf, PA, PATHS4, PB, PC, PEERS4, peerInfo, ROOM_ID, sceneAfter, snapshotOf, SPEC,
 } from '../../helpers/vizModels.js';
 
 /** A real hub whose published payloads are recorded in order (with `marks` pushed by the test interleaved). */
@@ -81,6 +81,50 @@ test('createWorldApi recomputes the world at most once per 2.5 s whatever the nu
   assert.notEqual(fresh, later[0]);
   assert.equal(a.snapshots, 3);
   assert.equal(fresh.cursor, hub.seq());
+});
+
+test('world() within 2.5 s recomputes when the hub emitted a reset after the cached world\'s cursor (an oversize snapshot through pollSinkFor) or when the ring no longer covers that cursor, so a reloading page never replays the reset it reloads for (8a final review, reset loop)', async () => {
+  const clock = new VirtualClock();
+  const { hub, log } = recordingHub(clock);
+  const store = new FakeStore(snapshotOf());
+  const handles = createHandleTable();
+  const api = createWorldApi({ stores: [store], handles, hub, clock, demo: false, captions: [] });
+  const sink = pollSinkFor(api, hub, handles, clock);
+  hub.publish({ type: 'room', room_id: ROOM_ID, change: 'state', label: 'x', branch: 'main', gone: false, badges: [], unknown: 0 });
+  const first = await api.world();
+  assert.equal(first.cursor, 1);
+  assert.equal(store.snapshots, 1);
+  clock.advance(1_000);
+  assert.equal(await api.world(), first, 'nothing happened: the cached world');
+
+  // A snapshot delta whose scene alone is over 64 KiB (its beat: 400 publishes): the hub sends one reset in its place.
+  const layout = layoutOf();
+  const base = sceneAfter(allKindsEvents(), layout);
+  const beat = Array.from({ length: 400 }, (_, i) => ev('publish', [base.at.height, 1001, i], {
+    actor: { peer: PA }, target: 1, others: [], paths: [`src/${'p'.repeat(70)}${i}.ts`], n: 1, state: 'closed', checks: 'pass', origin: 'human',
+  }));
+  log.length = 0;
+  sink.delta(deltaOf({ kind: 'snapshot', scene: { ...base, beat }, window: { h0: 0, h1: base.at.height } }));
+  assert.deepEqual(payloads(log).map((p) => p.type), ['room_snapshot'], 'the sink published a snapshot');
+  assert.equal(hub.lastReset(), 2, 'the hub replaced it with a reset');
+  clock.advance(1_000);
+  let n = store.snapshots;                                            // (the sink reads the store's snapshot too)
+  const second = await api.world();
+  assert.notEqual(second, first, 'recomputed within 2.5 s');
+  assert.equal(store.snapshots, n + 1, 'one recomputation');
+  assert.ok(second.cursor >= hub.lastReset(), `cursor ${second.cursor} at or above the reset ${hub.lastReset()}`);
+  assert.equal(await api.world(), second, 'then cached again');
+
+  // More than 1 MiB of frames after its cursor: the ring no longer covers it, and a resume from it would get a reset.
+  for (let i = 0; i < 17; i++) hub.publish({ type: 'room', room_id: ROOM_ID, change: 'state', label: 'x'.repeat(65_000), branch: 'main', gone: false, badges: [], unknown: 0 });
+  assert.equal(hub.covers(second.cursor), false);
+  clock.advance(1);
+  n = store.snapshots;
+  const third = await api.world();
+  assert.notEqual(third, second, 'recomputed within 2.5 s');
+  assert.equal(store.snapshots, n + 1, 'one recomputation');
+  assert.equal(third.cursor, hub.seq());
+  assert.equal(hub.covers(third.cursor), true, 'a cursor the ring covers');
 });
 
 test('a page that appends desks publishes one layout event whose from_version is the version before the call', async () => {

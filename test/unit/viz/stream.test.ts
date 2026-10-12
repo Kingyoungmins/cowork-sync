@@ -249,6 +249,45 @@ test('T-VIZ-stream (resume): when the events after Last-Event-ID add up to more 
   assert.deepEqual(near.ids(), [18, 19]);
 });
 
+test('T-VIZ-stream (world cache, 8a final review): lastReset() is the id of the last reset the hub emitted — published, or standing in for an oversize payload — and covers(cursor) is the resume test (a cursor ≤ seq at or above the oldest ring id − 1)', () => {
+  const clock = new VirtualClock();
+  const hub = new StreamHub(clock);
+  assert.equal(hub.lastReset(), 0, 'no reset yet');
+  assert.deepEqual([hub.covers(0), hub.covers(1)], [true, false], 'no event yet: only 0 is covered');
+  hub.publish(overlay(ROOM_A));                                       // 1
+  hub.publish({ type: 'reset' });                                     // 2: published
+  assert.equal(hub.lastReset(), 2);
+  hub.publish(roomMsg(ROOM_A));                                       // 3
+  assert.equal(hub.lastReset(), 2, 'another kind is no reset');
+  const desks: LayoutDeltaVM['desks'] = Array.from({ length: 900 }, (_, i) => ({
+    ordinal: i + 1, kind: 'file', zone: 0, cell: 0, slot: i % 23, plaque: 'plaque', path: pathOf(i, 0, 40), lockbox: false, first: i,
+  }));
+  hub.publish({ type: 'layout', room_id: ROOM_A, layout: { from_version: 0, version: 1, zones: [], desks, homeOrder: [] } });   // 4: a reset
+  assert.equal(hub.lastReset(), 4, 'a reset standing in for an oversize payload counts');
+  // A split timeline or a snapshot fitted into parts is no reset.
+  const paths = Array.from({ length: 24 }, (_, i) => pathOf(9, i, 60));
+  hub.publish(timeline(ROOM_A, 80, Array.from({ length: 40 }, (_, i) => publishAt(10 + i, paths)), [], []));
+  assert.ok(hub.seq() > 5, 'the timeline was split');
+  assert.equal(hub.lastReset(), 4);
+  // A resume older than the ring gets a reset on that stream only: it never enters the ring, so it is no reset of the hub's.
+  const old = new MemSink();
+  hub.attach(old, String(hub.seq() + 5));
+  assert.equal(old.messages()[0]?.event, 'reset');
+  assert.equal(hub.lastReset(), 4);
+  const seq = hub.seq();
+  for (let n = 0; n <= seq; n++) assert.equal(hub.covers(n), true, `${n}: the ring holds every later event`);
+  for (const n of [seq + 1, -1, 1.5, Number.NaN]) assert.equal(hub.covers(n), false, `${n}: not a cursor of this hub`);
+  // Age: after 10 min the ring is empty and only the current sequence is covered.
+  clock.advance(RING_MS + 1);
+  assert.deepEqual([hub.covers(seq - 1), hub.covers(seq)], [false, true]);
+  // Bytes: past 1 MiB of later frames the oldest leave the ring, and a cursor before them is no longer covered.
+  hub.publish(roomMsg(ROOM_B));
+  const at = hub.seq();
+  assert.equal(hub.covers(at - 1), true);
+  for (let i = 0; i < 17; i++) hub.publish({ type: 'room', room_id: ROOM_A, change: 'state', label: 'x'.repeat(65_000), branch: 'main', gone: false, badges: [], unknown: 0 });
+  assert.deepEqual([hub.covers(at - 1), hub.covers(at), hub.covers(hub.seq())], [false, false, true]);
+});
+
 /** A stream response whose backlog the test sets: writableLength stands for the bytes the reader has not taken. */
 class FakeResponse extends EventEmitter implements SseResponse {
   writableLength = 0;
@@ -547,6 +586,53 @@ test('T-VIZ-stream: no SSE message exceeds 64 KiB', async (t) => {
     assert.deepEqual({ ...got, cards: [] }, { ...snap, cards: [] }, 'everything else unchanged');
     const oneMore = { ...snap, cards: cards.slice(cards.length - got.cards.length - 1) };
     assert.ok(Buffer.byteLength(frameSse(1, oneMore), 'utf8') > SSE_MAX_BYTES, 'as many as fit');
+  });
+
+  await t.test('B1: a snapshot whose ticks do not fit is one room_snapshot (its newest cards, then the oldest ticks that fit) and tick-only timeline parts with its h1 — never a reset while the scene alone fits', () => {
+    const hub = new StreamHub(new VirtualClock());
+    const sink = new MemSink();
+    hub.attach(sink, '0');
+    // A +2,000-height catch-up: two ticks per height (about 116 KB of ticks), its last 200 cards (about 50 KB) and a small scene.
+    const ticks: Tick[] = [];
+    for (let h = 1_001; h <= 3_000; h++) ticks.push({ h, glyph: 'publish' }, { h, glyph: h % 2 === 0 ? 'door' : 'save' });
+    const cards = Array.from({ length: 200 }, (_, i) => cardAt(2_801 + i, [pathOf(2_801 + i, 0, 20)]));
+    const snap: Extract<StreamPayload, { type: 'room_snapshot' }> = {
+      type: 'room_snapshot', room_id: ROOM_A, window: { h0: 256, h1: 3_000 }, scene: emptyScene(3_000), cards, ticks,
+      characters: [character(1), character(2)], pets: [],
+    };
+    const sceneAlone = Buffer.byteLength(frameSse(1, { ...snap, cards: [], ticks: [] }), 'utf8');
+    assert.ok(sceneAlone < 4_096, `the scene alone is small (${sceneAlone} bytes)`);
+    assert.ok(Buffer.byteLength(frameSse(1, { ...snap, cards: [] }), 'utf8') > SSE_MAX_BYTES, 'the ticks alone are over 64 KiB');
+    hub.publish(snap);
+    const msgs = check(sink);
+    assert.ok(!msgs.some((m) => m.event === 'reset'), 'no reset');
+    assert.deepEqual(msgs.map((m) => m.id), msgs.map((_, i) => i + 1), 'consecutive ids');
+    assert.equal(msgs[0]?.event, 'room_snapshot');
+    assert.ok(msgs.length >= 2, `tick-only parts follow (${msgs.length} messages)`);
+    const got = msgs[0]!.data as Extract<StreamPayload, { type: 'room_snapshot' }>;
+    assert.deepEqual([got.room_id, got.window, got.scene, got.characters, got.pets], [snap.room_id, snap.window, snap.scene, snap.characters, snap.pets]);
+    // Its cards: the newest that fit with no ticks (the ticks never push a card out).
+    assert.ok(got.cards.length > 0);
+    assert.deepEqual(got.cards, cards.slice(cards.length - got.cards.length), 'a suffix: the newest cards');
+    if (got.cards.length < cards.length) {
+      const oneMore = { ...snap, cards: cards.slice(cards.length - got.cards.length - 1), ticks: [] };
+      assert.ok(Buffer.byteLength(frameSse(1, oneMore), 'utf8') > SSE_MAX_BYTES, 'as many cards as fit');
+    }
+    // Then the oldest ticks that still fit.
+    assert.ok(got.ticks.length > 0, 'the room left after the cards takes ticks');
+    assert.ok(Buffer.byteLength(frameSse(1, { ...got, ticks: ticks.slice(0, got.ticks.length + 1) }), 'utf8') > SSE_MAX_BYTES, 'as many ticks as fit');
+    const parts = msgs.slice(1).map((m) => m.data as Extract<StreamPayload, { type: 'timeline' }>);
+    for (const part of parts) {
+      assert.deepEqual({ ...part, ticks: [] }, { type: 'timeline', room_id: ROOM_A, h1: 3_000, events: [], cards: [], ticks: [], characters: [], pets: [] }, 'a tick-only part with the snapshot h1');
+      assert.ok(part.ticks.length > 0);
+    }
+    assert.deepEqual([...got.ticks, ...parts.flatMap((p) => p.ticks)], ticks, 'every tick once, in order');
+    // A snapshot whose ticks fit stays one message with all of them.
+    const small = { ...snap, ticks: ticks.slice(0, 40) };
+    hub.publish(small);
+    const last = check(sink).slice(msgs.length);
+    assert.equal(last.length, 1);
+    assert.deepEqual((last[0]!.data as typeof small).ticks, small.ticks);
   });
 
   await t.test('a single event whose framed message with its card exceeds 64 KiB becomes one reset', () => {

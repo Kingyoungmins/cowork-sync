@@ -16,6 +16,7 @@
 import { CHECKPOINT_EVERY, type FoldState } from '../../board/fold.js';
 import type { Clock } from '../../ports/clock.js';
 import type { Fs } from '../../ports/fs.js';
+import { STATUS_STATES } from '../i18n/codes.js';
 import type { Card } from '../model/cards.js';
 import type { PeerRef, SceneEvent, SeatRef } from '../model/events.js';
 import { ZERO_PEER, type Frame } from '../model/frame.js';
@@ -413,7 +414,9 @@ export class RoomStore implements StoreLike {
       roomId: this.spec.id, window: { h0: w.h0, h1: w.h1 }, layout: layoutDelta(layout0, w.layout),
       peers: changedOnly(peers0, peerInfos(w.head.state)), pets: changedOnly(pets0, petInfos(w.head.carry.scene)),
     };
-    if (w.h1 - h1 > SNAPSHOT_AFTER) return { ...base, kind: 'snapshot', events: [], cards: this.lastCards(w), ticks: [...w.ticks], scene: w.head.carry.scene };
+    // A snapshot carries the ticks of the newly folded heights only, like a timeline delta: h0 never moves here, so the page appends
+    // them to the window's ticks it holds (8a final review B1; the whole window's would turn a big catch-up into a reset).
+    if (w.h1 - h1 > SNAPSHOT_AFTER) return { ...base, kind: 'snapshot', events: [], cards: this.lastCards(w), ticks: ticksOf(run.events), scene: w.head.carry.scene };
     return { ...base, kind: 'timeline', events: run.events, cards: run.cards.map((c) => this.model(w, c)), ticks: ticksOf(run.events), scene: null };
   }
 
@@ -517,7 +520,11 @@ export class RoomStore implements StoreLike {
     } catch (e) {
       this.log(() => this.deps.log.error('UI_VIZ_STATUS_UNREADABLE', e));    // EIO and the like: the previous read stays
     }
-    const o = overlayOf(this.status ?? NOT_READ, this.deps.machineMonoMs(), this.deps.viewerVersion, youOf(this.peerFile, this.status));
+    let o = overlayOf(this.status ?? NOT_READ, this.deps.machineMonoMs(), this.deps.viewerVersion, youOf(this.peerFile, this.status));
+    // R-V43, VIZ-13 (8a final review): a state outside the closed set (a newer daemon, a hand edit) keeps the last light of the set;
+    // the projection serves '?' only before any valid state.
+    const kept = this.overlay?.state;
+    if (!STATUS_STATES.has(o.state) && kept !== undefined && STATUS_STATES.has(kept)) o = { ...o, state: kept };
     if (o.versionSkew) this.badges.add('UI_VIZ_VERSION_SKEW');
     else this.badges.delete('UI_VIZ_VERSION_SKEW');
     const key = JSON.stringify(o);

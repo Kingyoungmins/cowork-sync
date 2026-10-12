@@ -93,7 +93,10 @@ repository root.
 
 1. Change the version in all of these places: `package.json`, both `"version"` fields at the top of `package-lock.json`,
    `src/version.ts`, and `plugin/.claude-plugin/plugin.json`. `test/unit/version.test.ts` and `test/unit/plugin.test.ts` check
-   that they agree.
+   that they agree. After every `PLUGIN_VERSION` bump, re-run `node --import tsx tools/viz/storyboard.ts` and commit the
+   regenerated `src/viz/demo/plan2.jsonl`: the viewer's bundled demo embeds the plugin version, so its
+   `node --import tsx tools/viz/storyboard.ts --check` (and `test/integration/viz/storyboard.test.ts`, which runs it in CI) fails
+   otherwise.
 2. Set the catalog entry's `ref` to the new tag (`.claude-plugin/marketplace.json`). Update or drop the `sha` if one is set.
 3. Repeat steps 1 to 6 above with the new version.
 

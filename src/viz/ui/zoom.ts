@@ -30,8 +30,12 @@ export class ZoomState {
   get coarse(): boolean { return this.coarseView; }
   open(panelW: number): void { this.zoom = autoZoom(panelW, this.worldW); }
   resize(panelW: number): void { this.zoom = autoZoom(panelW, this.worldW); }
-  /** + or − steps from the current zoom, within 2–8. */
-  userZoom(delta: number): void { this.zoom = clampZoom(this.zoom + delta); }
+  /** + or − steps from the current zoom, within 2–8. The auto-fit Z of a wide panel can sit above 8: there + changes nothing (it never
+   *  shrinks the office) and − steps to at most 8 (clampZoom of min(z − 1, 8)). */
+  userZoom(delta: number): void {
+    if (delta > 0 && this.zoom >= ZOOM_MAX) return;
+    this.zoom = clampZoom(this.zoom + delta);
+  }
   /** The office grew (it grows downward only; its width, and so Z, never changes): nothing changes. */
   officeGrew(): void { /* VIZ-16: the panel scrolls instead */ }
   toggleCoarse(): void { this.coarseView = !this.coarseView; }

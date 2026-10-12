@@ -144,7 +144,7 @@ The flags are glossary §15's, verbatim. This chapter interprets:
 - `save "<summary>"`: `--sign`, `--approve-check=<sha8>`, `--confirm=<id>`.
 - `uninstall`: `--purge`, `--discard-holds=<ids>`, `--confirm=<id>`.
 
-Flags of two glossary §15 verbs that are not lifecycle verbs, cited here and interpreted by their owners: `since`: `--since=<anchor>`, `--json` (read-only; 10-product §3.9a) *(new in rev 2.5, F04)*; `revert <cs_id>|last`: `--confirm=<id>` (acting; the computation is 05-holds Algorithm REV and the verb surface is 10-product's; this chapter interprets only its `--confirm` through §3.2) *(new in rev 2.5, F10)*.
+Flags of three *(8a batch, after Plan 2's: was two)* glossary §15 verbs that are not lifecycle verbs, cited here and interpreted by their owners: `since`: `--since=<anchor>`, `--json` (read-only; 10-product §3.9a) *(new in rev 2.5, F04)*; `revert <cs_id>|last`: `--confirm=<id>` (acting; the computation is 05-holds Algorithm REV and the verb surface is 10-product's; this chapter interprets only its `--confirm` through §3.2) *(new in rev 2.5, F10)*; `view`: `--no-open`, `--demo[=<file>]`, `--repo <path>` (12-visualizer; read-only) *(8a batch, after Plan 2's; 12 §9.4)*.
 
 Verbs that use the preview/confirm step (§3.2) are exactly glossary §15's list: `save`, `recover` (mechanics in ENG-22, surface §3.13), `start --publish` with pre-existing local work, `start --fresh`, `stop --discard-holds`, `uninstall --purge --discard-holds`, `review <id> --accept` (write in SEC-33; digest of record rev, team blob and disk blob), and `revert <cs_id>|last` (§3.2 item 5; digest of the target, its commit oids and every path's disk and result blob, and the kept and skipped lists) *(new in rev 2.5, F10)*.
 

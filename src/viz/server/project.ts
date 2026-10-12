@@ -224,12 +224,15 @@ const ELLIPSIS = '\u{2026}';
 /** A display ending in what looks like a handle (R-V52): it always counts as colliding, so it shows its own handle. */
 const HANDLE_LOOKALIKE = /[\s.\u{B7}\u{2022}-]+[0-9a-f]{6,}$/u;
 
-/** Default-ignorable code points. validName admits the Mn and Lo ones and sanitize keeps them. The Mn ones (U+034F, U+17B4, U+17B5,
- *  U+180B–U+180D, U+180F, U+FE00–U+FE0F, U+E0100–U+E01EF) draw as nothing, so name comparison removes them (fix round 1). */
+/** Default-ignorable code points. validName admits the Mn and Lo ones, but sanitize(…, 'viz') strips every one of them (follow-up FS),
+ *  so a shown name holds none: the removals below are defence in depth, kept so that name comparison stays right should a name ever
+ *  reach it unsanitized. The Mn ones (U+034F, U+17B4, U+17B5, U+180B–U+180D, U+180F, U+FE00–U+FE0F, U+E0100–U+E01EF) draw as
+ *  nothing, so comparison removes them (fix round 1). */
 const INVISIBLE = /\p{Default_Ignorable_Code_Point}/gu;
-/** The four Lo default-ignorables, the Hangul fillers. They do not draw as nothing: HarfBuzz keeps them visible (Uniscribe
- *  compatibility) and fillText draws a blank space (7–14 px at 14 px in Chromium). Name comparison therefore also reads each as a
- *  space (fix round 2). NFKC maps U+3164 and U+FFA0 to U+1160 and maps nothing else onto a filler. */
+/** The four Lo default-ignorables, the Hangul fillers. Unsanitized they do not draw as nothing: HarfBuzz keeps them visible (Uniscribe
+ *  compatibility) and fillText draws a blank space (7–14 px at 14 px in Chromium), so comparison also reads each as a space (fix
+ *  round 2). sanitize strips them too (FS), so on a shown name this form equals the other: defence in depth, like INVISIBLE. NFKC
+ *  maps U+3164 and U+FFA0 to U+1160 and maps nothing else onto a filler. */
 const HANGUL_FILLER = /[\u{115F}\u{1160}\u{3164}\u{FFA0}]/gu;
 
 /** The sanitized display a valid name shows, or null (validName fails, or only whitespace, Hangul fillers and invisible marks are left):
@@ -268,7 +271,8 @@ const comparisonForm = (s: string): string =>
 /** The comparison forms of a shown name, distinct: with the Hangul fillers removed, and with each read as a space (mapped before
  *  INVISIBLE removes it). Two names that draw the same share a form, and a forged handle suffix whose separator is a filler, or that
  *  carries an invisible mark or a filler inside it, matches HANDLE_LOOKALIKE in one of them (R-V52, VIZ-18). The union only adds
- *  collisions, the direction R-V52 allows. */
+ *  collisions, the direction R-V52 allows. A shown name is sanitized, which already strips the fillers and the marks (FS), so it has
+ *  one form today; the two forms stay as defence in depth (8a final review). */
 const nameKeys = (shown: string): readonly string[] => {
   const removed = comparisonForm(shown);
   const spaced = comparisonForm(shown.replace(HANGUL_FILLER, ' '));

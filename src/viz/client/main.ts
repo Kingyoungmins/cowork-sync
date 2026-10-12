@@ -6,17 +6,22 @@
 // timeline (ui/roomView.ts: the world's head scene, the stream's events, timeline pages loaded below it, the seek cache, the live
 // queue); live beats play at 300 ms and snap to the newest scene after a 5 s backlog; replay steps at 800 ms / k and draws only
 // heights the page holds — a seek to a height still loading keeps the last frame until it arrives (§3.9.1, VIZ-26). Demo mode
-// shows its banner and plays from h0 with its captions (R-V32). Browser only: DOM, canvas and event glue (R-V33).
+// shows its banner and plays from h0 with its captions (R-V32). (rev 2.5, F32; Task 19) One FollowSet per page, in memory only
+// (FEAT-F32-01): a room's follow pins the log's person filter while that room is selected, the office consults the follow camera
+// instead of the 30 s rule there, and the now card above the log is recomputed from the scene on screen after each beat and seek.
+// Browser only: DOM, canvas and event glue (R-V33).
 import { LANGS, type Lang, type Params } from '../../i18n/render.js';
 import type { SceneEvent } from '../model/events.js';
+import { deskName } from '../model/labels.js';
 import type { Layout } from '../model/layout.js';
 import type { Scene } from '../model/scene.js';
 import type {
   ActorVM, CaptionVM, CardVM, CharacterVM, LayoutVM, OverlayVM, PetVM, RoomVM, StreamPayload, Tick, TimelinePage, World,
 } from '../server/viewModel.js';
-import { KEYS } from '../ui/a11y.js';
+import { keyActionFor, lampCode, modifiedKey, stepBy, streamStale } from '../ui/a11y.js';
 import { LIVE_BEAT_MS, replayBeatMs, SPEEDS } from '../ui/anim.js';
 import { Connection, firstRoom, type ConnIo, type ConnState } from '../ui/conn.js';
+import { beatScroll, FollowSet, nowCard, nowRows } from '../ui/follow.js';
 import { consumeLaunchToken } from '../ui/fragment.js';
 import { cardText, LogModel } from '../ui/logModel.js';
 import { headerLamp } from '../ui/map.js';
@@ -27,7 +32,7 @@ import { CLS, button, createA11y, el, setPressed, type A11y } from './a11y.js';
 import { createConnIo } from './api.js';
 import { createLogPanel, type LogPanel } from './log.js';
 import { createOffice, type Office } from './office.js';
-import { createRewind, PAGE_HEIGHTS, tickOf, type Rewind } from './rewind.js';
+import { createRewind, tickOf, type Rewind } from './rewind.js';
 
 const LANG_KEY = 'UI_VIZ_CTRL_LANGUAGE';               // localStorage: the language switcher's choice (a per-viewer convenience)
 const SEEN_REFRESH_MS = 60_000;
@@ -93,6 +98,7 @@ export function boot(): void {
   banner.hidden = true;
   const lamp = el('span', CLS.lamp, top);
   lamp.hidden = true;
+  lamp.setAttribute('role', 'img');                    // the light with a label (VIZ-19: never colour alone)
   const roomTitle = el('span', CLS.status, top);
   const status = el('div', CLS.status, top);
   status.setAttribute('role', 'status');
@@ -130,8 +136,17 @@ export function boot(): void {
   let beatTimer: number | null = null;
   let stepTimer: number | null = null;
   let captionUntil: number | null = null;
+  /** Who each room follows (12 §3.8.1): page memory only — never sent, stored, logged or put in the fragment (FEAT-F32-01). */
+  const follows = new FollowSet((room, n) => {
+    // FEAT-F32-11 (SHOULD): the selected room's follow start and end, whatever caused them, are offered to the announcer (≤ 1 per 10 s).
+    if (room === selected) a11y.announce(t(n.code, { name: sel()?.names.get(n.peer) ?? n.peer }));
+  });
 
   const sel = (): RoomState | null => (selected === null ? null : rooms.get(selected) ?? null);
+  /** A card's desk named by kind in the selected room (cardText's {path} when the card has no file chip; final review group B). */
+  const deskNameOfSel = (d: number): string | null => { const r = sel(); return r === null ? null : deskName(r.layout, d); };
+  /** The peer the selected room follows, or null. */
+  const followed = (): string | null => (selected === null ? null : follows.get(selected));
   const session = (): string => io.storage.get().session ?? '';
   const withSession = (): { method: 'GET'; headers: Record<string, string> } => ({ method: 'GET', headers: { 'X-Cowork-Session': session() } });
 
@@ -142,6 +157,8 @@ export function boot(): void {
     root: appRoot, canvas, people, live, controls, t,
     onMotion: () => office.motion(),
     onPerson: (h) => filterPerson(h),
+    onFollow: (h) => followPerson(h),
+    followed: () => followed(),
   });
   const office: Office = createOffice(canvas, mapCanvas, scrollBox, {
     t,
@@ -154,6 +171,7 @@ export function boot(): void {
     },
     selectRoom: (id) => select(id),
     highlighted: () => logPanel.filter().peer,
+    followed: () => followed(),
   });
   const logPanel: LogPanel = createLogPanel(logAside, {
     t,
@@ -165,15 +183,20 @@ export function boot(): void {
     },
     personOf: (a) => personOf(a),
     deskOfPath: (p) => sel()?.layoutVM.desks.find((d) => d.path === p)?.ordinal ?? null,
+    deskNameOf: (d) => deskNameOfSel(d),
     pathOfDesk: (d) => {
       const desk = sel()?.layoutVM.desks[d];
       return desk === undefined ? null : desk.path ?? desk.plaque;
     },
     changed: () => {
+      filterChanged();
       renderLog();
       redraw();
     },
     version: () => sel()?.textVersion ?? 0,
+    following: () => followed() !== null,
+    toggleFollow: () => toggleFollow(),
+    recentre: () => office.camera('chip'),
   });
   const rewind: Rewind = createRewind(rewindBar, {
     t,
@@ -191,7 +214,7 @@ export function boot(): void {
     live: () => goLive(),
     earlier: () => {
       const r = sel();
-      if (r !== null) void r.tl.earlier();
+      if (r !== null) void r.tl.earlier().then(() => { if (r === sel()) office.camera('earlier'); });
     },
     describe: (h) => {
       const r = sel();
@@ -234,7 +257,7 @@ export function boot(): void {
     return r?.names.get(h) ?? h;
   }
   function cardLine(c: CardVM): string {
-    const x = cardText(c, nameOf);
+    const x = cardText(c, nameOf, deskNameOfSel);
     return t(x.code, x.params);
   }
 
@@ -261,8 +284,9 @@ export function boot(): void {
     relabel();
   }
   function relabel(): void {
-    zoomOut.setAttribute('aria-label', t('UI_VIZ_CTRL_ZOOM'));
-    zoomIn.setAttribute('aria-label', t('UI_VIZ_CTRL_ZOOM'));
+    // Two buttons, two names (12 §3.11): the control code with the sign each one shows.
+    zoomOut.setAttribute('aria-label', `${t('UI_VIZ_CTRL_ZOOM')} \u{2212}`);
+    zoomIn.setAttribute('aria-label', `${t('UI_VIZ_CTRL_ZOOM')} +`);
     coarse.textContent = t('UI_VIZ_CTRL_COARSE');
     langSelect.setAttribute('aria-label', t('UI_VIZ_CTRL_LANGUAGE'));
     a11y.relabel();
@@ -335,10 +359,13 @@ export function boot(): void {
   function onWorld(w: World): void {
     world = w;
     const prev = selected;
+    // A world reload ends a room's follow when the room no longer lists the followed handle (R-V22: extended after a collision).
+    for (const vm of w.rooms) follows.worldReloaded(vm.room_id, new Set(vm.characters.map((c) => c.handle)));
     rooms.clear();
     for (const vm of w.rooms) rooms.set(vm.room_id, roomOf(vm, w.captions));
     order = w.rooms.map((r) => r.room_id);
     selected = firstRoom(w, prev ?? io.storage.get().room);
+    keepFilters();
     stopTimers();
     pending = null;
     mode.live = true;
@@ -349,6 +376,17 @@ export function boot(): void {
       if (w.demo) startDemo();
     });
     enterRoom(true);
+  }
+  /** The log filters after a world reload (12 §3.8 "Filters", §3.8.1; R-V22): the selected room's follow, when the follow set kept it,
+   *  pins the person filter; else a person filter on a handle the room no longer lists (extended after a collision) is cleared, and so
+   *  is a file filter on a desk beyond the room's layout. */
+  function keepFilters(): void {
+    const r = sel();
+    const f = logPanel.filter();
+    const pinned = selected === null ? null : follows.get(selected);
+    if (pinned !== null) logPanel.person(pinned);
+    else if (f.peer !== null && (r === null || !r.characters.has(f.peer))) logPanel.person(null);
+    if (f.desk !== null && (r === null || f.desk >= r.layout.desks.length)) logPanel.desk(null);
   }
 
   function onPayload(p: StreamPayload): void {
@@ -381,12 +419,16 @@ export function boot(): void {
         upsert(r, p.characters, p.pets);
         r.tl.snapshot(start, p.window);
         r.live.reset(start);
-        r.ticks = [...p.ticks];
+        // The ticks of the newly folded heights (8a final review B1): appended, as the tick-only timeline parts that may follow are.
+        r.ticks.push(...p.ticks);
         r.caught = [...r.caught, p.window.h1];
         addCards(r, p.cards);
         if (r.id === selected) {
-          if (mode.live) office.show(start, { live: true, overlay: r.overlay, speed: 1, animate: false });
-          else if (pending === null && !r.tl.holds(mode.at)) {
+          if (mode.live) {
+            office.show(start, { live: true, overlay: r.overlay, speed: 1, animate: false });
+            office.camera('snapshot');
+            a11y.scene(start, [...r.characters.values()], r.layout);
+          } else if (pending === null && !r.tl.holds(mode.at)) {
             // The replay position is no longer held (the view restarted at the new tip): it loads again; the last frame stays.
             pending = { h: mode.at, play: false };
             void r.tl.want(mode.at);
@@ -472,15 +514,19 @@ export function boot(): void {
     if (b.kind === 'snap') {
       r.caught = [...r.caught, b.height];
       office.show(b.scene, { live: true, overlay: r.overlay, speed: 1, animate: false });
+      office.camera('snapshot');
       a11y.scene(b.scene, [...r.characters.values()], r.layout);
       refresh();
       return;
     }
     office.show(b.scene, { live: true, overlay: r.overlay, speed: 1, animate: true });
-    const first = b.events.find((e) => e.kind === 'publish');
-    if (first !== undefined && first.kind === 'publish') office.follow(first.target);
+    // 12 §3.8.1: in a room with a follow the follow camera replaces the 30 s rule (beatScroll, ui/follow.ts).
+    const scroll = beatScroll(followed(), b.events);
+    if (scroll?.by === 'camera') office.camera('beat');
+    else if (scroll?.by === 'rule') office.follow(scroll.desk);
     captionFor(r, b.height, LIVE_BEAT_MS);
     a11y.scene(b.scene, [...r.characters.values()], r.layout);
+    renderNow();
     updateRewind();
     if (r.live.queued() > 0) beatTimer = window.setTimeout(() => liveBeat(), LIVE_BEAT_MS);
   }
@@ -490,12 +536,15 @@ export function boot(): void {
   function shownScene(r: RoomState): Scene | null {
     return mode.live ? r.live.scene() : r.tl.sceneAt(mode.at);
   }
-  function showReplay(animate: boolean): void {
+  /** The replay position on screen: a step of the playing replay (cause 'beat', animated) or a seek. In replay the follow camera is the
+   *  only automatic scroll (12 §3.8.1). */
+  function showReplay(cause: 'beat' | 'seek'): void {
     const r = sel();
     if (r === null) return;
     const s = r.tl.sceneAt(mode.at);
     if (s !== null) {
-      office.show(s, { live: false, overlay: null, speed: mode.speed, animate });
+      office.show(s, { live: false, overlay: null, speed: mode.speed, animate: cause === 'beat' });
+      office.camera(cause);
       captionFor(r, mode.at, replayBeatMs(mode.speed));
       a11y.scene(s, [...r.characters.values()], r.layout);
     }
@@ -521,7 +570,7 @@ export function boot(): void {
         return;
       }
       mode.at = next;                                   // an event the page holds: inside its one held run
-      showReplay(true);
+      showReplay('beat');
     }                                                   // else a position is loading: try again next beat
     stepTimer = window.setTimeout(() => replayStep(), replayBeatMs(mode.speed));
   }
@@ -531,7 +580,7 @@ export function boot(): void {
     beatTimer = null;
     mode.live = false;
     mode.at = at;
-    showReplay(false);
+    showReplay('seek');
     if (andPlay) play(true);
   }
   /** A seek (the slider, the keys, play from live, the demo start): a held height shows at once; any other loads first and shows
@@ -579,6 +628,7 @@ export function boot(): void {
     r.tl.dropTarget();
     r.live.reset(r.tl.head());
     office.show(r.live.scene(), { live: true, overlay: r.overlay, speed: 1, animate: false });
+    office.camera('seek');                              // back to the tip: a jump, like a seek
     a11y.scene(r.live.scene(), [...r.characters.values()], r.layout);
     refresh();
   }
@@ -637,7 +687,8 @@ export function boot(): void {
     pending = null;
     mode.live = true;
     mode.playing = false;
-    logPanel.person(null);
+    // Not a person-filter change (12 §3.8.1): that room's own follow, or none, pins the person filter; the left room's follow is kept.
+    logPanel.person(follows.get(id));
     logPanel.desk(null);
     enterRoom(false);
   }
@@ -648,6 +699,7 @@ export function boot(): void {
     if (r !== null) {
       r.live.reset(r.tl.head());
       office.show(r.live.scene(), { live: true, overlay: r.overlay, speed: 1, animate: false });
+      office.camera('room');
       a11y.scene(r.live.scene(), [...r.characters.values()], r.layout);
     } else a11y.scene(null, [], null);
     if (fresh) caption.textContent = '';
@@ -655,8 +707,58 @@ export function boot(): void {
   }
   function filterPerson(h: string): void {
     logPanel.person(h);
+    filterChanged();
     renderLog();
     redraw();
+  }
+  /** The person filter may have changed: another person, a cleared filter or Esc ends the selected room's follow (12 §3.8.1); the
+   *  followed peer itself again ends nothing. */
+  function filterChanged(): void {
+    if (selected !== null) follows.filterChanged(selected, logPanel.filter().peer);
+    a11y.refresh();
+  }
+  /** The toggle on the person-filter chip, the now card's toggle, or F: follow the person filter's peer, or stop following; nothing
+   *  without a person filter. */
+  function toggleFollow(): void {
+    if (selected === null) return;
+    const p = follows.toggle(selected, logPanel.filter().peer);
+    if (p !== null) followStarted(p);
+    else followChanged();
+  }
+  /** The second button of a hidden people-list row (12 §3.11): follow that row's person (the person filter becomes it), or stop. */
+  function followPerson(h: string): void {
+    if (selected === null) return;
+    if (followed() === h) return toggleFollow();
+    logPanel.person(h);
+    filterChanged();
+    const p = follows.toggle(selected, h);
+    if (p !== null) followStarted(p);
+    else followChanged();
+  }
+  /** A follow started: the person filter is its peer and the camera centres it (the follow set offered the start to the announcer). */
+  function followStarted(peer: string): void {
+    logPanel.person(peer);
+    office.camera('start');
+    followChanged();
+  }
+  function followChanged(): void {
+    a11y.refresh();
+    renderLog();
+    redraw();
+  }
+  /** The now card (12 §3.8.1) from the scene on screen, the layout and the character table; the last card stays while a replay position
+   *  loads (nothing is drawn then either). */
+  function renderNow(): void {
+    const r = sel();
+    const peer = followed();
+    if (r === null || peer === null) return logPanel.now(null);
+    const s = shownScene(r);
+    if (s === null) return;
+    const name = (h: string): string => r.names.get(h) ?? h;
+    logPanel.now({
+      name: name(peer), hue: r.looks.get(peer)?.hue ?? null, reason: s.characters.get(peer)?.frozen ?? '?',
+      rows: nowRows(nowCard(s, r.layout, peer), s, name),
+    });
   }
   function redraw(): void {
     const r = sel();
@@ -668,6 +770,7 @@ export function boot(): void {
   function renderLog(): void {
     const r = sel();
     logPanel.render(r === null ? null : r.log, { replay: !mode.live, nowMono: performance.now() });
+    renderNow();
   }
   function updateRewind(): void {
     const r = sel();
@@ -675,7 +778,7 @@ export function boot(): void {
     const top = r.tl.top();
     const at = pending !== null ? pending.h : mode.live ? top : mode.at;
     rewind.update({
-      h0: r.tl.h0, h1: top, at, live: mode.live, playing: mode.playing, speed: mode.speed, reconnecting: connState === 'reconnecting',
+      h0: r.tl.h0, h1: top, at, live: mode.live, playing: mode.playing, speed: mode.speed, stale: streamStale(connState),
       canEarlier: r.tl.canEarlier(), ticks: r.ticks, caught: r.caught,
     });
   }
@@ -704,6 +807,8 @@ export function boot(): void {
         lamp.className = CLS.lamp;
         lamp.classList.add(lampState.down ? CLS.lampDown : lampState.unreadable ? CLS.lampWarn : CLS.lampOk);
         lamp.title = lampState.state;
+        const lampWord = lampCode(lampState);            // VIZ-19: the label names a down or unreadable state, not the colour alone
+        lamp.setAttribute('aria-label', lampWord === null ? lampState.state : `${lampState.state} \u{00B7} ${t(lampWord)}`);
         if (lampState.down) notes.push(t('UI_VIZ_ROOM_DOWN'));
         if (lampState.unreadable) notes.push(t('UI_VIZ_STATUS_UNREADABLE'));
       }
@@ -733,7 +838,12 @@ export function boot(): void {
   function renderMap(): void {
     drawMap();
     const list = order.map((id) => rooms.get(id)).filter((r): r is RoomState => r !== undefined);
-    const rows = list.map((r) => ({ id: r.id, text: r.branch === '' ? r.label : `${r.label} \u{00B7} ${r.branch}`, current: r.id === selected }));
+    const rows = list.map((r) => {
+      const name = r.branch === '' ? r.label : `${r.label} \u{00B7} ${r.branch}`;
+      // VIZ-19: the map's status lamp is not colour alone — a down or unreadable room says so in its button.
+      const code = lampCode(headerLamp(r.overlay));
+      return { id: r.id, text: code === null || !hasStrings() ? name : `${name} \u{00B7} ${t(code)}`, current: r.id === selected };
+    });
     const key = JSON.stringify(rows);
     if (key === roomsKey) return;
     roomsKey = key;
@@ -770,17 +880,22 @@ export function boot(): void {
   document.addEventListener('keydown', (e) => {
     const target = e.target;
     const typing = target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement;
-    const action = Object.hasOwn(KEYS, e.key) ? KEYS[e.key] : undefined;
-    if (action === undefined || (typing && action !== 'clear_filters')) return;
+    const action = keyActionFor(e.key, typing, modifiedKey(e));   // none with Ctrl, Meta or Alt held (12 §3.11, §3.8.1)
+    if (action === null) return;
     const r = sel();
     switch (action) {
       case 'live':
         goLive();
         break;
       case 'clear_filters':
+        // Esc (8a has no export panel): every filter cleared, and so the selected room's follow ends (12 §3.11, §3.8.1).
         logPanel.clear();
+        filterChanged();
         renderLog();
         redraw();
+        break;
+      case 'follow':
+        toggleFollow();
         break;
       case 'zoom_in':
         office.zoomBy(1);
@@ -790,10 +905,12 @@ export function boot(): void {
         break;
       case 'step_back': case 'step_fwd': case 'page_back': case 'page_fwd': {
         if (r === null) return;
-        const n = action === 'step_back' ? -1 : action === 'step_fwd' ? 1 : action === 'page_back' ? -PAGE_HEIGHTS : PAGE_HEIGHTS;
+        // ±1 or ±64 from the position on screen; a forward key at the tip shown live does nothing (12 §3.9.1: live already shows the tip).
+        const by = stepBy(action, mode.live && pending === null);
+        if (by === null) return;
         const from = pending !== null ? pending.h : mode.live ? r.tl.top() : mode.at;
         e.preventDefault();
-        seek(from + n);
+        seek(from + by);
         break;
       }
       case 'select':

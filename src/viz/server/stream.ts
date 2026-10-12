@@ -147,9 +147,12 @@ function splitTimeline(p: Timeline, firstId: number): StreamPayload[] | null {
   });
 }
 
-/** The snapshot with the longest suffix of its cards (the newest) that fits; null when it does not fit without cards. */
+/** A snapshot over 64 KiB as messages that each fit (8a final review B1), or null when the scene alone — with its characters and
+ *  pets, without cards and ticks — does not fit. The snapshot keeps the longest suffix of its cards (the newest) that fits without
+ *  ticks, then the longest prefix of its ticks that still fits; the ticks left over follow, in order, as tick-only timeline parts
+ *  with the snapshot's h1 (no events, cards, characters or pets), which the page appends like any timeline's ticks. */
 function fitSnapshot(p: Snapshot, id: number): StreamPayload[] | null {
-  let total = bytes(frameSse(id, { ...p, cards: [] }));
+  let total = bytes(frameSse(id, { ...p, cards: [], ticks: [] }));
   if (total > SSE_MAX_BYTES) return null;
   let keep = 0;
   for (let i = p.cards.length - 1; i >= 0; i--) {
@@ -158,7 +161,17 @@ function fitSnapshot(p: Snapshot, id: number): StreamPayload[] | null {
     total = next;
     keep++;
   }
-  return [{ ...p, cards: p.cards.slice(p.cards.length - keep) }];
+  let fit = 0;
+  for (; fit < p.ticks.length; fit++) {
+    const next = total + added(size(p.ticks[fit]), fit);
+    if (next > SSE_MAX_BYTES) break;
+    total = next;
+  }
+  const snapshot: Snapshot = { ...p, cards: p.cards.slice(p.cards.length - keep), ticks: p.ticks.slice(0, fit) };
+  if (fit === p.ticks.length) return [snapshot];
+  const rest: Timeline = { type: 'timeline', room_id: p.room_id, h1: p.window.h1, events: [], cards: [], ticks: p.ticks.slice(fit), characters: [], pets: [] };
+  const parts = splitTimeline(rest, id + 1);
+  return parts === null ? null : [snapshot, ...parts];
 }
 
 interface Entry { id: number; mono: number; frame: string; bytes: number; }
@@ -171,24 +184,44 @@ export class StreamHub {
   private ringBytes = 0;
   private readonly sinks = new Set<SseSink>();
   private byeFrame: string | null = null;
+  /** The id of the last reset emitted into the ring (lastReset). */
+  private resetId = 0;
 
   constructor(private readonly clock: Clock) {}
 
-  /** Assigns the next id(s); a timeline payload over 64 KiB is split between events (never inside one), each part its own id; a layout
-   *  delta or a snapshot scene over 64 KiB alone is replaced by one reset; a snapshot keeps as many of its newest cards as fit; a single
-   *  event whose framed message with its card exceeds 64 KiB (unreachable under R-V50's budgets; pinned by a test) is replaced by one
-   *  reset — the whole payload, so a page never holds half of it. */
+  /** Assigns the next id(s); a timeline payload over 64 KiB is split between events (never inside one), each part its own id; a
+   *  snapshot over 64 KiB keeps as many of its newest cards as fit, then as many of its ticks as still fit, and the ticks left over
+   *  follow as tick-only timeline parts with its h1 (fitSnapshot); a layout delta over 64 KiB, or a snapshot whose scene alone (no
+   *  cards, no ticks) is over 64 KiB, is replaced by one reset; a single event whose framed message with its card exceeds 64 KiB
+   *  (unreachable under R-V50's budgets; pinned by a test) is replaced by one reset — the whole payload, so a page never holds half of
+   *  it. */
   publish(p: StreamPayload): void {
     const id = this.last + 1;
     const whole = frameSse(id, p);
     if (bytes(whole) <= SSE_MAX_BYTES) {
-      this.emit(whole);
+      this.emit(whole, p.type === 'reset');
       return;
     }
     const parts = p.type === 'timeline' ? splitTimeline(p, id) : p.type === 'room_snapshot' ? fitSnapshot(p, id) : null;
     const frames = parts?.map((q, i) => frameSse(id + i, q));
-    if (frames === undefined || frames.some((f) => bytes(f) > SSE_MAX_BYTES)) this.emit(frameSse(id, { type: 'reset' }));
+    if (frames === undefined || frames.some((f) => bytes(f) > SSE_MAX_BYTES)) this.emit(frameSse(id, { type: 'reset' }), true);
     else for (const f of frames) this.emit(f);
+  }
+
+  /** The id of the last reset this hub emitted into its ring (0 before any): published, or standing in for an oversize payload. A
+   *  world whose cursor is below it would make the reloading page replay that reset and reload again (8a final review: the api's
+   *  world cache is stale then). The reset attach() writes for an uncovered resume is not one: it never enters the ring. */
+  lastReset(): number {
+    return this.resetId;
+  }
+
+  /** A resume from `cursor` would replay rather than reset: a whole number ≤ seq at or above the oldest ring id − 1 (resumePoint's
+   *  test). A world whose cursor the ring no longer covers is stale (8a final review). */
+  covers(cursor: number): boolean {
+    if (!Number.isSafeInteger(cursor) || cursor < 0 || cursor > this.last) return false;
+    this.trim();
+    const oldest = this.ring[0]?.id ?? this.last + 1;
+    return cursor >= oldest - 1;
   }
 
   /** Valid, ≤ seq and covered by the ring (or no event yet) → replay every later event of every kind, then live; else one reset
@@ -236,15 +269,13 @@ export class StreamHub {
   private resumePoint(lastEventId: string | undefined): number | null {
     if (lastEventId === undefined || !LAST_EVENT_ID_RE.test(lastEventId)) return null;
     const n = Number(lastEventId);
-    if (n > this.last) return null;
-    this.trim();
-    const oldest = this.ring[0]?.id ?? this.last + 1;
-    return n >= oldest - 1 ? n : null;
+    return this.covers(n) ? n : null;
   }
 
-  /** Records a frame framed with the next id and writes it to every sink. */
-  private emit(frame: string): void {
+  /** Records a frame framed with the next id and writes it to every sink; `reset`: the frame is a reset (lastReset). */
+  private emit(frame: string, reset = false): void {
     const id = ++this.last;
+    if (reset) this.resetId = id;
     const entry: Entry = { id, mono: this.clock.monoMs(), frame, bytes: bytes(frame) };
     this.ring.push(entry);
     this.ringBytes += entry.bytes;

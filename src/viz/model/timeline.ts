@@ -313,9 +313,19 @@ const boardLevelRow: DerivedRoomRow = (c) => {
 /** Derived room-level rows, before every actor's. */
 export const DERIVED_ROOM_ROWS: readonly DerivedRoomRow[] = [boardLevelRow];
 
-/** person_ghost: in liveSet(after), in rankedSet(before), not in rankedSet(after) (the fold's own ghost rule). */
+/** A seat key that is live in the fold state after the frame (a folded seat_start and no seat_end or retirement since). */
+const liveFoldedSeat = (c: RowContext, seat: string): boolean => Object.hasOwn(c.frame.after.seats, seat) && c.frame.after.seats[seat]!.status === 'live';
+/**
+ * person_ghost: in liveSet(after), in rankedSet(before), not in rankedSet(after) (the fold's own ghost rule); then (VIZ-21, §8 Q7)
+ * pet_poof per live pet of that peer whose seat key is not a live folded seat — a footprint-only seat, which PRO-20 lets end
+ * without seat_end — in ascending seat key. A seat live in the fold keeps its pet (seat_end, retirement or leave removes it);
+ * a later footprint spawns a poofed one again (ordinaryCode).
+ */
 const ghostRow: DerivedActorRow = (c, a) => {
-  if ('peer' in a && c.liveAfter.has(a.peer) && c.rankedBefore.has(a.peer) && !c.rankedAfter.has(a.peer)) c.emit('ghost', { kind: 'person_ghost', peer: a.peer });
+  if (!('peer' in a) || !c.liveAfter.has(a.peer) || !c.rankedBefore.has(a.peer) || c.rankedAfter.has(a.peer)) return;
+  const peer = a.peer;
+  c.emit('ghost', { kind: 'person_ghost', peer });
+  for (const seat of petsOf(c.scene(), peer, (k) => !liveFoldedSeat(c, k))) c.emit('ghost', { kind: 'pet_poof', seat, owner: ownerOfSeatKey(seat) });
 };
 /** person_unghost: in rankedSet(after), in liveSet(before), not in rankedSet(before). */
 const unghostRow: DerivedActorRow = (c, a) => {

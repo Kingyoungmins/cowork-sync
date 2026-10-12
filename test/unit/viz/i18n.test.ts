@@ -85,9 +85,9 @@ const ROW_GROUP: Readonly<Record<string, CodeGroup>> = {
   'CLI': 'cli', 'Page states': 'page', 'Scene labels': 'scene', 'Icons': 'icon', 'Cards': 'card', 'Recording': 'recording',
   'Controls and filters': 'control', 'Log only': 'log', 'Reused': 'reused',
 };
-/** Codes a ruling adds to a row of the table ahead of the spec text (spec-edit list): R-V67's VIZ_LOG_DROPPED (12 §3.10.10, §3.11
- *  "Log only"). */
-const PENDING_SPEC_EDITS: Readonly<Partial<Record<CodeGroup, readonly string[]>>> = { log: ['VIZ_LOG_DROPPED'] };
+/** Codes a ruling adds to a row of the table ahead of the spec text (spec-edit list). None now: R-V67's VIZ_LOG_DROPPED is in the
+ *  §3.11 "Log only" row since Plan 8a Task 19, which dropped its entry here. */
+const PENDING_SPEC_EDITS: Readonly<Partial<Record<CodeGroup, readonly string[]>>> = {};
 function specTable(): Map<CodeGroup, string[]> {
   const v311 = section(specText('12-visualizer.md'), /^### 3\.11 /, /^### /);
   const out = new Map<CodeGroup, string[]>();
@@ -131,9 +131,11 @@ const CARD_PLACEHOLDERS: ReadonlySet<string> = new Set(['name', 'target', 'n', '
 const OTHER_PLACEHOLDERS: ReadonlySet<string> = new Set([
   ...CARD_PLACEHOLDERS, 'people', 'sessions', 'open', 'conflicts', 'zone', 'height', 'reason', 'cmd', 'est_minutes', 'lo', 'hi',
 ]);
+// {height} is a board height, printed as plain digits like every other '#<height>' of the page (the log's position label, the
+// rewind bar): an 'id' (String(v)), never an 'n' (Intl.NumberFormat would print '#1,024'; final review §4a, Group B).
 const TYPE_OF: Readonly<Record<string, ParamType>> = {
   name: 'name', target: 'name', n: 'n', path: 'path', id: 'id', label: 'label', people: 'n', sessions: 'n', open: 'n', conflicts: 'n',
-  zone: 'path', height: 'n', reason: 'reason', cmd: 'cmd', est_minutes: 'n', lo: 'n', hi: 'n', url: 'url',
+  zone: 'path', height: 'id', reason: 'reason', cmd: 'cmd', est_minutes: 'n', lo: 'n', hi: 'n', url: 'url',
 };
 const templatesOf = (e: CatalogEntry): string[] => [e.text, ...Object.values(e.forms ?? {}).filter((x): x is string => typeof x === 'string')];
 const placeholdersOf = (s: string): string[] => [...s.matchAll(/\{([^{}]*)\}/g)].map((m) => m[1] as string);
@@ -154,6 +156,8 @@ const SPEC_WORDING: Readonly<Record<string, string>> = {
   UI_VIZ_BUBBLE_GO_FIRST: 'go first? ~{est_minutes} min',
   UI_VIZ_SCENE_SUMMARY: '{people} people, {sessions} Claude sessions, {open} requests open, {conflicts} conflicts',
   UI_VIZ_BIG_TABLE: '{n} files',
+  // (8a final review, spec batch item 9) the shelf plaque as landed; 12 §3.5.3 adopts it (was "{zone}/… +{n}")
+  UI_VIZ_SHELF_DESK: 'more files in {zone}',
   UI_VIZ_CARD_PUBLISH: '{name} shared {n} files',
   UI_VIZ_CARD_SAVE: '{name} saved',
   UI_VIZ_HOLDING: 'holding {label}',
@@ -163,6 +167,17 @@ const SPEC_WORDING: Readonly<Record<string, string>> = {
   UI_VIZ_LINK_REUSED: 'This link was opened twice, so the viewer stopped. If you did not open it twice, another program or user on this PC may '
     + 'have opened it. Run /cowork view again.',
   UI_VIZ_RECORD_NOTICE: "This recording will show your teammates' names, file names and notes.",
+  // (rev 2.5, F32; Task 19) the follow codes, as 12 §3.8.1 gives them
+  UI_VIZ_CTRL_FOLLOW: 'Follow',
+  UI_VIZ_FOLLOWING: 'Following {name}',
+  UI_VIZ_NOW_ASKS: 'asks {target} ({id})',
+  UI_VIZ_NOW_ASKED_BY: 'asked by {target} ({id})',
+  UI_VIZ_NOW_LAST_SHARED: 'last shared: {path} (#{height})',
+  UI_VIZ_NOW_LAST_SHARED_TABLE: 'last shared: a change too large to list (#{height})',
+  UI_VIZ_NOW_NOTHING: 'Nothing held, asked or shared yet in this view.',
+  UI_VIZ_NOW_NOT_HERE: '{name} is not in this room at this point.',
+  // (8a batch, after Plan 2's; FEAT-F32-11) the follow end offered to the announcer, as 12 §3.8.1 gives it
+  UI_VIZ_FOLLOW_ENDED: 'Stopped following {name}',
 };
 
 test('T-VIZ-i18n (en): every code of the 12 \u00a73.11 table is in VIZ_CODES and has an en template; every template fits the viz caps at worst-case parameters; every UI_VIZ_CARD_* template uses only {name}, {target}, {n}, {path}, {id} and {label}; the other codes use only those and {people}, {sessions}, {open}, {conflicts}, {zone}, {height}, {reason}, {cmd}, {est_minutes}, {lo}, {hi} and (UI_VIZ_URL only) {url}', () => {
@@ -251,6 +266,15 @@ function tsFiles(dir: string): string[] {
   }
   return out;
 }
+
+test('a {height} renders as plain digits, as the log\'s position label and the rewind bar print it (#1024, never #1,024)', () => {
+  const withHeight = Object.entries(EN_VIZ).filter(([, e]) => e.params?.['height'] !== undefined).map(([code]) => code).sort();
+  assert.deepEqual(withHeight, ['UI_VIZ_LAST_SHARED_HERE', 'UI_VIZ_NOW_LAST_SHARED', 'UI_VIZ_NOW_LAST_SHARED_TABLE']);
+  assert.equal(render('UI_VIZ_LAST_SHARED_HERE', { path: 'src/a.ts', height: 1_024 }, 'viz', 'en'), 'last shared here: src/a.ts (#1024)');
+  assert.equal(render('UI_VIZ_NOW_LAST_SHARED', { path: 'src/a.ts', height: 17_280 }, 'viz', 'en'), 'last shared: src/a.ts (#17280)');
+  assert.equal(render('UI_VIZ_NOW_LAST_SHARED_TABLE', { height: 1_234_567 }, 'viz', 'en'), 'last shared: a change too large to list (#1234567)');
+  for (const code of withHeight) assert.doesNotMatch(render(code, { path: 'p', height: 9_007_199_254_740_991 }, 'viz', 'en'), /#\d{1,3},/u, code);
+});
 
 test('every code literal in src/viz/** is in ALL_VIZ_CODES', () => {
   assert.deepEqual(

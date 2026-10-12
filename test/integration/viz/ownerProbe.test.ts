@@ -3,11 +3,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, join, win32 } from 'node:path';
 import { realFs } from '../../../src/ports/fs.js';
 import { parseSddl, sddlOwnerOk, sddlUserOnly, verifyDataDir } from '../../../src/viz/cli/dataDir.js';
 import { realOwnerProbe, WINDOWS_ACL_COMMAND, type OwnerProbe } from '../../../src/viz/cli/ownerProbe.js';
+import { openViewerStderr, VIEWER_STDERR_FILE } from '../../../src/viz/cli/spawn.js';
 import { makeTempRoot } from '../../helpers/tmp.js';
 import { programsStartedBy } from '../../helpers/vizCli.js';
 
@@ -235,7 +236,7 @@ test('a data directory swapped for a junction (or for another directory) between
     }
   });
 
-test('the CLI repairs an existing data directory only when it is empty or holds nothing but the viewer\'s own files; one holding anything else, or a log junction, keeps its DACL and is refused',
+test('the CLI repairs an existing data directory only when it is empty or holds nothing but the viewer\'s own files (an earlier start\'s log\\viz-stderr.txt included); one holding anything else, or a log junction, keeps its DACL and is refused',
   { skip: process.platform !== 'win32' ? 'Windows legs only' : false }, async () => {
     const t = await makeTempRoot('viz-probe-contents');
     try {
@@ -248,6 +249,16 @@ test('the CLI repairs an existing data directory only when it is empty or holds 
       writeFileSync(join(own, 'probe.json'), '{}\n');
       assert.deepEqual(await verify(own), { ok: true });
       assert.match((await sddlOf(own)) ?? '', /D:PAI?\(/);
+      // A data directory an earlier CLI start left behind: the viewer's stderr file log\viz-stderr.txt, opened by the CLI's own
+      // openViewerStderr (Task 15 fix round 2), is one of the viewer's files too (Plan 8a final review, fix Group D).
+      const started = join(parent, 'started data');
+      mkdirSync(started);
+      const err = openViewerStderr(started, 'win32');
+      assert.ok(err !== null, 'the stderr file opens');
+      err.close();
+      assert.deepEqual(readdirSync(join(started, 'log')), [VIEWER_STDERR_FILE]);
+      assert.deepEqual(await verify(started), { ok: true });
+      assert.match((await sddlOf(started)) ?? '', /D:PAI?\(/);
       // Anything else: the folder is not the viewer's, so its DACL is never rewritten.
       const other = join(parent, 'other data');
       mkdirSync(other);

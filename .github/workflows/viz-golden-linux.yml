@@ -1,0 +1,43 @@
+name: viz-golden-linux
+
+# T-VIZ-golden-sim alone on ubuntu-latest, on demand only (Plan 8a Task 18 step B1, fix round 1). 12 §7 compares the SIM goldens
+# (test/golden/viz/viz-golden-<n>.timeline.json) on Linux only, and `npm run viz:golden -- --update` refuses to write them on
+# another OS. Dispatch this workflow on a branch to get the Linux timelines from one Linux job, without the macOS and Windows legs
+# of viz-slow: the test keeps each timeline it computed (exactly what --update writes) in test-results/viz-golden-sim/, uploaded
+# as the artifact viz-golden-sim-ubuntu-latest also when the golden comparison fails. Review the diff, then commit them as the
+# goldens.
+on:
+  # TEMPORARY (public CI snapshot only, never on dev main): run on the snapshot's pull request.
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  golden-sim-linux:
+    name: ubuntu-latest / viewer slow suite (golden SIM timelines)
+    runs-on: ubuntu-latest
+    # The test's own timeout is 25 min; checkout and npm ci take a few.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: npm
+      - name: Tool versions
+        run: |
+          git --version
+          node --version
+      - run: npm ci
+      - name: Viewer slow suite (golden SIM)
+        env:
+          COWORK_VIZ_SLOW: '1'
+        run: npx tsx --test test/integration/viz/golden.sim.test.ts
+      - name: Upload the computed SIM timelines
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: viz-golden-sim-ubuntu-latest
+          path: test-results/viz-golden-sim/

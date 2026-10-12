@@ -3,8 +3,12 @@
 // swatch and name tag, a button that filters the log to that person), its UI_VIZ_CARD_* text, teammate free text inside the quoted
 // frame only, status and file chips (a file chip filters the log to its desk), its display id, and its position label (seen n min
 // ago, before this view opened, or #height in replay). The list follows new cards unless the reader scrolled up, when a "new"
-// pill jumps down. Filters: all, person, file, and the four kinds, combined with AND. Browser only.
+// pill jumps down. Filters: all, person, file, and the four kinds, combined with AND. (rev 2.5, F32; 12 §3.8.1) The person-filter
+// chip carries the follow toggle (UI_VIZ_CTRL_FOLLOW, aria-pressed), and while the selected room follows someone the now card sits at
+// the top of the panel: a section labelled by UI_VIZ_FOLLOWING (a region), not a card of the list — never merged, filtered or counted;
+// its rows come from ui/follow.ts's nowRows and reach the DOM through textContent only. Browser only.
 import type { ActorVM, CardVM } from '../server/viewModel.js';
+import type { NowRow } from '../ui/follow.js';
 import { cardText, type LogFilter, type LogModel, type LogRow } from '../ui/logModel.js';
 import { CLS, HUE_CLS, button, el, setPressed, type Translate } from './a11y.js';
 
@@ -31,11 +35,22 @@ export interface LogDeps {
   /** A desk ordinal by served path, and a desk's path (the file filter). */
   deskOfPath(path: string): number | null;
   pathOfDesk(desk: number): string | null;
+  /** A desk's name by kind for card text when the card has no file chip (model/labels.ts deskName), null when unknown. */
+  deskNameOf(desk: number): string | null;
   /** The filters changed: the page re-renders (and mirrors the person filter on the canvas). */
   changed(): void;
   /** Changes whenever a name tag, a look or a pet's owner the cards show changes (the list is rebuilt then too). */
   version(): number;
+  /** The selected room follows the person filter's peer (12 §3.8.1). */
+  following(): boolean;
+  /** The follow toggle (on the person-filter chip or the now card): follow the person filter's peer, or stop. */
+  toggleFollow(): void;
+  /** A click on the now card's UI_VIZ_FOLLOWING chip: the camera centres the followed actors at once. */
+  recentre(): void;
 }
+
+/** What the now card shows (12 §3.8.1): the followed peer's name tag and look, the reason its PH_FROZEN label nests, and its rows. */
+export interface NowView { name: string; hue: number | null; reason: string; rows: readonly NowRow[]; }
 
 export interface LogPanel {
   /** The room's cards as rows (12 §3.8); the list's DOM is rebuilt only when the rows, their labels or the names they show changed,
@@ -46,11 +61,15 @@ export interface LogPanel {
   desk(desk: number | null): void;
   /** Esc: back to every kind but system, no person and no file. */
   clear(): void;
+  /** The now card (null: no follow in the selected room), rebuilt only when what it shows changed. */
+  now(v: NowView | null): void;
   relabel(): void;
 }
 
 export function createLogPanel(root: HTMLElement, deps: LogDeps): LogPanel {
   const { t } = deps;
+  const nowBox = el('section', CLS.now, root);         // a section with an accessible name: a region (12 §3.8.1, FEAT-F32-11)
+  nowBox.hidden = true;
   const filters = el('div', CLS.filters, root);
   const list = el('ul', CLS.cards, root);
   const pill = button(CLS.newPill, root, () => {
@@ -87,6 +106,7 @@ export function createLogPanel(root: HTMLElement, deps: LogDeps): LogPanel {
     peer = null;
     deps.changed();
   });
+  const followToggle = button(CLS.filter, filters, () => deps.toggleFollow());
   const fileChip = button(CLS.filter, filters, () => {
     deskFilter = null;
     deps.changed();
@@ -113,6 +133,9 @@ export function createLogPanel(root: HTMLElement, deps: LogDeps): LogPanel {
     personChip.hidden = peer === null;
     personChip.textContent = peer === null ? '' : `${t('UI_VIZ_FILTER_PERSON')}: ${deps.nameOf({ peer })} \u{00D7}`;
     setPressed(personChip, peer !== null);
+    followToggle.hidden = peer === null;               // shown with a person filter (12 §3.8.1)
+    followToggle.textContent = t('UI_VIZ_CTRL_FOLLOW');
+    setPressed(followToggle, peer !== null && deps.following());
     const path = deskFilter === null ? null : deps.pathOfDesk(deskFilter);
     fileChip.hidden = deskFilter === null;
     fileChip.textContent = deskFilter === null ? '' : `${t('UI_VIZ_FILTER_FILE')}: ${path ?? `#${deskFilter}`} \u{00D7}`;
@@ -121,6 +144,8 @@ export function createLogPanel(root: HTMLElement, deps: LogDeps): LogPanel {
 
   /** The buttons of the current render by a stable key (card id and role), so a rebuild keeps keyboard focus where it was. */
   let focusables = new Map<string, HTMLElement>();
+  /** Each request card's list item by display id: a now-card id scrolls the list to it (12 §3.8 "Card content"). */
+  let cardsById = new Map<string, HTMLElement>();
 
   /** The actor line: look swatch and name tag (a button filtering the log to that person). */
   const actorHead = (parent: Element, a: ActorVM | null, displayId: string | null, key: string): void => {
@@ -177,10 +202,11 @@ export function createLogPanel(root: HTMLElement, deps: LogDeps): LogPanel {
 
   const cardNode = (c: CardVM, answers: readonly CardVM[], statusChips: readonly string[]): HTMLLIElement => {
     const li = el('li', CLS.card);
+    if (c.displayId !== null && !cardsById.has(c.displayId)) cardsById.set(c.displayId, li);
     if (c.group === 'system') li.classList.add(CLS.cardSystem);
     if (c.detail !== null) li.title = c.detail;                      // a raw reason code only in the detail tooltip (12 §3.8)
     actorHead(li, c.actor, c.displayId, c.id);
-    const { code, params, quoted } = cardText(c, deps.nameOf);
+    const { code, params, quoted } = cardText(c, deps.nameOf, deps.deskNameOf);
     el('div', CLS.text, li).textContent = t(code, params);
     if (quoted !== null) el('blockquote', CLS.quote, li).textContent = quoted;   // teammate text: the quoted frame only (VIZ-25)
     if (statusChips.length > 0) {
@@ -220,6 +246,7 @@ export function createLogPanel(root: HTMLElement, deps: LogDeps): LogPanel {
     const follow = atBottom();
     const focused = [...focusables].find(([, e]) => e === document.activeElement)?.[0] ?? null;
     focusables = new Map();
+    cardsById = new Map();
     const nodes = rows.map((r) => (r.kind === 'card' ? cardNode(r.card, r.answers, r.chips) : mergedNode(r)));
     list.replaceChildren(...nodes);
     if (focused !== null) focusables.get(focused)?.focus({ preventScroll: true });
@@ -233,6 +260,72 @@ export function createLogPanel(root: HTMLElement, deps: LogDeps): LogPanel {
 
   const filter = (): LogFilter => ({ peer, desk: deskFilter, groups: new Set(groups), system });
 
+  // ---------------------------------------------------------------------------------------------------------
+  // The now card (12 §3.8.1): the header (look swatch, the UI_VIZ_FOLLOWING chip, the PH label, the pressed toggle), then the rows
+
+  let nowView: NowView | null = null;
+  let nowKey = '';
+  let nowFocus = new Map<string, HTMLElement>();
+  /** A file chip of a holding row sets the file filter; a display id scrolls the log to its card. */
+  const nowLink = (parent: Element, r: NowRow, key: string): void => {
+    if (r.link === null) return;
+    const link = r.link;
+    const b = button(CLS.chip, parent, () => {
+      if (r.row === 'holding') {
+        const d = deps.deskOfPath(link);
+        if (d === null) return;
+        deskFilter = d;
+        deps.changed();
+        return;
+      }
+      const li = cardsById.get(link);
+      // The list itself scrolls (never the page) until the card's top meets the list's top, wherever the card sits (an answer in its request).
+      if (li !== undefined) list.scrollTop += li.getBoundingClientRect().top - list.getBoundingClientRect().top - list.clientTop;
+    });
+    b.textContent = link;
+    nowFocus.set(key, b);
+  };
+  const nowRow = (r: NowRow, i: number, v: NowView): HTMLElement => {
+    if (r.row === 'header') {
+      const head = el('div', CLS.head);
+      const swatch = el('span', CLS.swatch, head);
+      if (v.hue !== null && v.hue >= 0 && v.hue < HUE_CLS.length) swatch.classList.add(HUE_CLS[v.hue]!);
+      const chip = button(CLS.chip, head, () => deps.recentre());
+      chip.textContent = t(r.code, r.params);
+      nowFocus.set(`${i}`, chip);
+      if (r.label !== null) el('span', CLS.meta, head).textContent = t(r.label, { reason: v.reason });
+      const toggle = button(CLS.filter, head, () => deps.toggleFollow());
+      toggle.textContent = t('UI_VIZ_CTRL_FOLLOW');
+      setPressed(toggle, true);
+      nowFocus.set(`${i}|`, toggle);
+      return head;
+    }
+    const line = el('div', CLS.text);
+    el('span', null, line).textContent = t(r.code, r.params);
+    if (r.row === 'holding' && r.label !== null) line.title = t(r.label);           // the chair-tag label is unverified (12 §3.5.4)
+    if ((r.row === 'asks' || r.row === 'asked_by') && r.label !== null) el('span', CLS.meta, line).textContent = t(r.label);   // the status icon's label
+    nowLink(line, r, `${i}|${r.row}`);
+    return line;
+  };
+  const renderNow = (): void => {
+    const v = nowView;
+    nowBox.hidden = v === null;
+    const key = v === null ? '' : JSON.stringify(v);
+    if (key === nowKey) return;
+    nowKey = key;
+    const focused = [...nowFocus].find(([, e]) => e === document.activeElement)?.[0] ?? null;
+    nowFocus = new Map();
+    if (v === null) {
+      nowBox.removeAttribute('aria-label');
+      nowBox.replaceChildren();
+      return;
+    }
+    const header = v.rows.find((r) => r.row === 'header');
+    if (header !== undefined) nowBox.setAttribute('aria-label', t(header.code, header.params));
+    nowBox.replaceChildren(...v.rows.map((r, i) => nowRow(r, i, v)));
+    if (focused !== null) nowFocus.get(focused)?.focus({ preventScroll: true });
+  };
+
   return {
     render,
     filter,
@@ -243,10 +336,16 @@ export function createLogPanel(root: HTMLElement, deps: LogDeps): LogPanel {
       deskFilter = d;
     },
     clear,
+    now(v): void {
+      nowView = v;
+      renderNow();
+    },
     relabel(): void {
       pill.textContent = t('UI_VIZ_NEW_PILL');
       built = null;                                     // the language changed: every card is rebuilt
+      nowKey = '';                                      // and the now card
       render(current.model, current);
+      renderNow();
     },
   };
 }

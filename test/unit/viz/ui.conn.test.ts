@@ -233,7 +233,9 @@ test('T-VIZ-failure-signs (page): the launch token is removed before the first r
   assert.deepEqual(w.streams[1]!.headers, { 'X-Cowork-Session': SESSION, 'Last-Event-ID': '9' });
   w.answers.push({ status: 200, json: world(12, [[ROOM, 6], [ROOM2, 1], ['rNEW00000', 0]]) });
   w.streamAnswers.push(200);
-  w.streams[1]!.body!.push(frame(11, { type: 'room', room_id: 'rNEW00000', change: 'added', label: 'new', branch: 'main', gone: false, badges: [], unknown: 0 }));
+  // (Each reloaded stream passes a payload on first, so every reload here is at once; the reset-loop test covers a reload asked for
+  // before then.)
+  w.streams[1]!.body!.push(frame(10, overlay()) + frame(11, { type: 'room', room_id: 'rNEW00000', change: 'added', label: 'new', branch: 'main', gone: false, badges: [], unknown: 0 }));
   await flush();
   assert.deepEqual(routes(w), ['GET world', 'GET world', 'GET world']);
   assert.deepEqual(w.streams[2]!.headers, { 'X-Cowork-Session': SESSION, 'Last-Event-ID': '12' });
@@ -250,7 +252,7 @@ test('T-VIZ-failure-signs (page): the launch token is removed before the first r
   // A layout for a room the world does not have is a gap too.
   w.answers.push({ status: 200, json: world(31) });
   w.streamAnswers.push(200);
-  w.streams[3]!.body!.push(frame(31, layout(0, 1, 'rUNKNOWN0')));
+  w.streams[3]!.body!.push(frame(31, overlay()) + frame(32, layout(0, 1, 'rUNKNOWN0')));
   await flush();
   assert.deepEqual(routes(w).length, 5);
   // A malformed message (no id, bad JSON, a type that differs from the event name) is a broken stream: reconnect from the last id.
@@ -333,6 +335,81 @@ test('T-VIZ-failure-signs (page): the launch token is removed before the first r
   await fire(q, 2_000);
   qr.conn.stop();
   assert.equal(q.timers.filter((t) => !t.cancelled).length, 0);
+});
+
+test('reset loop (8a final review): a reset, a layout gap or a room added that comes before the stream the last world reload opened has worked waits 1 s, doubling to 30 s, before the next reload (reconnecting meanwhile); a stream that works — a payload passed on, or open STREAM_STABLE_MS — clears the wait', async () => {
+  const f = fake({ session: SESSION, room: ROOM });
+  f.answers.push({ status: 200, json: world(5) });
+  f.streamAnswers.push(200);
+  const c = connect(f);
+  await c.conn.start(null);
+  await flush();
+  const last = (): Body => f.streams.at(-1)!.body!;
+  const reset = (id: number): string => frame(id, { type: 'reset' });
+  /** The next world answer (a server whose cached world keeps a cursor below its reset: the stream replays that reset). */
+  const next = (cursor = 6): void => {
+    f.answers.push({ status: 200, json: world(cursor) });
+    f.streamAnswers.push(200);
+  };
+  const worldCalls = (): number => f.calls.filter((x) => x.route.r === 'world').length;
+  last().push(frame(6, overlay()));
+  await flush();
+  // A reset on a stream that worked: the world reloads at once.
+  next();
+  last().push(reset(7));
+  await flush();
+  assert.equal(worldCalls(), 2, 'the first reload: at once');
+  assert.deepEqual(c.states, ['live']);
+  // Its stream replays the same reset before anything else: each next reload waits 1, 2, 4, 8, 16, 30, 30 s, reconnecting meanwhile.
+  for (const ms of [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000]) {
+    const before = worldCalls();
+    last().push(reset(7));
+    await flush();
+    assert.equal(worldCalls(), before, `no reload before the ${ms} ms wait`);
+    assert.equal(c.states.at(-1), 'reconnecting', 'reconnecting while it waits');
+    assert.equal(last().cancelled, true, 'the stream is closed meanwhile');
+    next();
+    await fire(f, ms);
+    assert.equal(worldCalls(), before + 1, `the reload after ${ms} ms`);
+    assert.equal(c.states.at(-1), 'live');
+  }
+  // A layout gap or a room added first on the reloaded stream is the same loop (world(6) has the room at layout version 3).
+  last().push(frame(8, layout(7, 8)));
+  await flush();
+  next();
+  await fire(f, 30_000);
+  last().push(frame(9, { type: 'room', room_id: 'rNEW00000', change: 'added', label: 'new', branch: 'main', gone: false, badges: [], unknown: 0 }));
+  await flush();
+  next();
+  await fire(f, 30_000);
+  // A payload passed on clears the wait: the next reset reloads at once, and a repeat waits 1 s again.
+  const passed = c.payloads.length;
+  last().push(frame(7, overlay()));
+  await flush();
+  assert.equal(c.payloads.length, passed + 1);
+  let before = worldCalls();
+  next();
+  last().push(reset(8));
+  await flush();
+  assert.equal(worldCalls(), before + 1, 'at once after a stream that worked');
+  last().push(reset(8));
+  await flush();
+  next();
+  await fire(f, 1_000);
+  // A quiet stream open STREAM_STABLE_MS clears it too.
+  await fire(f, STREAM_STABLE_MS);
+  before = worldCalls();
+  next();
+  last().push(reset(9));
+  await flush();
+  assert.equal(worldCalls(), before + 1, 'at once after a quiet stream that stayed open');
+  // stop() while a reload waits: stopped, no timer left.
+  last().push(reset(9));
+  await flush();
+  assert.equal(c.states.at(-1), 'reconnecting');
+  c.conn.stop();
+  assert.equal(c.states.at(-1), 'stopped');
+  assert.equal(f.timers.filter((t) => !t.cancelled).length, 0);
 });
 
 test('conn: every request names an ApiRoute, never a path string; the first room is the kept room when it is still in the world, else the first in server order; stopped and link_reused clear the stored session and room', async () => {

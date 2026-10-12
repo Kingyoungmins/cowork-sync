@@ -1,8 +1,9 @@
 // The data directory (Task 11): derivation, creation and the SEC-20 owner/ACL verification (R-V11; 12 §3.2 item 2, VIZ-02; S9).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join, win32 } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { realFs, type Fs, type FsLstat } from '../../../src/ports/fs.js';
 import * as dataDirModule from '../../../src/viz/cli/dataDir.js';
 import { parseSddl, pluginDataDir, resolveDataDir, sddlOwnerOk, sddlUserOnly, verifyDataDir, type DataDirVerdict } from '../../../src/viz/cli/dataDir.js';
@@ -10,6 +11,8 @@ import * as pluginDataModule from '../../../src/data/pluginDataDir.js';
 import * as sddlModule from '../../../src/sec/sddl.js';
 import { isUncOrDevice } from '../../../src/viz/cli/paths.js';
 import { realOwnerProbe, type OwnerProbe } from '../../../src/viz/cli/ownerProbe.js';
+import { VIEWER_STDERR_FILE } from '../../../src/viz/cli/spawn.js';
+import * as stderrLeaf from '../../../src/viz/cli/stderrFile.js';
 import { makeTempRoot } from '../../helpers/tmp.js';
 import { passingProbe, USER_ONLY_SDDL, USER_SID } from '../../helpers/vizCli.js';
 
@@ -313,7 +316,7 @@ test('verifyDataDir (win32): every protectDir runs between an lstat right before
   assert.deepEqual(await run({ exists: true, sddl: PROTECTED_DACL, swap: { when: 'acl#1', to: OTHER_INO } }), { v: { ok: false, why: 'probe_failed' }, events: ['lstat', 'acl', 'lstat'] });
 });
 
-test('verifyDataDir (win32): a directory is repaired only when it is empty or holds nothing but the viewer\'s own files (log\\*.jsonl, *.jsonl, probe.json), checked before and after the repair; anything else keeps its acl refusal and is never re-permissioned', async () => {
+test('verifyDataDir (win32): a directory is repaired only when it is empty or holds nothing but the viewer\'s own files (log\\*.jsonl, log\\viz-stderr.txt, *.jsonl, probe.json), checked before and after the repair; anything else keeps its acl refusal and is never re-permissioned', async () => {
   const FILE: Partial<FsLstat> = { isFile: true, mode: 0o100000 };
   const DIR: Partial<FsLstat> = { isDirectory: true, mode: 0o40000 };
   const LINK: Partial<FsLstat> = { isSymbolicLink: true, mode: 0o120000 };
@@ -345,19 +348,26 @@ test('verifyDataDir (win32): a directory is repaired only when it is empty or ho
     return { v: await verifyDataDir(WIN_DIR, { fs, probe, platform: 'win32', create: true }), protects, acls };
   };
 
-  // Empty, or only the viewer's own files: repaired once and accepted.
+  // Empty, or only the viewer's own files: repaired once and accepted. The viewer's own files include its stderr file,
+  // log\viz-stderr.txt (VIEWER_STDERR_FILE: every CLI start opens it, Task 15 fix round 2), a regular file inside log\ only.
+  assert.equal(VIEWER_STDERR_FILE, 'viz-stderr.txt');
+  const stderrIn = (dir: string): string => `${dir}\\${VIEWER_STDERR_FILE}`;
   for (const entries of [
     {}, { log: DIR }, { log: DIR, 'log\\viz-ABCDEFGH-1.jsonl': FILE, 'log\\viz-ABCDEFGH-0.jsonl': FILE },
     { 'probe.json': FILE }, { 'viz-ABCDEFGH-1.jsonl': FILE, 'probe.json': FILE, log: DIR, 'log\\viz-ABCDEFGH-2.jsonl': FILE },
+    { log: DIR, [stderrIn('log')]: FILE }, { log: DIR, 'log\\viz-ABCDEFGH-1.jsonl': FILE, [stderrIn('log')]: FILE, 'probe.json': FILE },
   ] as Array<Record<string, Partial<FsLstat>>>) {
     assert.deepEqual(await run(entries), { v: { ok: true }, protects: 1, acls: 2 }, JSON.stringify(Object.keys(entries)));
   }
-  // Anything else: the acl refusal it had, and its DACL never touched (no protectDir).
+  // Anything else: the acl refusal it had, and its DACL never touched (no protectDir). The stderr file as a link (symlink or
+  // junction), a folder, outside log\ (the data directory itself) or under another case of its name is not the viewer's.
   for (const entries of [
     { 'notes.txt': FILE }, { 'repos.json': FILE }, { 'user.json': FILE }, { 'viz-no-hooks': DIR }, { sub: DIR }, { 'Documents.lnk': FILE },
     { log: LINK }, { log: FILE }, { 'log\\x.txt': FILE, log: DIR }, { log: DIR, 'log\\sub': DIR }, { log: DIR, 'log\\a.jsonl': LINK },
     { log: DIR, 'log\\a.jsonl': DIR }, { 'probe.json': DIR }, { 'probe.json': LINK }, { 'a.jsonl': LINK }, { 'a.jsonl': DIR },
     { 'probe.json': FILE, 'notes.txt': FILE }, { 'LOG.TXT': FILE },
+    { log: DIR, [stderrIn('log')]: LINK }, { log: DIR, [stderrIn('log')]: DIR }, { [VIEWER_STDERR_FILE]: FILE },
+    { log: DIR, 'log\\VIZ-STDERR.TXT': FILE }, { log: DIR, 'log\\viz-stderr.txt.bak': FILE }, { log: DIR, 'log\\viz-stderr.log': FILE },
   ] as Array<Record<string, Partial<FsLstat>>>) {
     assert.deepEqual(await run(entries), { v: { ok: false, why: 'acl' }, protects: 0, acls: 1 }, JSON.stringify(entries));
   }
@@ -447,4 +457,15 @@ test('resolveDataDir refuses UNC and device paths on POSIX too, and agrees with 
   for (const p of ['//host/c', '/dev/c']) {
     assert.equal(pluginDataDir({ CLAUDE_CONFIG_DIR: p }, '/home/me', 'linux'), '/home/me/.claude/plugins/data/cowork-sync', p);
   }
+});
+
+test('the stderr file\'s name comes from the import-free leaf stderrFile.ts, which dataDir.ts and spawn.ts both import: dataDir.ts (bundled into viz.js too) never imports spawn.ts and its node:child_process', () => {
+  const src = (rel: string): string => readFileSync(fileURLToPath(new URL(`../../../src/viz/cli/${rel}`, import.meta.url)), 'utf8');
+  const imports = (text: string): string[] => [...text.matchAll(/^(?:import|export)\b[^;]*?\bfrom\s+'([^']+)'/gms)].map((m) => m[1]!);
+  assert.deepEqual(imports(src('stderrFile.ts')), [], 'the leaf imports nothing');
+  assert.equal(stderrLeaf.VIEWER_STDERR_FILE, 'viz-stderr.txt');
+  assert.equal(VIEWER_STDERR_FILE, stderrLeaf.VIEWER_STDERR_FILE, 'spawn.ts re-exports the leaf\'s name');
+  assert.ok(imports(src('dataDir.ts')).includes('./stderrFile.js'));
+  assert.ok(!imports(src('dataDir.ts')).some((m) => m === './spawn.js' || m.startsWith('node:child_process')), 'dataDir.ts imports neither spawn.ts nor child_process');
+  assert.ok(imports(src('spawn.ts')).includes('./stderrFile.js'));
 });

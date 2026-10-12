@@ -3,20 +3,21 @@
 // textContent), the office canvas's UI_VIZ_SCENE_SUMMARY label, the visually hidden people list (one button per character that
 // filters the log), the polite live region rate-limited to one announcement per 10 s, and the reduced-motion and pause toggles
 // (the OS setting with an in-page override in both directions; the root carries data-motion="reduced" while motion is reduced).
-// Browser only; nothing here touches the DOM at module load.
+// (rev 2.5, F32; 12 §3.8.1, FEAT-F32-11) Each row of the hidden people list carries a second button, the follow toggle for that row's
+// person (aria-pressed while the selected room follows them). Browser only; nothing here touches the DOM at module load.
 import type { Params } from '../../i18n/render.js';
 import type { Layout } from '../model/layout.js';
 import type { PlaceLabel } from '../model/labels.js';
 import type { Scene } from '../model/scene.js';
 import type { CharacterVM } from '../server/viewModel.js';
-import { ANNOUNCE_GAP_MS, Announcer, peopleList, sceneSummaryParams } from '../ui/a11y.js';
+import { ANNOUNCE_GAP_MS, Announcer, MotionPreference, peopleList, sceneSummaryParams } from '../ui/a11y.js';
 
 /** Every class the page sets, and exactly the classes app.css declares (tested both ways). */
 export const CLS = Object.freeze({
   app: 'app', top: 'top', banner: 'banner', status: 'status', notice: 'notice',
   lamp: 'lamp', lampOk: 'lamp-ok', lampWarn: 'lamp-warn', lampDown: 'lamp-down',
   main: 'main', map: 'map', rooms: 'rooms', room: 'room', office: 'office', scroll: 'scroll', caption: 'caption', pixel: 'pixel',
-  log: 'log', filters: 'filters', filter: 'filter', cards: 'cards', card: 'card', cardSystem: 'card-system', head: 'head', swatch: 'swatch',
+  log: 'log', now: 'now', filters: 'filters', filter: 'filter', cards: 'cards', card: 'card', cardSystem: 'card-system', head: 'head', swatch: 'swatch',
   name: 'name', text: 'text', quote: 'quote', chips: 'chips', chip: 'chip', meta: 'meta', answers: 'answers', newPill: 'new-pill',
   rewind: 'rewind', track: 'track', ticks: 'ticks', slider: 'slider', position: 'position', control: 'control',
   livePill: 'live-pill', liveOn: 'live-on', liveOff: 'live-off', controls: 'controls', srOnly: 'sr-only', people: 'people', person: 'person',
@@ -50,11 +51,13 @@ export function setPressed(b: HTMLElement, on: boolean): void {
   b.setAttribute('aria-pressed', String(on));
 }
 
-/** The text of a place label (R-V56): UI_VIZ_HOLDING {label} or UI_VIZ_LAST_SHARED_HERE {path, height}; null when none. */
+/** The text of a place label (R-V56): UI_VIZ_HOLDING {label} or UI_VIZ_LAST_SHARED_HERE {path, height} with the desk named by kind
+ *  (model/labels.ts deskName); at the big table (path null) UI_VIZ_NOW_LAST_SHARED_TABLE {height}, as the now card says it (final
+ *  review B3: never the '?' of an unverified path); null when none. */
 export function placeText(t: Translate, p: PlaceLabel | null): string | null {
   if (p === null) return null;
   if (p.code === 'UI_VIZ_HOLDING') return t(p.code, { label: p.label ?? '?' });
-  return t(p.code, { path: p.path ?? '?', height: p.height });
+  return p.path === null ? t('UI_VIZ_NOW_LAST_SHARED_TABLE', { height: p.height }) : t(p.code, { path: p.path, height: p.height });
 }
 
 export interface A11y {
@@ -67,6 +70,8 @@ export interface A11y {
   announce(summary: string): void;
   /** The control labels in the current language. */
   relabel(): void;
+  /** The people list again (a follow started or ended: its toggles' aria-pressed). */
+  refresh(): void;
 }
 
 const MOTION_QUERY = '(prefers-reduced-motion: reduce)';
@@ -74,28 +79,30 @@ const MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 /**
  * The accessibility layer over the page's parts: `canvas` gets role img and its summary, `people` (a list) the hidden buttons,
  * `live` the announcements, `controls` the reduced-motion and pause toggles. onMotion runs whenever either toggle or the OS
- * setting changes; onPerson when a person's button is pressed (the log filters to that person).
+ * setting changes; onPerson when a person's button is pressed (the log filters to that person); onFollow when a row's follow toggle
+ * is pressed, and followed() names whom the selected room follows.
  */
 export function createA11y(o: {
   root: HTMLElement; canvas: HTMLCanvasElement; people: HTMLElement; live: HTMLElement; controls: HTMLElement; t: Translate;
-  onMotion(): void; onPerson(handle: string): void;
+  onMotion(): void; onPerson(handle: string): void; onFollow(handle: string): void; followed(): string | null;
 }): A11y {
   const { root, canvas, people, live, t } = o;
   canvas.setAttribute('role', 'img');
   live.setAttribute('aria-live', 'polite');
   live.setAttribute('role', 'status');
   const query = window.matchMedia(MOTION_QUERY);
-  let override: boolean | null = null;                   // the page's toggle: null follows the OS
+  const motion = new MotionPreference();                 // the page's toggle over the OS setting (ui/a11y.ts)
   let paused = false;
   const announcer = new Announcer(ANNOUNCE_GAP_MS);
   let flushTimer: number | null = null;
   let last: { s: Scene | null; characters: readonly CharacterVM[]; layout: Layout | null } = { s: null, characters: [], layout: null };
   let peopleKey = '';
   const peopleButtons = new Map<string, HTMLButtonElement>();   // handle → its button (a Map: handles are served strings, VIZ-37)
+  const followButtons = new Map<string, HTMLButtonElement>();   // handle → its row's follow toggle
 
-  const reduced = (): boolean => override ?? query.matches;
+  const reduced = (): boolean => motion.reduced(query.matches);
   const motionButton = button(CLS.control, o.controls, () => {
-    override = !reduced();
+    motion.toggle(query.matches);
     applyMotion(true);
   });
   const pauseButton = button(CLS.control, o.controls, () => {
@@ -129,8 +136,10 @@ export function createA11y(o: {
       people.replaceChildren();
       peopleKey = '';
       peopleButtons.clear();
+      followButtons.clear();
       return;
     }
+    const followed = o.followed();
     const p = sceneSummaryParams(s);
     canvas.setAttribute('aria-label', t('UI_VIZ_SCENE_SUMMARY', { people: p.people, sessions: p.sessions, open: p.open, conflicts: p.conflicts }));
     const rows = peopleList(s, characters, layout).map((r) => {
@@ -139,22 +148,30 @@ export function createA11y(o: {
       if (r.ph !== null) parts.push(t(r.ph, { reason: s.characters.get(r.handle)?.frozen ?? '?' }));
       const place = placeText(t, r.place);
       if (place !== null) parts.push(place);
-      return { handle: r.handle, person: r.person, text: parts.join(' \u{00B7} ') };
+      return { handle: r.handle, person: r.person, text: parts.join(' \u{00B7} '), follow: [t('UI_VIZ_CTRL_FOLLOW'), r.name].join(' \u{00B7} '), on: followed === r.person };
     });
     // Rebuilt only when a row changed, keeping the focused person's button focused (a live beat must not steal keyboard focus).
     const key = JSON.stringify(rows);
     if (key === peopleKey) return;
     peopleKey = key;
     const focused = [...peopleButtons].find(([, b]) => b === document.activeElement)?.[0] ?? null;
+    const focusedFollow = [...followButtons].find(([, b]) => b === document.activeElement)?.[0] ?? null;
     peopleButtons.clear();
+    followButtons.clear();
     people.replaceChildren(...rows.map((r) => {
       const li = el('li', null);
       const b = button(CLS.person, li, () => o.onPerson(r.person));   // a pet's row filters by its owner (VIZ-40)
       b.textContent = r.text;
       peopleButtons.set(r.handle, b);
+      // The second button (12 §3.8.1): follow this row's person in the selected room (a pet's row: its owner), or stop.
+      const f = button(CLS.person, li, () => o.onFollow(r.person));
+      f.textContent = r.follow;
+      setPressed(f, r.on);
+      followButtons.set(r.handle, f);
       return li;
     }));
     if (focused !== null) peopleButtons.get(focused)?.focus({ preventScroll: true });
+    if (focusedFollow !== null) followButtons.get(focusedFollow)?.focus({ preventScroll: true });
   };
 
   applyMotion(false);
@@ -178,5 +195,6 @@ export function createA11y(o: {
       }
     },
     relabel,
+    refresh: renderScene,
   };
 }

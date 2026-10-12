@@ -1,6 +1,6 @@
 {
   "name": "cowork-sync",
-  "version": "0.1.1-preview",
+  "version": "0.1.0-preview",
   "private": true,
   "description": "Real-time code sync between Claude Code sessions on different PCs, over a shared git remote.",
   "license": "SEE LICENSE IN LICENSE.md",
