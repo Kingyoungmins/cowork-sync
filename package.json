@@ -1,6 +1,6 @@
 {
   "name": "cowork-sync",
-  "version": "0.1.1-preview",
+  "version": "0.1.0-preview",
   "private": true,
   "description": "Real-time code sync between Claude Code sessions on different PCs, over a shared git remote.",
   "license": "SEE LICENSE IN LICENSE.md",
@@ -14,6 +14,7 @@
     "build:plugin": "node tools/release/stage-plugin.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "test": "node tools/test/run-tests.mjs test/unit test/integration",
+    "test:sim": "node tools/test/run-tests.mjs --sim-full test/unit test/integration",
     "test:unit": "node tools/test/run-tests.mjs test/unit",
     "test:integration": "node tools/test/run-tests.mjs test/integration",
     "lint": "tsx tools/lint/lint.ts",
@@ -21,6 +22,7 @@
     "sim:smoke": "tsx tools/sim/smoke.ts",
     "sim:seeds": "tsx tools/sim/run-seeds.ts",
     "sim:exit": "tsx tools/sim/run-seeds.ts --profile edits --seeds 1000 --parallel 8",
+    "sim:exit:holds": "tsx tools/sim/run-seeds.ts --profile holds --seeds 1000 --parallel 8",
     "real:two-clone": "tsx tools/real/two-clone.ts",
     "real:cleanup": "tsx tools/real/cleanup.ts"
   },
@@ -28,7 +30,12 @@
     "@types/node": "^20.17.10",
     "esbuild": "^0.24.2",
     "fast-check": "^3.23.2",
+    "tree-sitter-c-sharp": "0.23.5",
+    "tree-sitter-javascript": "0.25.0",
+    "tree-sitter-python": "0.25.0",
+    "tree-sitter-typescript": "0.23.2",
     "tsx": "^4.19.2",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "web-tree-sitter": "0.27.0"
   }
 }

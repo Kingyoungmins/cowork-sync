@@ -1,0 +1,21 @@
+{
+  "name": "2/tip_caller",
+  "check": 2,
+  "lang": "python",
+  "expect": "fail",
+  "reason": "incompatible_caller",
+  "line": 9,
+  "tipEqualsA": false,
+  "A": {
+    "lib.py": "def foo(a, b):\n    \"\"\"Price of a line.\"\"\"\n    return a * b\n\n\ndef helper(x):\n    return round(x, 2)\n",
+    "orders.py": "from lib import foo\n\n\ndef subtotal(lines):\n    return sum(p * q for p, q in lines)\n"
+  },
+  "R": {
+    "lib.py": "def foo(a):\n    \"\"\"Price of a line.\"\"\"\n    return a[0] * a[1]\n\n\ndef helper(x):\n    return round(x, 2)\n",
+    "orders.py": "from lib import foo\n\n\ndef subtotal(lines):\n    return sum(p * q for p, q in lines)\n"
+  },
+  "TIP": {
+    "lib.py": "def foo(a, b):\n    \"\"\"Price of a line.\"\"\"\n    return a * b\n\n\ndef helper(x):\n    return round(x, 2)\n",
+    "orders.py": "from lib import foo\n\n\ndef subtotal(lines):\n    return sum(p * q for p, q in lines)\n\n\ndef checkout(order):\n    return foo(order.price, order.quantity)\n"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "tc09/tsjs/2_fail",
+  "check": 2,
+  "lang": "typescript",
+  "expect": "fail",
+  "reason": "incompatible_caller",
+  "line": 6,
+  "tipEqualsA": true,
+  "A": {
+    "pricing.ts": "export function price(amount: number, qty: number): number {\n  return Math.round(amount * qty * 100) / 100;\n}\n\nexport function discount(amount: number): number {\n  return Math.round(amount * 90) / 100;\n}\n",
+    "checkout.ts": "import { price, discount } from './pricing';\n\nexport function checkout(cart: Array<{ amount: number; qty: number }>): number {\n  let total = 0;\n  for (const line of cart) {\n    total += price(line.amount, line.qty);\n  }\n  return discount(total);\n}\n"
+  },
+  "R": {
+    "pricing.ts": "export function price(amount: number): number {\n  return Math.round(amount * 100) / 100;\n}\n\nexport function discount(amount: number): number {\n  return Math.round(amount * 90) / 100;\n}\n",
+    "checkout.ts": "import { price, discount } from './pricing';\n\nexport function checkout(cart: Array<{ amount: number; qty: number }>): number {\n  let total = 0;\n  for (const line of cart) {\n    total += price(line.amount, line.qty);\n  }\n  return discount(total);\n}\n"
+  }
+}

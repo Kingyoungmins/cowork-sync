@@ -1,0 +1,13 @@
+{
+  "session_id": "f1x7u4e0-0000-4000-8000-000000000011",
+  "transcript_path": "/home/dev/.claude/projects/repo/f1x7u4e0.jsonl",
+  "cwd": "/repo",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "/repo/src/banner.py",
+    "old_string": "message = \"Use \"net\" totals, it's safer\"",
+    "new_string": "message = \"Use \"gross\" totals, it's safer\"",
+    "replace_all": false
+  }
+}

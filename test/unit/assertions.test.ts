@@ -50,7 +50,7 @@ function clean(): PrePushInput {
     outTree: OUT_TREE, emptyTree: EMPTY_TREE,
     bnewParents: [T, C], liveCode: C, cParents: [TIP],
     scope: (): ScopeClass => 'LIVE', masked: () => false,
-    heldEntriesAdded: 0,
+    heldAdded: [],
     readBlob: async (oid) => {
       const b = BLOBS.get(oid);
       if (b === undefined) throw new Error(`no blob ${oid}`);
@@ -105,8 +105,9 @@ test('each ENG-41 letter fails on its planted violation and passes on a clean in
   assert.deepEqual(await prePushAsserts({ ...clean(), out: map({ 'a.ts': A_BASE, 'b.ts': B_TEAM }), masked: (p) => p === 'a.ts' }), { ok: false, letter: 'i', path: 'a.ts' });
   // INV-MASK (HLD-19): a path-class (QUARANTINED / SAVE_ONLY / UNMANAGED) path differing from A in P while OUT keeps TIP.
   assert.deepEqual(await prePushAsserts({ ...clean(), out: map({ 'a.ts': A_BASE, 'b.ts': B_TEAM }), scope: (p) => (p === 'a.ts' ? 'UNMANAGED' : 'LIVE') }), { ok: false, letter: 'INV-MASK', path: 'a.ts' });
-  // (j) an added held/ entry (Plan 2 adds none).
-  assert.deepEqual(await prePushAsserts({ ...clean(), heldEntriesAdded: 1 }), { ok: false, letter: 'j', path: null });
+  // (j) an added held/ entry of a local_only record (Plan 3 Task 4: the real additions; test/unit/assertions.held.test.ts has the rest).
+  const held = { holdId: '01J9ZQ3C5X00000000000000AA', path: 'a.ts', stage: 'h1' as const, oid: A_LOCAL, localOnly: true, live: true };
+  assert.deepEqual(await prePushAsserts({ ...clean(), heldAdded: [held] }), { ok: false, letter: 'j', path: 'a.ts' });
 });
 
 test('ENG-41 (d): an invalid OUT oid, the empty tree over a non-empty TIP and an empty OUT map each fail alone; an empty OUT over an empty TIP passes', async () => {

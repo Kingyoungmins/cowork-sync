@@ -1,0 +1,3 @@
+// CCI-03 (12): a daemon spawn outside spawnDaemon() (a 'daemon.js' literal passed to a call).
+import { join } from 'node:path';
+export const daemonPath = (dist: string): string => join(dist, 'daemon.js');

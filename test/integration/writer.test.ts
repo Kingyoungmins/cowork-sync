@@ -210,8 +210,8 @@ async function leftovers(w: W, ext: RegExp = /\.(new|old|redo)$/): Promise<strin
   return (await fsp.readdir(w.s.tmp)).filter((n) => ext.test(n)).sort();
 }
 
-function deferred(n: number, reason: GroupResult['reason']): GroupResult {
-  return { n, outcome: 'deferred', reason, written: [], deleted: [], phantoms: [], stranded: false };
+function deferred(n: number, reason: GroupResult['reason'], path?: string): GroupResult {
+  return { n, outcome: 'deferred', reason, written: [], deleted: [], phantoms: [], stranded: false, ...(path !== undefined ? { path } : {}) };
 }
 
 /** An error shaped like Node's own fs errors. */
@@ -313,7 +313,7 @@ test('a 3-path group is written all or none: a share-read lock on one path defer
     const release = w.ffs.holdLock(w.s.abs('src/c.txt'), 'share-read');
     w.ffs.calls.length = 0;
     const [r] = await w.writer.applyGroups([g], realRemerge(w));
-    assert.deepEqual(r, deferred(0, 'locked'));
+    assert.deepEqual(r, deferred(0, 'locked', 'src/c.txt'));
     for (const [i, p] of paths.entries()) {
       assert.equal(await read(w, p), before[i]!.bytes, `${p}: bytes untouched`);
       assert.equal(await ino(w, p), before[i]!.ino, `${p}: the same file, linked back from its .old`);
@@ -358,7 +358,7 @@ test('a create into an existing file defers race and leaves the local bytes unto
     const g: WriteGroup = { n: 0, entries: [await modify(w, 'src/a.txt', 'A\n', 0), await create(w, 'src/new.txt', 'team bytes\n', 1)] };
     w.ffs.calls.length = 0;
     const [r] = await w.writer.applyGroups([g], realRemerge(w));
-    assert.deepEqual(r, deferred(0, 'race'));
+    assert.deepEqual(r, deferred(0, 'race', 'src/new.txt'));
     assert.equal(await read(w, 'src/new.txt'), 'local bytes\n');
     assert.deepEqual(await realFs.lstat(w.s.abs('src/new.txt')), st, 'not even its stat changed');
     assert.equal(await read(w, 'src/a.txt'), SEVEN, 'the rest of the group is rolled back');
@@ -404,12 +404,12 @@ test('a write interposed between P1 and P2 is re-merged up to 3 times or defers 
     // human bytes stay on disk.
     x = await run('src/r3.txt', 3);
     assert.equal(x.calls, MAX_REMERGE, 'never more than 3 re-merges');
-    assert.deepEqual(x.r, deferred(0, 'mismatch'));
+    assert.deepEqual(x.r, deferred(0, 'mismatch', 'src/r3.txt'));
     assert.equal(await read(w, 'src/r3.txt'), human(4));
     // A conflicting save (the same line as the team's): no merge, mismatch, the human bytes on disk.
     await w.s.write('src/r4.txt', 'a1\na2\na3\na4\na5\na6\nH7\n');
     const [c] = await w.writer.applyGroups([{ n: 0, entries: [await modify(w, 'src/r4.txt', TEAM, 0)] }], realRemerge(w));
-    assert.deepEqual(c, deferred(0, 'mismatch'));
+    assert.deepEqual(c, deferred(0, 'mismatch', 'src/r4.txt'));
     assert.equal(await read(w, 'src/r4.txt'), 'a1\na2\na3\na4\na5\na6\nH7\n');
     // A save between P1 and P2 (yieldPoint apply.beforePhase2: p is at its .old): P2 finds the new file, the group
     // defers race, and the human bytes stay on disk; the .old (S_raw bytes, in git) goes to the ring.
@@ -418,7 +418,7 @@ test('a write interposed between P1 and P2 is re-merged up to 3 times or defers 
     };
     const [d] = await w.writer.applyGroups([{ n: 0, entries: [await modify(w, 'src/r5.txt', TEAM, 0)] }], realRemerge(w));
     w.sched.hook = null;
-    assert.deepEqual(d, deferred(0, 'race'));
+    assert.deepEqual(d, deferred(0, 'race', 'src/r5.txt'));
     assert.equal(await read(w, 'src/r5.txt'), human(9));
     assert.deepEqual(await leftovers(w, /\.(new|redo)$/), []);
     w.s.clock.advance(RING_KEEP_MS);
@@ -437,7 +437,7 @@ test('rollback restores the exact .old bytes, also for an already linked path', 
     w.ffs.addRule({ op: 'link', pathIncludes: w.s.abs('src/c.txt'), code: 'EBUSY', times: 1 });
     w.ffs.calls.length = 0;
     const [r] = await w.writer.applyGroups([g], realRemerge(w));
-    assert.deepEqual(r, deferred(0, 'locked'));
+    assert.deepEqual(r, deferred(0, 'locked', 'src/c.txt'));
     for (const [i, p] of paths.entries()) {
       assert.ok((await fsp.readFile(w.s.abs(p))).equals(before[i]!.bytes), `${p}: the exact .old bytes`);
       assert.equal(await ino(w, p), before[i]!.ino, `${p}: the .old itself is linked back`);
@@ -451,7 +451,7 @@ test('rollback restores the exact .old bytes, also for an already linked path', 
     });
     w.ffs.addRule({ op: 'link', pathIncludes: w.s.abs('src/c.txt'), code: 'EBUSY', times: 1 });
     const [r2] = await w.writer.applyGroups([g], realRemerge(w));
-    assert.deepEqual(r2, deferred(0, 'locked'));
+    assert.deepEqual(r2, deferred(0, 'locked', 'src/c.txt'));
     assert.equal(await read(w, 'src/a.txt'), 'human after the link\n');
     assert.ok((await fsp.readFile(w.s.abs('src/b.txt'))).equals(before[1]!.bytes));
     assert.ok((await fsp.readFile(w.s.abs('src/c.txt'))).equals(before[2]!.bytes));
@@ -483,7 +483,7 @@ test('no rename onto an existing target is ever issued', async () => {
     // A rollback with a linked path (rename p -> .redo) and a renamed one (link .old back).
     w.ffs.addRule({ op: 'link', pathIncludes: w.s.abs('src/r2.txt'), code: 'EBUSY', times: 1 });
     const rb: WriteGroup = { n: 1, entries: [await modify(w, 'src/r1.txt', 'R1\n', 0), await modify(w, 'src/r2.txt', 'R2\n', 1)] };
-    assert.deepEqual((await w.writer.applyGroups([rb], realRemerge(w)))[0], deferred(1, 'locked'));
+    assert.deepEqual((await w.writer.applyGroups([rb], realRemerge(w)))[0], deferred(1, 'locked', 'src/r2.txt'));
     // A local write and the ring sweep.
     assert.deepEqual(await w.writer.writeLocal('src/c.txt', aEntry(w, 'src/c.txt').oid, await blob(w, 'C\n'), 'test'), { kind: 'WRITTEN' });
     w.s.clock.advance(RING_KEEP_MS);
@@ -515,14 +515,14 @@ test('with setNoHardLinks the copy fallback creates exclusively and rolls back b
     assert.deepEqual(excl, [w.s.abs('src/a.txt'), w.s.abs('src/n.txt')], 'one exclusive create per written path');
     // An existing target at a create defers race.
     await w.s.write('src/local.txt', 'mine\n');
-    assert.deepEqual((await w.writer.applyGroups([{ n: 1, entries: [await create(w, 'src/local.txt', 'theirs\n', 0)] }], realRemerge(w)))[0], deferred(1, 'race'));
+    assert.deepEqual((await w.writer.applyGroups([{ n: 1, entries: [await create(w, 'src/local.txt', 'theirs\n', 0)] }], realRemerge(w)))[0], deferred(1, 'race', 'src/local.txt'));
     assert.equal(await read(w, 'src/local.txt'), 'mine\n');
     // A rollback after one path was written: exclusive creates from the .old bytes.
     const before = await Promise.all(['src/b.txt', 'src/c.txt'].map((p) => fsp.readFile(w.s.abs(p))));
     w.ffs.addRule({ op: 'writeFileExclusive', pathIncludes: w.s.abs('src/c.txt'), code: 'EBUSY', times: 1 });
     w.ffs.calls.length = 0;
     const rb: WriteGroup = { n: 2, entries: [await modify(w, 'src/b.txt', 'B\n', 0), await modify(w, 'src/c.txt', 'C\n', 1)] };
-    assert.deepEqual((await w.writer.applyGroups([rb], realRemerge(w)))[0], deferred(2, 'locked'));
+    assert.deepEqual((await w.writer.applyGroups([rb], realRemerge(w)))[0], deferred(2, 'locked', 'src/c.txt'));
     assert.ok((await fsp.readFile(w.s.abs('src/b.txt'))).equals(before[0]!));
     assert.ok((await fsp.readFile(w.s.abs('src/c.txt'))).equals(before[1]!));
     const i = w.ffs.calls.findIndex((c) => c.startsWith(`rename ${w.s.abs('src/b.txt')} -> `) && c.endsWith('.redo'));
@@ -796,13 +796,13 @@ test('a group holding a carried or dotgit-alias path, or a path DISK_EQ refuses,
     for (const [alias, needle] of [['.GIT/hooks/post-checkout', '.GIT'], ['GIT~1/config', 'GIT~1'], ['src/x\u{fffd}.txt', '\u{fffd}']] as const) {
       w.ffs.calls.length = 0;
       const g: WriteGroup = { n: 0, entries: [await modify(w, 'src/a.txt', 'A\n', 0), await create(w, alias, 'evil\n', 1)] };
-      assert.deepEqual((await w.writer.applyGroups([g], realRemerge(w)))[0], deferred(0, 'unmaterializable'), alias);
+      assert.deepEqual((await w.writer.applyGroups([g], realRemerge(w)))[0], deferred(0, 'unmaterializable', alias), alias);
       assert.deepEqual(w.ffs.calls.filter((c) => c.includes(needle)), [], `${alias} is never looked at`);
       assert.deepEqual(w.ffs.calls.filter((c) => c.startsWith('rename ')), [], 'nothing moved');
     }
     // DISK_EQ refuses a filtered path under an over-cap filter set (P2-DRIVERCAP): the group defers filter_failure.
     const g: WriteGroup = { n: 0, entries: [await modify(w, 'src/a.txt', 'A\n', 0), await modify(w, 'src/b.txt', 'B\n', 1)] };
-    assert.deepEqual((await w.writer.applyGroups([g], realRemerge(w)))[0], deferred(0, 'filter_failure'));
+    assert.deepEqual((await w.writer.applyGroups([g], realRemerge(w)))[0], deferred(0, 'filter_failure', 'src/b.txt'));
     assert.equal(await read(w, 'src/a.txt'), SEVEN);
     assert.deepEqual(await leftovers(w), []);
   });
@@ -814,7 +814,7 @@ test('final review minor: a creation of a filtered path is refused like a modify
     await withWriter(`w-create-filtered-${label}`, { filtered: (p) => p === 'src/new.sec', filters }, async (w) => {
       if (label === 'unknown') await fsp.writeFile(w.s.abs('.git/info/attributes'), 'src/new.sec filter=undiscovered\n');
       const g: WriteGroup = { n: 0, entries: [await modify(w, 'src/a.txt', 'A\n', 0), await create(w, 'src/new.sec', 'STORED FORM\n', 1)] };
-      assert.deepEqual((await w.writer.applyGroups([g], realRemerge(w)))[0], deferred(0, 'filter_failure'), label);
+      assert.deepEqual((await w.writer.applyGroups([g], realRemerge(w)))[0], deferred(0, 'filter_failure', 'src/new.sec'), label);
       assert.equal(await read(w, 'src/new.sec'), null, `${label}: nothing at p`);
       assert.equal(await read(w, 'src/a.txt'), SEVEN, `${label}: the group is whole`);
       assert.deepEqual(await leftovers(w), []);
@@ -969,7 +969,7 @@ test('a copy-mode rollback on a full disk unlinks the .new files first and resto
     w.ffs.addRule({ op: 'writeFileExclusive', pathIncludes: w.s.abs('src/r3.txt'), code: 'ENOSPC', times: 1 });
     w.ffs.calls.length = 0;
     const [r] = await w.writer.applyGroups([g], realRemerge(w));
-    assert.deepEqual(r, deferred(0, 'disk_low'));
+    assert.deepEqual(r, deferred(0, 'disk_low', 'src/r3.txt'));
     for (const p of paths) assert.equal(await read(w, p), SEVEN, `${p}: restored`);
     const fail = w.ffs.calls.indexOf(`writeFileExclusive ${w.s.abs('src/r3.txt')}`);
     const firstRestore = w.ffs.calls.indexOf(`writeFileExclusive ${w.s.abs('src/r1.txt')}`, fail);
@@ -983,7 +983,7 @@ test('a copy-mode rollback on a full disk unlinks the .new files first and resto
     const g: WriteGroup = { n: 0, entries: await Promise.all(paths.map((p, i) => modify(w, p, target(i + 1), i))) };
     w.ffs.addRule({ op: 'writeFileExclusive', pathIncludes: w.s.abs('src/r3.txt'), code: 'ENOSPC', times: 1 });
     const [r] = await w.writer.applyGroups([g], realRemerge(w));
-    assert.deepEqual(r, { ...deferred(0, 'disk_low'), stranded: true }, 'the group reports its stranded restore (P2-STRANDED)');
+    assert.deepEqual(r, { ...deferred(0, 'disk_low', 'src/r3.txt'), stranded: true }, 'the group reports its stranded restore (P2-STRANDED)');
     assert.equal(await read(w, 'src/r1.txt'), null, 'no partial file is left at r1');
     assert.equal(await fsp.readFile(join(w.s.tmp, '0.0.old'), 'utf8'), SEVEN, 'r1 keeps its .old');
     assert.deepEqual([await read(w, 'src/r2.txt'), await read(w, 'src/r3.txt')], [SEVEN, SEVEN], 'every other path is restored');
@@ -1031,7 +1031,7 @@ test('the link stat is taken at once and a failing .new unlink is not fatal: a l
     w.ffs.addRule({ op: 'unlink', pathIncludes: join(w.s.tmp, '0.0.new'), code: 'EPERM', times: 1 });
     w.ffs.addRule({ op: 'link', pathIncludes: w.s.abs('src/c.txt'), code: 'EBUSY', times: 1 });
     const [r] = await w.writer.applyGroups([g], realRemerge(w));
-    assert.deepEqual(r, deferred(0, 'locked'));
+    assert.deepEqual(r, deferred(0, 'locked', 'src/c.txt'));
     for (const [i, p] of paths.entries()) {
       assert.equal(await read(w, p), before[i]!.bytes, `${p}: restored`);
       assert.equal(await ino(w, p), before[i]!.ino, `${p}: its .old linked back`);
@@ -1058,7 +1058,7 @@ test('a create, modify or delete beneath a symlinked or junction directory is de
       { n: 2, entries: [del(w, 'docs/d.txt', 0)] },
       { n: 3, entries: [await modify(w, 'src/a.txt', 'A\n', 0), await create(w, 'docs/x/y.txt', 'y\n', 1)] },
     ];
-    for (const g of groups) assert.deepEqual((await w.writer.applyGroups([g], realRemerge(w)))[0], deferred(g.n, 'unmaterializable'), JSON.stringify(g.entries.map((e) => e.path)));
+    for (const g of groups) assert.deepEqual((await w.writer.applyGroups([g], realRemerge(w)))[0], deferred(g.n, 'unmaterializable', g.entries.at(-1)!.path), JSON.stringify(g.entries.map((e) => e.path)));
     assert.equal(await read(w, 'src/a.txt'), SEVEN, 'the rest of the group is untouched');
     assert.deepEqual(await w.writer.writeLocal('docs/d.txt', aEntry(w, 'docs/d.txt').oid, await blob(w, 'local d\n'), 'resolve'), { kind: 'DEFERRED', reason: 'unmaterializable' });
     // A restart's rollback of an intent naming a path beneath the link never relinks its .old through it.
@@ -1125,7 +1125,7 @@ test('in copy mode the .old is compared by size and mtime only: a rename that ch
   });
   await withWriter('w-copystat-link', { mode: 'link', wrap: newId }, async (w) => {
     const [r] = await w.writer.applyGroups([{ n: 0, entries: [await modify(w, 'src/a.txt', 'A\n', 0)] }], realRemerge(w));
-    assert.deepEqual(r, deferred(0, 'mismatch'), 'link mode keeps the file-id check');
+    assert.deepEqual(r, deferred(0, 'mismatch', 'src/a.txt'), 'link mode keeps the file-id check');
     assert.equal(await read(w, 'src/a.txt'), SEVEN);
   });
 });
@@ -1179,7 +1179,7 @@ test('the writer refuses symlink (120000) and gitlink (160000) entries: the grou
       const g: WriteGroup = { n: 0, entries: [await modify(w, 'src/a.txt', 'A\n', 0), bad] };
       w.ffs.calls.length = 0;
       const [r] = await w.writer.applyGroups([g], realRemerge(w));
-      assert.deepEqual(r, deferred(0, 'unmaterializable'), bad.path);
+      assert.deepEqual(r, deferred(0, 'unmaterializable', bad.path), bad.path);
       assert.deepEqual(w.ffs.calls, [], 'nothing is looked at, moved or written (no fs call, no git call)');
     }
     assert.equal(await read(w, 'src/a.txt'), SEVEN);
@@ -1204,7 +1204,7 @@ test('a re-merge of a filtered or -text path is fed the raw disk blob: canon run
     for (const p of ['src/f.txt', 'src/bin.txt', 'src/t.txt']) {
       await w.s.write(p, human);
       const [r] = await w.writer.applyGroups([{ n: 0, entries: [await modify(w, p, CRLF.replace('c7', 'T7'), 0)] }], remerge);
-      assert.deepEqual(r, deferred(0, 'mismatch'), p);
+      assert.deepEqual(r, deferred(0, 'mismatch', p), p);
     }
     assert.equal(seen.get('src/f.txt'), await blob(w, human), 'filtered: found is the raw blob, never canon');
     assert.equal(seen.get('src/bin.txt'), await blob(w, human), '-text: found is the raw blob, never canon');
@@ -1230,7 +1230,7 @@ test('a stranded restore keeps the apply intent journaled (GroupResult.stranded)
     // P2's link fails EPERM, and so do the rollback's relink of the .old and the next sweep's retry.
     w.ffs.addRule({ op: 'link', pathIncludes: w.s.abs('src/r1.txt'), code: 'EPERM', times: 3 });
     const [r] = await w.writer.applyGroups([g], realRemerge(w));
-    assert.deepEqual(r, { ...deferred(0, 'locked'), stranded: true }, 'the group reports its stranded restore');
+    assert.deepEqual(r, { ...deferred(0, 'locked', 'src/r1.txt'), stranded: true }, 'the group reports its stranded restore');
     if (r?.stranded !== true) journaled = { kind: 'none' };
     const old = join(w.s.tmp, '0.0.old');
     assert.equal(await read(w, 'src/r1.txt'), null, 'p is absent');

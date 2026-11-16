@@ -1,0 +1,2 @@
+secret.env filter=secret
+utf16.txt working-tree-encoding=UTF-16LE

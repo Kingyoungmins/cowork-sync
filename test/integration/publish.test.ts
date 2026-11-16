@@ -14,12 +14,12 @@ import { publishStep, publishTreeRefused } from '../../src/engine/publish.js';
 import { mergeTree } from '../../src/git/merge.js';
 import { ABSENT, type Oid } from '../../src/git/oid.js';
 import { pushSpec, runPush } from '../../src/git/push.js';
-import { GitCommandError, type IndexEdit, type TreeEntry } from '../../src/git/repo.js';
+import { GitCommandError, type IndexEdit } from '../../src/git/repo.js';
 import { setCrashHandler } from '../../src/ports/crashpoint.js';
 import { gitCallsOf, readWork, workPath, writeWork, type CoreFixture, type PeerFixture } from '../helpers/coreFixture.js';
 import {
-  blobText, buf, captureReady, editAndCapture, failedResult, lines, prep, pushCalls, remoteBoard, remoteCode, setMutants, stateA, treeOf,
-  withCores, wrapGit,
+  blobText, buf, captureReady, editAndCapture, failedResult, lines, prep, pushCalls, remoteBoard, remoteCode, setMutants, stateA, stubCompose,
+  treeOf, withCores, wrapGit,
 } from '../helpers/publishHelpers.js';
 import { testRunner } from '../helpers/tmp.js';
 
@@ -85,7 +85,7 @@ test('a human CS publishes after 20 s quiet: C = commit-tree OUT -p TIP with Cow
     assert.deepEqual(c.parents, [TIP0], 'C = commit-tree OUT -p TIP');
     assert.equal(c.subject, CODE_SUBJECT);
     const cs = parseCsTrailers(c.trailers);
-    assert.deepEqual(cs.cs, [{ csId: pair.csId, state: 'closed', seq: 0, origin: 'human', checks: 'skipped', paths: 1 }]);
+    assert.deepEqual(cs.cs, [{ csId: pair.csId, state: 'closed', seq: 1, origin: 'human', checks: 'skipped', paths: 1 }], 'seq is the 1-based publish count (R3-43)');
     assert.deepEqual(cs.paths.get(pair.csId), ['src/a.ts'], 'Cowork-CS-Paths lists the CS paths');
     assert.ok(c.trailers.some((t) => t.key === 'Cowork-Seat' && t.value === 'human'));
     assert.equal(await blobText(p, await treeOf(p, r.c), 'src/a.ts'), A_EDIT, 'OUT carries the published edit');
@@ -561,20 +561,8 @@ test('mutant M06 (S_disk pushed as OUT) is stopped by assert (b) or (c) before a
   });
 });
 
-/**
- * Test seam: composeP as built, then `edit` on P — with MASK bypassed when `unmasked` — as if MASK had failed to withhold a
- * path (the publish's own check of P must still stop it). Replaces any earlier stub.
- */
-function stubCompose(p: PeerFixture, unmasked: boolean, edit: (P: Map<string, TreeEntry>) => void = () => {}): void {
-  const cs = p.core.cs;
-  Reflect.deleteProperty(cs, 'composeP');
-  const orig = cs.composeP.bind(cs);
-  cs.composeP = async (repo, A, mask, pinned) => {
-    const c = await orig(repo, A, unmasked ? (X) => new Map(X) : mask, pinned);
-    edit(c.P);
-    return c;
-  };
-}
+// Test seam (shared with publish.mask.test.ts, Plan 3 Task 2): publishHelpers' stubCompose — composeP as built, then `edit` on P,
+// with MASK bypassed when `unmasked` — as if MASK had failed to withhold a path (the publish's own check of P must still stop it).
 
 test('a held path differing from A in P is reported with ENG-41\'s letter before the merge: (i) for a record-masked path, INV-MASK for a path class', async () => {
   const S = '.claude/settings.json';

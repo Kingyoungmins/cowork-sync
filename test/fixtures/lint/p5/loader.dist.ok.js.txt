@@ -1,0 +1,5 @@
+// A loader bundle that loads only Node built-ins and ./core.js at run time.
+import { readFileSync } from "node:fs";
+void readFileSync;
+const core = await import("./core.js");
+await core.main();

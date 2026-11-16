@@ -1,8 +1,9 @@
 // The data directory (Task 11): derivation, creation and the SEC-20 owner/ACL verification (R-V11; 12 §3.2 item 2, VIZ-02; S9).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join, win32 } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { realFs, type Fs, type FsLstat } from '../../../src/ports/fs.js';
 import * as dataDirModule from '../../../src/viz/cli/dataDir.js';
 import { parseSddl, pluginDataDir, resolveDataDir, sddlOwnerOk, sddlUserOnly, verifyDataDir, type DataDirVerdict } from '../../../src/viz/cli/dataDir.js';
@@ -10,6 +11,8 @@ import * as pluginDataModule from '../../../src/data/pluginDataDir.js';
 import * as sddlModule from '../../../src/sec/sddl.js';
 import { isUncOrDevice } from '../../../src/viz/cli/paths.js';
 import { realOwnerProbe, type OwnerProbe } from '../../../src/viz/cli/ownerProbe.js';
+import { VIEWER_STDERR_FILE } from '../../../src/viz/cli/spawn.js';
+import * as stderrLeaf from '../../../src/viz/cli/stderrFile.js';
 import { makeTempRoot } from '../../helpers/tmp.js';
 import { passingProbe, USER_ONLY_SDDL, USER_SID } from '../../helpers/vizCli.js';
 
@@ -17,6 +20,9 @@ const U = USER_SID;
 const OTHER = 'S-1-5-21-1111111111-2222222222-3333333333-1002';
 const CAPABILITY = 'S-1-15-3-65536-599108337-2355189375-1353122160-3480128286-3345335107-485756383-4087318168-230526575';
 const HANGUL = '\u{D64D}\u{AE38}\u{B3D9}';
+/** Plan 5 Task 1 (R5-56, ruling P5-PF-4): the derived directory is named by the plugin id of a plugin cache folder. */
+const PLUGIN_ROOT = '/home/me/.claude/plugins/cache/test-market/cowork-sync/0.6.0';
+const PLUGIN_ID = 'cowork-sync-test-market';
 
 test('parseSddl and sddlUserOnly', () => {
   // The user SID, SY and BA (aliases mapped to SIDs; flags P/AI and inherited ACEs read).
@@ -105,11 +111,11 @@ test('the machine-relative aliases LA and LG name the user exactly when the user
 
 test('resolveDataDir: CLAUDE_PLUGIN_DATA when absolute, else pluginDataDir; created 0700 when absent', async () => {
   // Derivation (both platforms' path forms, whatever this host is).
-  assert.equal(pluginDataDir({}, `C:\\Users\\${HANGUL}`, 'win32'), `C:\\Users\\${HANGUL}\\.claude\\plugins\\data\\cowork-sync`);
-  assert.equal(pluginDataDir({}, `/home/${HANGUL}`, 'linux'), `/home/${HANGUL}/.claude/plugins/data/cowork-sync`);
-  assert.equal(pluginDataDir({ CLAUDE_CONFIG_DIR: '/etc/claude conf' }, '/home/me', 'darwin'), '/etc/claude conf/plugins/data/cowork-sync');
-  assert.equal(pluginDataDir({ Claude_Config_Dir: 'D:\\conf' }, 'C:\\Users\\me', 'win32'), 'D:\\conf\\plugins\\data\\cowork-sync');
-  assert.equal(pluginDataDir({ CLAUDE_CONFIG_DIR: 'relative/conf' }, '/home/me', 'linux'), '/home/me/.claude/plugins/data/cowork-sync');
+  assert.equal(pluginDataDir({}, `C:\\Users\\${HANGUL}`, 'win32', PLUGIN_ROOT), `C:\\Users\\${HANGUL}\\.claude\\plugins\\data\\${PLUGIN_ID}`);
+  assert.equal(pluginDataDir({}, `/home/${HANGUL}`, 'linux', PLUGIN_ROOT), `/home/${HANGUL}/.claude/plugins/data/${PLUGIN_ID}`);
+  assert.equal(pluginDataDir({ CLAUDE_CONFIG_DIR: '/etc/claude conf' }, '/home/me', 'darwin', PLUGIN_ROOT), `/etc/claude conf/plugins/data/${PLUGIN_ID}`);
+  assert.equal(pluginDataDir({ Claude_Config_Dir: 'D:\\conf' }, 'C:\\Users\\me', 'win32', PLUGIN_ROOT), `D:\\conf\\plugins\\data\\${PLUGIN_ID}`);
+  assert.equal(pluginDataDir({ CLAUDE_CONFIG_DIR: 'relative/conf' }, '/home/me', 'linux', PLUGIN_ROOT), `/home/me/.claude/plugins/data/${PLUGIN_ID}`);
 
   assert.equal(resolveDataDir({ CLAUDE_PLUGIN_DATA: '/var/data/cowork' }, '/home/me', 'linux'), '/var/data/cowork');
   assert.equal(resolveDataDir({ claude_plugin_data: 'D:\\pd' }, 'C:\\Users\\me', 'win32'), 'D:\\pd');
@@ -122,20 +128,20 @@ test('resolveDataDir: CLAUDE_PLUGIN_DATA when absolute, else pluginDataDir; crea
   }
   // Unset or empty: the derived directory. Relative: refused like a UNC path (fail closed, never replaced by another location).
   for (const v of [undefined, '']) {
-    assert.equal(resolveDataDir({ CLAUDE_PLUGIN_DATA: v }, '/home/me', 'linux'), '/home/me/.claude/plugins/data/cowork-sync', String(v));
-    assert.equal(resolveDataDir({ CLAUDE_PLUGIN_DATA: v }, 'C:\\Users\\me', 'win32'), 'C:\\Users\\me\\.claude\\plugins\\data\\cowork-sync', String(v));
+    assert.equal(resolveDataDir({ CLAUDE_PLUGIN_DATA: v, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT }, '/home/me', 'linux'), `/home/me/.claude/plugins/data/${PLUGIN_ID}`, String(v));
+    assert.equal(resolveDataDir({ CLAUDE_PLUGIN_DATA: v, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT }, 'C:\\Users\\me', 'win32'), `C:\\Users\\me\\.claude\\plugins\\data\\${PLUGIN_ID}`, String(v));
   }
   for (const v of ['relative/data', './data', 'data', '~/data']) assert.equal(resolveDataDir({ CLAUDE_PLUGIN_DATA: v }, '/home/me', 'linux'), null, v);
   for (const v of ['C:data', 'relative\\data', '\\rooted\\data']) assert.equal(resolveDataDir({ CLAUDE_PLUGIN_DATA: v }, 'C:\\Users\\me', 'win32'), null, v);
   assert.equal(resolveDataDir({ CLAUDE_PLUGIN_DATA: '\\\\server\\share\\data' }, 'C:\\Users\\me', 'win32'), null);
-  assert.equal(resolveDataDir({}, '\\\\server\\share\\home', 'win32'), null);
-  assert.equal(resolveDataDir({}, 'relative home', 'linux'), null);
+  assert.equal(resolveDataDir({ CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT }, '\\\\server\\share\\home', 'win32'), null);
+  assert.equal(resolveDataDir({ CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT }, 'relative home', 'linux'), null);
 
   // Creation: absent → created (POSIX mode 0700) and verified; the viewer's create: false never creates.
   const t = await makeTempRoot('viz-datadir');
   try {
     const probe = process.platform === 'win32' ? passingProbe : realOwnerProbe;
-    const dir = resolveDataDir({}, join(t.root, `home ${HANGUL}`), process.platform);
+    const dir = resolveDataDir({ CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT }, join(t.root, `home ${HANGUL}`), process.platform);
     assert.ok(dir !== null);
     assert.deepEqual(await verifyDataDir(dir, { fs: realFs, probe, platform: process.platform, create: false }), { ok: false, why: 'not_dir' });
     assert.equal(existsSync(dir), false);
@@ -313,7 +319,7 @@ test('verifyDataDir (win32): every protectDir runs between an lstat right before
   assert.deepEqual(await run({ exists: true, sddl: PROTECTED_DACL, swap: { when: 'acl#1', to: OTHER_INO } }), { v: { ok: false, why: 'probe_failed' }, events: ['lstat', 'acl', 'lstat'] });
 });
 
-test('verifyDataDir (win32): a directory is repaired only when it is empty or holds nothing but the viewer\'s own files (log\\*.jsonl, *.jsonl, probe.json), checked before and after the repair; anything else keeps its acl refusal and is never re-permissioned', async () => {
+test('verifyDataDir (win32): a directory is repaired only when it is empty or holds nothing but the viewer\'s own files (log\\*.jsonl, log\\viz-stderr.txt, *.jsonl, probe.json), checked before and after the repair; anything else keeps its acl refusal and is never re-permissioned', async () => {
   const FILE: Partial<FsLstat> = { isFile: true, mode: 0o100000 };
   const DIR: Partial<FsLstat> = { isDirectory: true, mode: 0o40000 };
   const LINK: Partial<FsLstat> = { isSymbolicLink: true, mode: 0o120000 };
@@ -345,19 +351,26 @@ test('verifyDataDir (win32): a directory is repaired only when it is empty or ho
     return { v: await verifyDataDir(WIN_DIR, { fs, probe, platform: 'win32', create: true }), protects, acls };
   };
 
-  // Empty, or only the viewer's own files: repaired once and accepted.
+  // Empty, or only the viewer's own files: repaired once and accepted. The viewer's own files include its stderr file,
+  // log\viz-stderr.txt (VIEWER_STDERR_FILE: every CLI start opens it, Task 15 fix round 2), a regular file inside log\ only.
+  assert.equal(VIEWER_STDERR_FILE, 'viz-stderr.txt');
+  const stderrIn = (dir: string): string => `${dir}\\${VIEWER_STDERR_FILE}`;
   for (const entries of [
     {}, { log: DIR }, { log: DIR, 'log\\viz-ABCDEFGH-1.jsonl': FILE, 'log\\viz-ABCDEFGH-0.jsonl': FILE },
     { 'probe.json': FILE }, { 'viz-ABCDEFGH-1.jsonl': FILE, 'probe.json': FILE, log: DIR, 'log\\viz-ABCDEFGH-2.jsonl': FILE },
+    { log: DIR, [stderrIn('log')]: FILE }, { log: DIR, 'log\\viz-ABCDEFGH-1.jsonl': FILE, [stderrIn('log')]: FILE, 'probe.json': FILE },
   ] as Array<Record<string, Partial<FsLstat>>>) {
     assert.deepEqual(await run(entries), { v: { ok: true }, protects: 1, acls: 2 }, JSON.stringify(Object.keys(entries)));
   }
-  // Anything else: the acl refusal it had, and its DACL never touched (no protectDir).
+  // Anything else: the acl refusal it had, and its DACL never touched (no protectDir). The stderr file as a link (symlink or
+  // junction), a folder, outside log\ (the data directory itself) or under another case of its name is not the viewer's.
   for (const entries of [
     { 'notes.txt': FILE }, { 'repos.json': FILE }, { 'user.json': FILE }, { 'viz-no-hooks': DIR }, { sub: DIR }, { 'Documents.lnk': FILE },
     { log: LINK }, { log: FILE }, { 'log\\x.txt': FILE, log: DIR }, { log: DIR, 'log\\sub': DIR }, { log: DIR, 'log\\a.jsonl': LINK },
     { log: DIR, 'log\\a.jsonl': DIR }, { 'probe.json': DIR }, { 'probe.json': LINK }, { 'a.jsonl': LINK }, { 'a.jsonl': DIR },
     { 'probe.json': FILE, 'notes.txt': FILE }, { 'LOG.TXT': FILE },
+    { log: DIR, [stderrIn('log')]: LINK }, { log: DIR, [stderrIn('log')]: DIR }, { [VIEWER_STDERR_FILE]: FILE },
+    { log: DIR, 'log\\VIZ-STDERR.TXT': FILE }, { log: DIR, 'log\\viz-stderr.txt.bak': FILE }, { log: DIR, 'log\\viz-stderr.log': FILE },
   ] as Array<Record<string, Partial<FsLstat>>>) {
     assert.deepEqual(await run(entries), { v: { ok: false, why: 'acl' }, protects: 0, acls: 1 }, JSON.stringify(entries));
   }
@@ -445,6 +458,17 @@ test('resolveDataDir refuses UNC and device paths on POSIX too, and agrees with 
   }
   // A UNC or device CLAUDE_CONFIG_DIR is ignored (the derived directory falls back to <home>/.claude).
   for (const p of ['//host/c', '/dev/c']) {
-    assert.equal(pluginDataDir({ CLAUDE_CONFIG_DIR: p }, '/home/me', 'linux'), '/home/me/.claude/plugins/data/cowork-sync', p);
+    assert.equal(pluginDataDir({ CLAUDE_CONFIG_DIR: p }, '/home/me', 'linux', PLUGIN_ROOT), `/home/me/.claude/plugins/data/${PLUGIN_ID}`, p);
   }
+});
+
+test('the stderr file\'s name comes from the import-free leaf stderrFile.ts, which dataDir.ts and spawn.ts both import: dataDir.ts (bundled into viz.js too) never imports spawn.ts and its node:child_process', () => {
+  const src = (rel: string): string => readFileSync(fileURLToPath(new URL(`../../../src/viz/cli/${rel}`, import.meta.url)), 'utf8');
+  const imports = (text: string): string[] => [...text.matchAll(/^(?:import|export)\b[^;]*?\bfrom\s+'([^']+)'/gms)].map((m) => m[1]!);
+  assert.deepEqual(imports(src('stderrFile.ts')), [], 'the leaf imports nothing');
+  assert.equal(stderrLeaf.VIEWER_STDERR_FILE, 'viz-stderr.txt');
+  assert.equal(VIEWER_STDERR_FILE, stderrLeaf.VIEWER_STDERR_FILE, 'spawn.ts re-exports the leaf\'s name');
+  assert.ok(imports(src('dataDir.ts')).includes('./stderrFile.js'));
+  assert.ok(!imports(src('dataDir.ts')).some((m) => m === './spawn.js' || m.startsWith('node:child_process')), 'dataDir.ts imports neither spawn.ts nor child_process');
+  assert.ok(imports(src('spawn.ts')).includes('./stderrFile.js'));
 });

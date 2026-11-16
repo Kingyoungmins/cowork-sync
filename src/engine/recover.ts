@@ -29,7 +29,8 @@
 //                     LA_B at incident-<n>-own before any state change, crashpoint('recover.reanchor'), then ONE state
 //                     update: lostStateRebuild(V, 're_anchor') with INCIDENT cleared and the unlanded outbox ops rebuilt
 //                     as drafts under the new epoch (PRO-25), led by that epoch's join op (final review FC-7); no push of
-//                     any kind
+//                     any kind. Plan 3 Task 4: the old epoch's `hold` drafts are dropped and one hold draft per record not
+//                     durable on V's chain is re-drafted against its folded rev there, in that same state update
 //                   3 X = the candidate whose first-parent chain holds every other (else RECOVER_AMBIGUOUS{candidates,
 //                     displaced ref names}); X must pass the incident CHECK from LA_B (its chain board- and live-shaped),
 //                     else RECOVER_AMBIGUOUS{reason: 'x_check', ref, why} — in the plan, so before any push or crashpoint
@@ -48,7 +49,7 @@
 import { createHash } from 'node:crypto';
 import type { Json } from '../board/canonicalJson.js';
 import { governorRank } from '../board/fold.js';
-import type { OpDraft } from '../board/ops.js';
+import type { HoldOp, OpDraft } from '../board/ops.js';
 import { Outbox } from '../board/outbox.js';
 import { portable } from '../data/scope.js';
 import { fetchRefs, lsRemote, lsRemotePrefix, type FetchSpec } from '../git/fetch.js';
@@ -64,7 +65,7 @@ import { isRemoteContentError } from './errors.js';
 import type { FetchView } from './fetcher.js';
 import { fpOk, incidentCheck, liveBase, type IncidentVerdict, type IncidentWhy } from './incident.js';
 import type { Meta } from './meta.js';
-import { governedPush, resolvePushIntent, type AttemptClass, type GovernedBody } from './publish.js';
+import { governedPush, reanchorMirrors, resolvePushIntent, type AttemptClass, type GovernedBody } from './publish.js';
 import { headCheck, lostStateRebuild, scopeInputsFor, scopeOfEntry, tickOutside } from './restart.js';
 import { StateCasLostError, type Intent } from './state.js';
 import { diffPaths, sameTreeEntry } from './treeDiff.js';
@@ -638,6 +639,34 @@ async function restore(core: EngineCore, p: Plan): Promise<RecoverResult> {
 }
 
 /**
+ * Plan 3 Task 4 (PRO-25, 02-protocol §3.3 "Determinism", 05 F8; R3-26): the hold ops the re-anchor re-issues — one draft per
+ * record not durable on the recovered chain V, chained on its folded rev there (reanchorMirrors), so the next publish mints
+ * them under the new epoch. The fold at V is the one the rebuild persists (the same `from`: the run's fold, else the persisted
+ * one; Folder.foldTo refolds from a verified checkpoint when it is off V's chain); LIVE is V's scope at live_base(TIP of V),
+ * as the rebuild's; a terminal record is re-drafted only while V's fold holds a non-terminal entry for it or it had an unlanded
+ * op in the old outbox.
+ */
+async function reanchorHoldDrafts(core: EngineCore, V: Oid): Promise<Array<Omit<HoldOp, 'id'>>> {
+  const view = core.view!;
+  const fp = foldPatch(core);
+  const from = fp !== null && fp.meta.fold_board !== null ? { board: fp.meta.fold_board, state: fp.fold }
+    : view.fold !== null && view.meta.fold_board !== null ? { board: view.meta.fold_board, state: view.fold } : null;
+  const fold = (await core.folder.foldTo(V, from, core.deps.regionSpec)).state;
+  const v = await liveCodeOf(core, V);
+  const VT = await core.repo.readTreeMap(v.tree);
+  const paths = [...new Set(core.holds.all().flatMap((r) => r.paths))].filter((q) => validPathSyntax(q));
+  const inp = await scopeInputsFor(core, (await liveBase(core.repo, v.tip)).base, paths);
+  const live = (q: string): boolean => {
+    try {
+      return validPathSyntax(q) && scopeOfEntry(core, inp, q, VT.get(q)?.mode ?? '100644').cls === 'LIVE';
+    } catch {
+      return false;   // a path the scope cannot classify is not LIVE (PRO-21 fails closed)
+    }
+  };
+  return reanchorMirrors(core, V, fold, live, (id) => core.outbox.pendingHold(id) !== null);
+}
+
+/**
  * Step 2a's re-anchor: incident-<n>-own, crashpoint('recover.reanchor'), then ONE state update — the lost-state rebuild
  * against V with INCIDENT cleared and the unlanded outbox ops rebuilt as drafts with no seq (their seqs were the old
  * epoch's; the next publish allocates them under the new one, PRO-25) — so a crash leaves the whole re-anchor or none.
@@ -650,10 +679,13 @@ async function reanchor(core: EngineCore, p: Plan): Promise<RecoverResult> {
   crashpoint('recover.reanchor');
   // Final review FC-7: the new epoch's join op leads the rebuilt drafts (a fold rejects a non-join op of an unrecorded
   // epoch, also one placed ahead of the join in the same commit); a join draft already pending is not repeated.
+  // Plan 3 Task 4 (PRO-25, 05 F8): every hold draft of the old epoch is dropped, and the hold mirrors are re-drafted from the
+  // registry against the folded revs on the recovered chain (appended after the join) — in this same single state update.
   const outbox = new Outbox([
     { draft: (await joinDraft(core)) as OpDraft, op: null },
-    ...core.outbox.drafts().filter((d) => d.type !== 'join').map((draft) => ({ draft, op: null })),
+    ...core.outbox.drafts().filter((d) => d.type !== 'join' && d.type !== 'hold').map((draft) => ({ draft, op: null })),
   ]);
+  for (const d of await reanchorHoldDrafts(core, p.preview.V as Oid)) outbox.replaceHold(d);
   const report = await lostStateRebuild(core, p.preview.V as Oid, 're_anchor', undefined, { ...clearedMeta(view.meta), outbox: outbox.toJson() });
   await afterClear(core, n, 'reanchor');
   core.deps.log.write('warn', 'RECOVER_REANCHOR', { n, own: view.laB, board: p.preview.V, records: report.records.length });
@@ -683,6 +715,7 @@ async function incidentIteration(core: EngineCore, fetched: FetchView): Promise<
     tick: null, mat: null,
     freeze: [...view.meta.freeze_reasons], pushStates: pushStatesOf(core, folded.version),
     leaseIdleMs: core.deps.lease.idleMs(),
+    txnOpen: core.deps.claude.txnOpen(),   // F2 #108 (R-T8B-2): every IterationCtx names an open TXN; no apply runs on this one
   };
 }
 

@@ -32,7 +32,7 @@ function harness(): { put(bytes: Buffer | null): void; read(prev: StatusRead | n
   };
 }
 
-test('T-VIZ-overlay: each status state maps to its light; a heartbeat 3 loop periods + 1 ms old → down; a missing status.json → down (R-V24); a 2 MiB or unparseable file → unreadable with the previous values and never down; the offline age is last_fetch_age_ms + Δ machine mono in whole minutes', async () => {
+test('T-VIZ-overlay: each status state maps to its light; a heartbeat 3 loop periods + 1 ms old → down; a missing status.json → down (R-V24); a 2 MiB or unparseable file → unreadable with the previous values, down only as those kept values say (the unreadable file itself neither makes nor clears down); the offline age is last_fetch_age_ms + Δ machine mono in whole minutes', async () => {
   const h = harness();
   const fresh = HEARTBEAT + 1;
   // Every glossary §14 state is carried as the light; only `down` (the orderly exit's last write) is down by itself.
@@ -57,7 +57,9 @@ test('T-VIZ-overlay: each status state maps to its light; a heartbeat 3 loop per
   assert.equal(overlayOf(missing, fresh, '0.0.0', null).down, true, 'a missing status.json → down');
   assert.equal(overlayOf(await h.read(null), fresh, '0.0.0', null).down, true, 'missing from the start → down');
 
-  // 2 MiB and unparseable files: unreadable, the previous values kept, never down — even long after the old heartbeat.
+  // 2 MiB and unparseable files: unreadable, the previous values kept. The unreadable file itself never makes down, and it never
+  // clears it either (8a final review, VIZ-13 "keep the previous overlay"): down follows the kept parsed heartbeat — alive while it is
+  // fresh, down once it is 3 loop periods + 1 ms old, as for a readable file.
   const last = statusBytes({ state: 'degraded', heartbeat_mono_ms: HEARTBEAT, loop_period_ms: PERIOD, pending: { cs_ready: 3, cs_open: 0, holds_active: 2, holds_local_only: 0, incoming: 1, not_converged: [] } });
   for (const [label, bytes] of [['2 MiB', Buffer.alloc(2 * 1024 * 1024, 0x20)], ['unparseable', Buffer.from('{"v":1,"state":', 'utf8')], ['wrong schema', statusBytes({ state: 7 })], ['invalid UTF-8', Buffer.from([0x7b, 0xff, 0x7d])]] as const) {
     h.put(last);
@@ -66,9 +68,21 @@ test('T-VIZ-overlay: each status state maps to its light; a heartbeat 3 loop per
     const bad = await h.read(prev);
     assert.equal(bad.unreadable, true, `${label}: unreadable`);
     assert.deepEqual(bad.fields, prev.fields, `${label}: the previous values stay`);
-    const o = overlayOf(bad, HEARTBEAT + 100 * PERIOD, '0.0.0', null);
-    assert.deepEqual([o.unreadable, o.down, o.state, o.ready, o.holds, o.incoming], [true, false, 'degraded', 3, 2, 1], `${label}: never down, previous light and counts`);
+    const alive = overlayOf(bad, HEARTBEAT + 3 * PERIOD, '0.0.0', null);
+    assert.deepEqual([alive.unreadable, alive.down, alive.state, alive.ready, alive.holds, alive.incoming], [true, false, 'degraded', 3, 2, 1], `${label}: not down while the kept heartbeat is fresh; previous light and counts`);
+    const stale = overlayOf(bad, HEARTBEAT + 100 * PERIOD, '0.0.0', null);
+    assert.deepEqual([stale.unreadable, stale.down, stale.state], [true, true, 'degraded'], `${label}: down once the kept heartbeat is stale, as before the file turned unreadable`);
+    assert.equal(overlayOf(prev, HEARTBEAT + 100 * PERIOD, '0.0.0', null).down, true, `${label}: the same down as the last readable values`);
   }
+  // A last write of 'down' (an orderly exit) stays down when the next file is unreadable.
+  h.put(statusBytes({ state: 'down', heartbeat_mono_ms: HEARTBEAT, loop_period_ms: PERIOD }));
+  const exited = await h.read(null);
+  h.put(Buffer.from('{"v":1,', 'utf8'));
+  assert.equal(overlayOf(await h.read(exited), fresh, '0.0.0', null).down, true, 'an orderly exit stays down');
+  // An unreadable file before any parse: no kept values, so no down (the light is '?').
+  const first = await h.read(null);
+  assert.deepEqual([first.unreadable, first.fields], [true, null]);
+  assert.deepEqual([overlayOf(first, fresh, '0.0.0', null).down, overlayOf(first, fresh, '0.0.0', null).state], [false, '?']);
 
   // The offline age: last_fetch_age_ms + (machineMonoMs() − heartbeat_mono_ms), in whole minutes, only while offline.
   h.put(statusBytes({ state: 'offline', heartbeat_mono_ms: HEARTBEAT, loop_period_ms: PERIOD, last_fetch_age_ms: 90_000 }));
@@ -88,7 +102,7 @@ test('T-VIZ-overlay: each status state maps to its light; a heartbeat 3 loop per
   assert.equal(overlayOf(ok, fresh, '0.0.0', null).versionSkew, false);
 });
 
-test('T-VIZ-overlay (reboot): a heartbeat ahead of this boot\'s machine-monotonic clock by more than one loop period → down, the light keeps the last state; an unreadable file still never goes down', async () => {
+test('T-VIZ-overlay (reboot): a heartbeat ahead of this boot\'s machine-monotonic clock by more than one loop period → down, the light keeps the last state; an unreadable file keeps that down (it neither makes nor clears it)', async () => {
   const h = harness();
   // A daemon that was not restarted after a reboot: its last heartbeat was taken at the old boot's uptime (50 h), this
   // boot's clock reads 5 min. machineMonoMs restarts at boot on every OS (CLOCK_MONOTONIC, QPC, mach time).
@@ -108,12 +122,17 @@ test('T-VIZ-overlay (reboot): a heartbeat ahead of this boot\'s machine-monotoni
   h.put(statusBytes({ state: 'offline', heartbeat_mono_ms: oldUptime, loop_period_ms: PERIOD, last_fetch_age_ms: 120_000 }));
   const off = overlayOf(await h.read(null), now, '0.0.0', null);
   assert.deepEqual([off.down, off.offlineMin], [true, 2]);
-  // An unreadable file keeps the previous values and never makes down, whatever its heartbeat.
+  // An unreadable file keeps the previous values, so a pre-reboot heartbeat stays down (8a final review: the unreadable file used to
+  // clear it); one whose kept heartbeat is fresh stays up.
   h.put(statusBytes({ state: 'ok', heartbeat_mono_ms: oldUptime, loop_period_ms: PERIOD }));
   const prev = await h.read(null);
   h.put(Buffer.from('{"v":1,', 'utf8'));
   const bad = await h.read(prev);
-  assert.deepEqual([bad.unreadable, overlayOf(bad, now, '0.0.0', null).down], [true, false], 'unreadable: never down');
+  assert.deepEqual([bad.unreadable, overlayOf(bad, now, '0.0.0', null).down], [true, true], 'unreadable: the kept pre-reboot heartbeat is still down');
+  h.put(statusBytes({ state: 'ok', heartbeat_mono_ms: now, loop_period_ms: PERIOD }));
+  const alive = await h.read(null);
+  h.put(Buffer.from('{"v":1,', 'utf8'));
+  assert.deepEqual([overlayOf(await h.read(alive), now, '0.0.0', null).down], [false], 'unreadable: a fresh kept heartbeat is not down');
 });
 
 test('youOf: the peer file, else status.json\'s peer_id when it is 32 lowercase hex, else null', async () => {

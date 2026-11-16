@@ -1,7 +1,8 @@
 // The page's connection state machine (12 §3.2 items 5 and 11, §3.10.2 "Redemption", §3.10.5 "Stream ids and resume"; VIZ-31,
 // VIZ-34, VIZ-42; R-V49): redeem the launch token once (or reuse the tab's stored session), load the world, then read the stream
 // from the world's cursor; a broken stream retries with Last-Event-ID after 1 s doubling to 30 s, then reloads the world, then
-// stops; a layout gap, a room added and a reset reload the world; bye stops. Every request names an ApiRoute, never a path
+// stops; a layout gap, a room added and a reset reload the world (one asked for before the stream the last such reload opened has
+// worked waits 1 s doubling to 30 s: 8a final review, the reset loop); bye stops. Every request names an ApiRoute, never a path
 // (V8, L-VIZ-DOM: client/api.ts maps each route to one literal fetch). Pure and DOM-free (R-V33): the page passes the I/O.
 import type { Lang } from '../../i18n/render.js';
 import type { StreamPayload, World } from '../server/viewModel.js';
@@ -70,8 +71,10 @@ export class Connection {
   private gen = 0;                                        // bumped whenever the current step is superseded: its awaits are then ignored
   private stream: StreamHandle | null = null;
   private attempt: Attempt = 'fresh';                     // the current stream's attempt, 'fresh' once it worked
-  private cancelTimer: (() => void) | null = null;        // the retry timer
+  private cancelTimer: (() => void) | null = null;        // the retry timer (or a waiting world reload's)
   private cancelStable: (() => void) | null = null;       // the current stream's STREAM_STABLE_MS timer
+  private reloading = false;                              // a world reload a reset/gap/added asked for: its stream has not worked yet
+  private reloadMs = 0;                                   // the wait of the next such reload asked for before then (0: none yet)
 
   constructor(private readonly io: ConnIo, private readonly on: { state(s: ConnState): void; world(w: World): void; payload(p: StreamPayload, id: number): void }) {}
 
@@ -157,6 +160,13 @@ export class Connection {
     this.clearStable();
   }
 
+  /** The current stream passed a payload on, or stayed open STREAM_STABLE_MS: the next reset, gap or room added reloads at once. A
+   *  reset or gap frame itself is well-formed (worked) but does not settle: it is what a reload loop repeats. */
+  private settled(): void {
+    this.reloading = false;
+    this.reloadMs = 0;
+  }
+
   private schedule(ms: number, f: () => void): void {
     this.clearTimer();
     this.cancelTimer = this.io.timer(ms, () => {
@@ -206,7 +216,10 @@ export class Connection {
     this.attempt = attempt;
     this.cancelStable = this.io.timer(STREAM_STABLE_MS, () => {
       this.cancelStable = null;
-      if (g === this.gen) this.worked();
+      if (g === this.gen) {
+        this.worked();
+        this.settled();
+      }
     });
     this.setState('live');
     void this.pump(g, s);
@@ -268,12 +281,23 @@ export class Connection {
         break;
     }
     this.lastId = id;
+    this.settled();
     deliver(() => this.on.payload(p, id));
   }
 
+  /** A reset, a layout gap or a room added reloads the world: at once, unless the stream the last such reload opened has not worked
+   *  yet — then after 1 s, doubling to 30 s, reconnecting meanwhile (8a final review: a world whose cursor the server keeps below a
+   *  reset it emitted, or a foreign server, would otherwise loop GET world). */
   private reload(): void {
     this.abandonStream();
-    void this.loadWorld(false);
+    if (!this.reloading) {
+      this.reloading = true;
+      void this.loadWorld(false);
+      return;
+    }
+    this.reloadMs = this.reloadMs === 0 ? RETRY_START_MS : Math.min(this.reloadMs * 2, RETRY_MAX_MS);
+    this.setState('reconnecting');
+    this.schedule(this.reloadMs, () => void this.loadWorld(false));
   }
 
   /** The current stream broke (it ended without bye, a read failed, or a message was malformed): its attempt failed. */

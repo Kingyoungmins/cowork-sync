@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import {
   parseDaemonArgs, remoteRefusalNext, resolveRemote, RESPAWN_LIMIT, RESPAWN_WINDOW_MS, RespawnBudget, runDaemon, sanitizeUrl, shellQuote, startRefusalNext, STOP_POLL_MS, type DaemonArgs, type DaemonIo,
 } from '../../src/daemon/run.js';
+import { IN_TREE_DAEMON } from '../helpers/regionDeps.js';
 import { STOP_REQUEST_FILE } from '../../src/engine/daemonFiles.js';
 import { QUIET_MS } from '../../src/engine/snapshot.js';
 import { VirtualClock } from '../sim/vclock.js';
@@ -65,7 +66,7 @@ function daemons(): Daemons {
   return {
     start(a) {
       const s = session();
-      const done = runDaemon(a, daemonEnv(), s.io);
+      const done = runDaemon(a, daemonEnv(), s.io, IN_TREE_DAEMON);
       all.push({ s, done });
       return { s, done };
     },
@@ -79,7 +80,7 @@ function daemons(): Daemons {
 }
 
 function args(dir: string, over: Partial<DaemonArgs> = {}): DaemonArgs {
-  return { cmd: 'run', repo: dir, branch: 'main', publish: null, name: 'Tester', remote: null, confirm: null, ...over };
+  return { cmd: 'run', repo: dir, branch: 'main', publish: null, name: 'Tester', remote: null, confirm: null, id: null, verb: null, dataDir: null, pluginRoot: null, spawned: false, ...over };
 }
 
 async function statusIn(dir: string): Promise<StatusJson | null> {
@@ -195,10 +196,10 @@ test('dist/daemon.js --version prints the version', () => {
 
 test('parseDaemonArgs reads the three commands and refuses anything else', () => {
   assert.deepEqual(parseDaemonArgs(['run', '--repo', 'r', '--branch', 'main', '--publish=all', '--name', 'Ann', '--remote', 'up']),
-    { cmd: 'run', repo: 'r', branch: 'main', publish: 'all', name: 'Ann', remote: 'up', confirm: null });
+    { cmd: 'run', repo: 'r', branch: 'main', publish: 'all', name: 'Ann', remote: 'up', confirm: null, id: null, verb: null, dataDir: null, pluginRoot: null, spawned: false });
   assert.deepEqual(parseDaemonArgs(['recover', '--repo', 'r', '--branch', 'b', '--confirm=abc123']),
-    { cmd: 'recover', repo: 'r', branch: 'b', publish: null, name: null, remote: null, confirm: 'abc123' });
-  assert.deepEqual(parseDaemonArgs(['resume', '--branch', 'b', '--repo', 'r']), { cmd: 'resume', repo: 'r', branch: 'b', publish: null, name: null, remote: null, confirm: null });
+    { cmd: 'recover', repo: 'r', branch: 'b', publish: null, name: null, remote: null, confirm: 'abc123', id: null, verb: null, dataDir: null, pluginRoot: null, spawned: false });
+  assert.deepEqual(parseDaemonArgs(['resume', '--branch', 'b', '--repo', 'r']), { cmd: 'resume', repo: 'r', branch: 'b', publish: null, name: null, remote: null, confirm: null, id: null, verb: null, dataDir: null, pluginRoot: null, spawned: false });
   for (const bad of [['run'], ['run', '--repo', 'r'], ['run', '--repo', 'r', '--branch', 'b', '--publish=some'], ['stop', '--repo', 'r', '--branch', 'b'], ['run', '--repo', 'r', '--branch', 'b', '--confirm=x'], ['resume', '--repo', 'r', '--branch', 'b', '--publish=all']]) {
     const r = parseDaemonArgs(bad);
     assert.ok('usage' in r && r.exitCode === 2, JSON.stringify(bad));
@@ -498,7 +499,7 @@ test('the daemon log queue is flushed before the command returns, and a failing 
   try {
     const c = f.clones[0]!;
     const s = session();
-    const run = runDaemon(args(c.dir), daemonEnv(), s.io);
+    const run = runDaemon(args(c.dir), daemonEnv(), s.io, IN_TREE_DAEMON);
     try {
       await waitOk('genesis', c.dir, { s, done: run });
       // daemon.lock replaced by a directory: the release at exit fails (EISDIR on reading it back).
@@ -553,7 +554,7 @@ test('remote resolution follows pushRemote, pushDefault, branch remote, --remote
     const split = await resolveRemote(repo, 'main', null);
     assert.ok('refuse' in split && split.refuse === 'SEC_REFUSE_REMOTE_SPLIT', JSON.stringify(split));
     const s1 = session();
-    assert.equal(await runDaemon(args(dir), daemonEnv(), s1.io), 1);
+    assert.equal(await runDaemon(args(dir), daemonEnv(), s1.io, IN_TREE_DAEMON), 1);
     assert.ok(s1.lines.some((l) => l.startsWith('SEC_REFUSE_REMOTE_SPLIT')), s1.lines.join('\n'));
     await git(dir, ['config', '--unset', 'remote.other.pushurl']);
 
@@ -564,7 +565,7 @@ test('remote resolution follows pushRemote, pushDefault, branch remote, --remote
     // The refusal names the config key and the file that holds it.
     assert.deepEqual([rewrite.params['key'], rewrite.params['file']], ['url.https://mirror.invalid/.insteadof', join(dir, '.git', 'config')], JSON.stringify(rewrite));
     const s2 = session();
-    assert.equal(await runDaemon(args(dir), daemonEnv(), s2.io), 1);
+    assert.equal(await runDaemon(args(dir), daemonEnv(), s2.io, IN_TREE_DAEMON), 1);
     assert.ok(s2.lines.some((l) => l.startsWith('SEC_REFUSE_URL_REWRITE')), s2.lines.join('\n'));
     assert.ok(s2.lines.some((l) => l.startsWith('next: ') && l.includes('url.https://mirror.invalid/.insteadof') && l.includes(join('.git', 'config'))), s2.lines.join('\n'));
     // pushInsteadOf rewrites the push URL only: a split.
@@ -596,7 +597,7 @@ test('SEC_REFUSE_URL_REWRITE names the exact url.<base>.insteadOf key that exist
     // printed line keeps an scp user — so the printed command, run by this OS's shell, removes the rule.
     await git(dir, ['config', 'url.git@mirror.invalid:.insteadOf', 'https://example.invalid/']);
     const s1 = session();
-    assert.equal(await runDaemon(args(dir), daemonEnv(), s1.io), 1);
+    assert.equal(await runDaemon(args(dir), daemonEnv(), s1.io, IN_TREE_DAEMON), 1);
     const r1 = refusalOf(s1.lines);
     assert.deepEqual([r1.params['key'], r1.params['file'], r1.params['key_redacted']], ['url.git@mirror.invalid:.insteadof', cfg, false], JSON.stringify(r1.params));
     assert.equal(await exists('url.git@mirror.invalid:.insteadof'), true, 'the named key exists');
@@ -610,7 +611,7 @@ test('SEC_REFUSE_URL_REWRITE names the exact url.<base>.insteadOf key that exist
     // (2) A base with scheme userinfo (a token): never printed, the key included; the command opens the file instead.
     await git(dir, ['config', 'url.https://tok3n@mirror.invalid/.insteadOf', 'https://example.invalid/']);
     const s2 = session();
-    assert.equal(await runDaemon(args(dir), daemonEnv(), s2.io), 1);
+    assert.equal(await runDaemon(args(dir), daemonEnv(), s2.io, IN_TREE_DAEMON), 1);
     assert.ok(!s2.lines.some((l) => l.includes('tok3n')), s2.lines.join('\n'));
     const r2 = refusalOf(s2.lines);
     assert.deepEqual([r2.params['key'], r2.params['key_redacted']], ['url.https://mirror.invalid/.insteadof', true]);
@@ -632,7 +633,7 @@ test('the resolved core.sshCommand reaches the runner', async () => {
     await git(c.dir, ['remote', 'set-url', 'origin', 'ssh://git@cowork.invalid/repo.git']);
     await git(c.dir, ['config', 'core.sshCommand', `"${process.execPath.replace(/\\/g, '/')}" "${script}"`]);
     const s = session();
-    const code = await runDaemon(args(c.dir), daemonEnv({ GIT_SSH_VARIANT: 'ssh' }), s.io);
+    const code = await runDaemon(args(c.dir), daemonEnv({ GIT_SSH_VARIANT: 'ssh' }), s.io, IN_TREE_DAEMON);
     assert.equal(code, 1, s.lines.join('\n'));
     assert.ok(s.lines.some((l) => l.startsWith('START_REMOTE')), s.lines.join('\n'));
     const argv = JSON.parse(await readFile(marker, 'utf8')) as string[];
@@ -657,14 +658,14 @@ test('recover without --confirm prints the preview id; resume clears meta.nonret
 
     // While a daemon holds the lock (this fixture's), neither verb runs.
     const busy = session();
-    assert.equal(await runDaemon(args(dir, { cmd: 'recover', name: null }), daemonEnv(), busy.io), 1);
+    assert.equal(await runDaemon(args(dir, { cmd: 'recover', name: null }), daemonEnv(), busy.io, IN_TREE_DAEMON), 1);
     assert.ok(busy.lines.some((l) => l.startsWith('DAEMON_ALREADY_RUNNING')), busy.lines.join('\n'));
     const busy2 = session();
-    assert.equal(await runDaemon(args(dir, { cmd: 'resume', name: null }), daemonEnv(), busy2.io), 1);
+    assert.equal(await runDaemon(args(dir, { cmd: 'resume', name: null }), daemonEnv(), busy2.io, IN_TREE_DAEMON), 1);
 
     await lockOf(p).release();
     const rec = session();
-    assert.equal(await runDaemon(args(dir, { cmd: 'recover', name: null }), daemonEnv(), rec.io), 0, rec.lines.join('\n'));
+    assert.equal(await runDaemon(args(dir, { cmd: 'recover', name: null }), daemonEnv(), rec.io, IN_TREE_DAEMON), 0, rec.lines.join('\n'));
     const idLine = rec.lines.find((l) => l.startsWith('RECOVER_PREVIEW'));
     assert.ok(idLine !== undefined, rec.lines.join('\n'));
     const id = /\bid=([0-9a-f]{6})\b/.exec(idLine)?.[1];
@@ -682,17 +683,20 @@ test('recover without --confirm prints the preview id; resume clears meta.nonret
     });
     await fresh.core.commit({ meta: { ...view.meta, nonretryable: { lease: view.laB, hold_id: holdId }, rejections: { lease: view.laB, n: 3 } } });
     const res = session();
-    assert.equal(await runDaemon(args(dir, { cmd: 'resume', name: null }), daemonEnv(), res.io), 0, res.lines.join('\n'));
+    assert.equal(await runDaemon(args(dir, { cmd: 'resume', name: null }), daemonEnv(), res.io, IN_TREE_DAEMON), 0, res.lines.join('\n'));
     const after = await fresh.core.state.read();
     assert.deepEqual([after!.meta.nonretryable, after!.meta.rejections], [null, null]);
     // R-27: the board's `event{kind: nonretryable}` is queued once the pause lifts, in the same state update.
     const queued = JSON.stringify(after!.meta.outbox);
     assert.equal(queued.split('"nonretryable"').length - 1, 1, queued);
     await fresh.core.holds.load();
-    assert.equal(fresh.core.holds.get(holdId)?.state, 'RESOLVED_PUBLISH', 'the (pathless) host-reject PIN ended');
+    // Plan 3 Task 8 (R3-11, R3-39): the pathless PIN ends SUBSUMED with its guard kept; the ResumeReport is one JSON line.
+    const ended = fresh.core.holds.get(holdId);
+    assert.deepEqual([ended?.state, ended?.guards.map((g) => g.name)], ['SUBSUMED', ['host-reject']], 'the (pathless) host-reject PIN ended');
+    assert.deepEqual(JSON.parse(res.lines.find((l) => l.startsWith('{'))!), { nonretryable: true, hostRejectReleased: holdId, massLifted: false });
     // Nothing left to resume: exit 0, nothing written.
     const again = session();
-    assert.equal(await runDaemon(args(dir, { cmd: 'resume', name: null }), daemonEnv(), again.io), 0);
+    assert.equal(await runDaemon(args(dir, { cmd: 'resume', name: null }), daemonEnv(), again.io, IN_TREE_DAEMON), 0);
     assert.equal((await fresh.core.state.read())!.commit, after!.commit);
   });
 });
@@ -750,7 +754,7 @@ test('no printed line contains URL userinfo', async () => {
     // userinfo; neither the daemon log nor status.json carries it.
     await git(c.dir, ['remote', 'set-url', 'origin', 'https://alice:s3cret@127.0.0.1:9/repo.git']);
     const s = session();
-    assert.equal(await runDaemon(args(c.dir), daemonEnv(), s.io), 1, s.lines.join('\n'));
+    assert.equal(await runDaemon(args(c.dir), daemonEnv(), s.io, IN_TREE_DAEMON), 1, s.lines.join('\n'));
     assert.ok(s.lines.some((l) => l.includes('https://127.0.0.1:9/repo.git')), `the refusal names the remote: ${s.lines.join('\n')}`);
     for (const l of s.lines) assert.ok(!/s3cret|alice/.test(l), `printed: ${l}`);
     const coworkDir = join(c.dir, '.git', 'cowork');
@@ -761,14 +765,14 @@ test('no printed line contains URL userinfo', async () => {
     // (2) A refusal whose params name both URLs (a split; the push URL in scp form with a user) prints both without it.
     await git(c.dir, ['config', 'remote.origin.pushurl', 'bob@127.0.0.1:other.git']);
     const s2 = session();
-    assert.equal(await runDaemon(args(c.dir), daemonEnv(), s2.io), 1);
+    assert.equal(await runDaemon(args(c.dir), daemonEnv(), s2.io, IN_TREE_DAEMON), 1);
     assert.ok(s2.lines.some((l) => l.includes('https://127.0.0.1:9/repo.git') && l.includes('127.0.0.1:other.git')), s2.lines.join('\n'));
     for (const l of s2.lines) assert.ok(!/s3cret|alice|bob@/.test(l), `printed: ${l}`);
     // (3) The line filter covers every printed line, whatever produced it: here the --repo word of a refusal's next
     // command, holding a URL of each form.
     const bogus = `${f.root}${sep}missing https://carol:pw1@example.invalid/r.git dave@example.invalid:o/r.git`;
     const s3 = session();
-    assert.equal(await runDaemon(args(bogus), daemonEnv(), s3.io), 1);
+    assert.equal(await runDaemon(args(bogus), daemonEnv(), s3.io, IN_TREE_DAEMON), 1);
     assert.ok(s3.lines.some((l) => l.startsWith('next: ') && l.includes('https://example.invalid/r.git') && l.includes(' example.invalid:o/r.git')), s3.lines.join('\n'));
     for (const l of s3.lines) assert.ok(!/pw1|carol|dave@/.test(l), `printed: ${l}`);
   } finally {
@@ -846,7 +850,7 @@ test('final review FC minors: an invalid --branch is a usage error (exit 2 with 
   const f = await remoteWithClones('daemon-branch-name', 1);
   try {
     const s = session();
-    assert.equal(await runDaemon(args(f.clones[0]!.dir, { branch: 'b'.repeat(151) }), daemonEnv(), s.io), 1, s.lines.join('\n'));
+    assert.equal(await runDaemon(args(f.clones[0]!.dir, { branch: 'b'.repeat(151) }), daemonEnv(), s.io, IN_TREE_DAEMON), 1, s.lines.join('\n'));
     assert.ok(s.lines.some((l) => l === 'START_BRANCH_NAME {"reason":"too_long","other":null}'), s.lines.join('\n'));
     assert.ok(s.lines.some((l) => l.startsWith('next: use a different branch name')), s.lines.join('\n'));
   } finally {

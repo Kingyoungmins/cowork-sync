@@ -1,0 +1,15 @@
+{
+  "name": "pass/note_json_key_rename",
+  "check": null,
+  "lang": "python",
+  "expect": "pass",
+  "tipEqualsA": true,
+  "A": {
+    "config.json": "{\n  \"currency\": \"EUR\",\n  \"rounding\": 2\n}\n",
+    "settings.py": "import json\n\n\ndef currency():\n    with open(\"config.json\") as f:\n        return json.load(f)[\"currency\"]\n"
+  },
+  "R": {
+    "config.json": "{\n  \"currency_code\": \"EUR\",\n  \"rounding\": 2\n}\n",
+    "settings.py": "import json\n\n\ndef currency():\n    with open(\"config.json\") as f:\n        return json.load(f)[\"currency\"]\n"
+  }
+}

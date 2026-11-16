@@ -1,13 +1,22 @@
 // Plan 8a Task 5: health and place labels (R-V56; 10-product sec. 3.14; 12 sec. 1.5 item 5, sec. 3.5.4; VIZ-17): phOf's precedence,
-// never PH_OFFLINE for a teammate; placeLabel's "last shared here" and "holding", never a working-on wording.
+// never PH_OFFLINE for a teammate; placeLabel's "last shared here" and "holding", never a working-on wording. (Final review B3) the
+// desk a place label names, by kind, through the shared deskName.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import fc from 'fast-check';
-import { actorKey, type ActorRef, type Position } from '../../../src/viz/model/events.js';
-import { phOf, placeLabel, type PlaceLabel } from '../../../src/viz/model/labels.js';
+import { renderWith, type Params } from '../../../src/i18n/render.js';
+import { REASON_CODES } from '../../../src/viz/i18n/codes.js';
+import { EN_VIZ } from '../../../src/viz/i18n/en.js';
+import { actorKey, type ActorRef, type DeskRef, type PeerRef, type Position, type SceneEvent } from '../../../src/viz/model/events.js';
+import { deskName, phOf, placeLabel, type PlaceLabel } from '../../../src/viz/model/labels.js';
+import { BIG_TABLE, emptyLayout, LayoutBuilder, type Layout } from '../../../src/viz/model/layout.js';
 import type { CharacterState, PetState } from '../../../src/viz/model/scene.js';
+import { createHandleTable, projectLayout } from '../../../src/viz/server/project.js';
+import { unprojectLayout } from '../../../src/viz/ui/unproject.js';
 import { ev } from '../../helpers/vizEvents.js';
-import { A, B, D1, D2, HAND_SEQUENCES, OFFICE, SA1, SB1, SD1, SE1, chairsSequence, scenesAfter } from '../../helpers/vizScene.js';
+import { A, B, C, D, D1, D2, HAND_SEQUENCES, OFFICE, SA1, SB1, SD1, SE1, chairsSequence, scenesAfter } from '../../helpers/vizScene.js';
 
 const pos = (height: number): Position => ({ height, sub: 0, k: 0 });
 function character(o: Partial<CharacterState> = {}): CharacterState {
@@ -110,4 +119,66 @@ test('T-VIZ-placement: a seated publisher is labelled UI_VIZ_LAST_SHARED_HERE wi
     }
   }
   assert.deepEqual([...codes].sort(), ['UI_VIZ_HOLDING', 'UI_VIZ_LAST_SHARED_HERE']);
+});
+
+// An office with every desk kind (the follow test's now-card office): zone src holds src/f0.ts and 22 more file desks, so its 24th
+// path goes to its shelf desk; 14 more zones fill the 15 regular ones, so over/x.ts gets a folder desk in the overflow zone.
+function kindsOffice(): { layout: Layout; file: DeskRef; folder: DeskRef; shelf: DeskRef } {
+  const b = new LayoutBuilder(emptyLayout());
+  for (const p of [A, B, C, D]) b.home(p);
+  const file = b.desk('src/f0.ts', 1);
+  for (let i = 1; i < 23; i++) b.desk(`src/f${i}.ts`, 1);
+  const shelf = b.desk('src/zz.ts', 1);
+  for (let i = 0; i < 14; i++) b.desk(`z${i}/a.ts`, 1);
+  const folder = b.desk('over/x.ts', 1);
+  return { layout: b.layout(), file, folder, shelf };
+}
+
+test('T-VIZ-placement (desk kinds; final review B3): a sitting publisher is labelled by its desk\'s kind \u{2014} a file desk\'s path, a folder desk\'s plaque, a shelf desk\'s zone sign + "/\u{2026}", and at the big table the variant with no path, which the page renders as UI_VIZ_NOW_LAST_SHARED_TABLE \u{2014} on the model\'s layout and on the page\'s; never "?" for a desk of the layout', () => {
+  const o = kindsOffice();
+  assert.deepEqual([o.layout.desks[o.file]!.kind, o.layout.desks[o.folder]!.kind, o.layout.desks[o.shelf]!.kind, o.layout.desks[BIG_TABLE]!.kind], ['file', 'folder', 'shelf', 'big_table']);
+  const publish = (actor: PeerRef, target: DeskRef, h: number, paths: string[]): SceneEvent =>
+    ev('publish', [h, 1001, 0], { actor: { peer: actor }, target, others: [], paths, n: paths.length === 0 ? 300 : paths.length, state: 'closed', checks: 'pass', origin: 'human' });
+  const s = scenesAfter([
+    ...[A, B, C, D].map((peer, i) => ev('person_enter', [1, 1 + i, 0], { peer })),
+    publish(A, o.file, 2, ['src/f0.ts']),
+    publish(B, o.folder, 3, ['over/x.ts']),
+    publish(C, o.shelf, 4, ['src/zz.ts']),
+    publish(D, BIG_TABLE, 5, []),                                   // more than 256 paths (or no Cowork-CS trailer): the big table
+  ], o.layout).at(-1)!;
+  for (const p of [A, B, C, D]) assert.equal(s.characters.get(p)!.place.at, 'chair', 'each sits at the desk it shared at');
+  const want: Array<[PeerRef, PlaceLabel]> = [
+    [A, { code: 'UI_VIZ_LAST_SHARED_HERE', path: 'src/f0.ts', height: 2 }],
+    [B, { code: 'UI_VIZ_LAST_SHARED_HERE', path: 'over', height: 3 }],
+    [C, { code: 'UI_VIZ_LAST_SHARED_HERE', path: 'src/\u{2026}', height: 4 }],
+    [D, { code: 'UI_VIZ_LAST_SHARED_HERE', path: null, height: 5 }],   // the big-table variant: no path
+  ];
+  const kindOf = new Map<PeerRef, string>([[A, 'file'], [B, 'folder'], [C, 'shelf'], [D, 'big table']]);
+  // The page's layout (projected and unprojected as the page holds it: zone keys are the served signs) names the same desks.
+  const h = createHandleTable();
+  const page = unprojectLayout(projectLayout(o.layout, h));
+  for (const layout of [o.layout, page]) {
+    for (const [p, l] of want) assert.deepEqual(placeLabel(s, { peer: p }, layout), l, `the ${kindOf.get(p)!} desk on the ${layout === page ? 'page\'s' : 'model\'s'} layout`);
+    // deskName (the one helper the now card and the place label share): by kind, null only at the big table, '?' only for an
+    // ordinal the layout lacks, so never '?' for a desk of the layout.
+    for (const d of layout.desks) {
+      const name = deskName(layout, d.ordinal);
+      if (d.kind === 'big_table') assert.equal(name, null);
+      else assert.ok(name !== null && !name.includes('?'), `desk ${d.ordinal} (${d.kind}): ${String(name)}`);
+    }
+    assert.deepEqual([o.file, o.folder, o.shelf, BIG_TABLE].map((d) => deskName(layout, d)), ['src/f0.ts', 'over', 'src/\u{2026}', null]);
+    assert.equal(deskName(layout, layout.desks.length), '?', 'an ordinal the layout lacks');
+  }
+  // What the page renders (client/a11y.ts placeText: the big-table variant through UI_VIZ_NOW_LAST_SHARED_TABLE), never '?'.
+  const t = (code: string, params: Params): string => renderWith({ en: EN_VIZ }, REASON_CODES, code, params, 'viz', 'en');
+  const text = (l: PlaceLabel): string => (l.code === 'UI_VIZ_HOLDING' ? t(l.code, { label: l.label ?? '?' })
+    : l.path === null ? t('UI_VIZ_NOW_LAST_SHARED_TABLE', { height: l.height }) : t(l.code, { path: l.path, height: l.height }));
+  assert.deepEqual(want.map(([, l]) => text(l)), [
+    'last shared here: src/f0.ts (#2)', 'last shared here: over (#3)', 'last shared here: src/\u{2026} (#4)', 'last shared: a change too large to list (#5)',
+  ]);
+  for (const [, l] of want) assert.ok(!text(l).includes('?'), text(l));
+  const a11y = readFileSync(join(process.cwd(), 'src', 'viz', 'client', 'a11y.ts'), 'utf8');
+  const placeTextSrc = a11y.slice(a11y.indexOf('export function placeText'), a11y.indexOf('export interface A11y'));
+  assert.match(placeTextSrc, /p\.path === null \? t\('UI_VIZ_NOW_LAST_SHARED_TABLE', \{ height: p\.height \}\)/u, 'placeText renders the big-table variant');
+  assert.doesNotMatch(placeTextSrc, /p\.path \?\? '\?'/u, 'placeText never prints "?" for a missing path');
 });

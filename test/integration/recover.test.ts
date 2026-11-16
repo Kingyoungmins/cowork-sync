@@ -774,12 +774,15 @@ test('a late peer whose newer commits are not on the restored chain re-anchors: 
     }
     assert.equal(py.core.outbox.size, 0, 'the rebuilt ops landed');
     const epoch1 = py.core.view!.meta.epoch;
-    let sent: Array<{ id: string; type: string; kind?: string }> = [];
+    let sent: Array<{ id: string; type: string; kind?: string; hold_id?: string }> = [];
     for (const c of await py.core.repo.firstParents(py.core.view!.laB, Bn, 10)) {
-      const ops = (await readBoardCommit(py.core.repo, c)).opsLines.map((l) => JSON.parse(l) as { id: string; type: string; kind?: string });
+      const ops = (await readBoardCommit(py.core.repo, c)).opsLines.map((l) => JSON.parse(l) as { id: string; type: string; kind?: string; hold_id?: string });
       sent = [...ops.filter((o) => parseOpId(o.id)?.peer === py.core.peerId), ...sent];
     }
-    assert.deepEqual(sent.map((o) => o.kind ?? o.type), ['join', 'freeze', 'unfreeze'], 'the join op of the new epoch first (final review FC-7)');
+    assert.equal(sent[0]?.type, 'join', `the join op of the new epoch first (final review FC-7): ${JSON.stringify(sent)}`);
+    assert.deepEqual(sent.filter((o) => o.type !== 'hold').map((o) => o.kind ?? o.type), ['join', 'freeze', 'unfreeze'], 'the join op of the new epoch first (final review FC-7)');
+    // Plan 3 Task 4: the restart records are mirrored like any record — one creation `hold` op each (R3-25, HLD-64).
+    assert.deepEqual(sent.filter((o) => o.type === 'hold').map((o) => o.hold_id).sort(), recs.map((h) => h.id).sort());
     assert.ok(sent.every((o) => parseOpId(o.id)?.epoch === epoch1), `sent under the new epoch: ${JSON.stringify(sent)}`);
     assert.equal((await readWork(py, 't.txt'))?.toString('utf8'), 't on the new chain\n');
     assert.equal((await readWork(py, 'x.txt'))?.toString('utf8'), 'x v3 on the new chain\n');
@@ -1256,7 +1259,13 @@ test('final review FC round 2: a re-anchor that keeps a narrowed apply intent (P
     const v = py.core.view!;
     assert.equal(v.laB, Bn, 'LA_B stays V, never the old chain\'s board');
     assert.equal(v.laC, after.laC, 'LA_C stays live_code(V)');
-    assert.equal(v.snap, after.snap, 'snap stays the re-anchor\'s S_disk');
+    // EF2 fix round 1, F1 (ENG-36 and 01-engine §3.14 step 4 as ruled): the completion's snap is t/S — the re-anchor's S_disk — with each
+    // verified write's entry: x.txt, whose disk holds the kept group's target t/M[x]. No other entry moves (nothing of the old chain).
+    const snapNow = await py.core.repo.readTreeMap(v.snap);
+    const want = new Map(await py.core.repo.readTreeMap(after.snap));
+    want.set('x.txt', (await py.core.repo.readTreeMap(after.t.get('M')!)).get('x.txt')!);
+    const rows = (m: ReadonlyMap<string, { oid: string; mode: string }>): string[][] => [...m].map(([k, e]) => [k, e.oid, e.mode]).sort();
+    assert.deepEqual(rows(snapNow), rows(want), 'snap is the re-anchor\'s S_disk with the verified write of x.txt');
     assert.equal(v.base, after.base, 'A stays the re-anchor\'s');
     assert.equal(v.intent.kind, 'none', 'the restart resolved the kept intent');
     assert.ok(!inIncident(py), 'not in INCIDENT after the restart');

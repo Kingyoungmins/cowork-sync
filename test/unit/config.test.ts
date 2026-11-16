@@ -62,6 +62,7 @@ test('readTeamConfig: absent gives defaults; malformed JSON gives defaults and i
       sync: { include: ['src/**'], exclude: ['dist/**', '*.log'], allowSecretLike: ['.env'], maxNewFileBytes: 4096 },
       merge: { insertionMerge: ['*.rst'] },
       host: { pushBudgetPerMin: 8 },
+      checks: { checkpoint: [] },   // Plan 3 Task 12a (contract addition 1): the default when the key is absent
     };
     assert.deepEqual(g.config, want);
 

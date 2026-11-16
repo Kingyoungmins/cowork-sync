@@ -176,6 +176,15 @@ Jeder Klon legt seine eigenen Dateien unter `.git/cowork/` ab: `status.json`
   keine Geheimnisse in synchronisierten Dateien ab.
 - Dateien über 1 MiB werden, wenn sie neu sind, nicht geteilt, und Dateien ab
   50 MiB werden nie live synchronisiert.
+- Ein Editor-Puffer, den du **vor deinem Beitritt** geöffnet hast und nach dem
+  Beitritt speicherst, ein Claude `/rewind` ("Restore code") zu einem
+  Checkpoint von vor deinem Beitritt oder jede andere Wiederherstellung einer
+  ganzen Datei von vor deinem Beitritt kann Zeilen deiner Teammitglieder ohne
+  Warnung rückgängig machen (bekannte Lücke J-PROV, offen, bis das Journal den
+  Bereich abdeckt, den dein Beitritt mitgebracht hat). Lade nach dem Beitritt
+  Dateien, die du schon vorher offen hattest, neu, bevor du sie speicherst,
+  und stelle keine ganzen Dateien aus Checkpoints wieder her, die älter als
+  dein Beitritt sind.
 - Das Beenden der Synchronisation oder das Deinstallieren des Plugins lässt die
   eigenen Refs auf dem Remote zurück. Nachdem jeder PC gestoppt hat, kannst du
   sie von Hand löschen, zum Beispiel mit

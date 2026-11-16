@@ -32,8 +32,8 @@ interface ApiState {
   readonly ready: Set<StoreLike>;
   /** Each store's room id, learnt from its first snapshot (a store's RoomSpec never changes). */
   readonly ids: Map<StoreLike, string>;
-  /** The last world: pending (at null) or computed at Δmono `at`. */
-  cache: { at: number | null; world: Promise<World> } | null;
+  /** The last world: pending (at null) or computed at Δmono `at` with stream cursor `cursor`. */
+  cache: { at: number | null; cursor: number | null; world: Promise<World> } | null;
   /** Per room, the peers whose name tags showed their handle when last served (a change re-sends those characters, R-V52). */
   readonly collide: Map<string, ReadonlySet<PeerRef>>;
 }
@@ -82,7 +82,7 @@ export function createWorldApi(o: { stores: readonly StoreLike[]; handles: Handl
   const strings = pageStrings();
   const allReady = (): Promise<void> => Promise.all(o.stores.map((s) => s.ready)).then(() => undefined);
 
-  const compute = async (entry: { at: number | null }): Promise<World> => {
+  const compute = async (entry: { at: number | null; cursor: number | null }): Promise<World> => {
     await allReady();
     const models: RoomSnapshotModel[] = o.stores.map((s) => s.snapshot());
     o.stores.forEach((s, i) => st.ids.set(s, models[i]!.spec.id));
@@ -93,17 +93,23 @@ export function createWorldApi(o: { stores: readonly StoreLike[]; handles: Handl
       const world = projectWorld(models, o.hub.seq(), o.demo, o.captions, o.clock.monoMs(), o.handles);
       if (!o.handles.takeCollision()) {
         for (const m of models) st.collide.set(m.spec.id, tagCollisions(m.peers, m.looks));
+        entry.cursor = world.cursor;
         return world;
       }
       o.hub.publish({ type: 'reset' });
     }
   };
 
+  /** A computed world goes stale before WORLD_MS when the hub has since emitted a reset after its cursor (an oversize payload's, a
+   *  collision's: the reloading page would replay it and reload again) or its ring no longer covers the cursor (the page's resume
+   *  would get a reset) — 8a final review, the reset/world-cache loop (spec-edit 12 §3.10.5). */
+  const fresh = (cursor: number): boolean => cursor >= o.hub.lastReset() && o.hub.covers(cursor);
+
   const api: WorldApi = {
     world(): Promise<World> {
       const c = st.cache;
-      if (c !== null && (c.at === null || o.clock.monoMs() - c.at < WORLD_MS)) return c.world;
-      const pending = { at: null as number | null };
+      if (c !== null && (c.at === null || c.cursor === null || (o.clock.monoMs() - c.at < WORLD_MS && fresh(c.cursor)))) return c.world;
+      const pending = { at: null as number | null, cursor: null as number | null };
       const entry = Object.assign(pending, { world: compute(pending) });
       st.cache = entry;
       entry.world.catch(() => { if (st.cache === entry) st.cache = null; });

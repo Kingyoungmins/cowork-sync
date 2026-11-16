@@ -1,0 +1,26 @@
+{
+  "session_id": "f1x7u4e0-0000-4000-8000-000000000011",
+  "transcript_path": "/home/dev/.claude/projects/repo/f1x7u4e0.jsonl",
+  "cwd": "/repo",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "MultiEdit",
+  "tool_input": {
+    "file_path": "/repo/src/orders.py",
+    "edits": [
+      {
+        "old_string": "        total += item.price * item.quantity",
+        "new_string": "        total += item.price * item.quantity * item.weight",
+        "replace_all": false
+      },
+      {
+        "old_string": "    total = total * rate",
+        "new_string": "    total = total * (1 + rate)",
+        "replace_all": false
+      }
+    ]
+  },
+  "tool_response": {
+    "filePath": "/repo/src/orders.py",
+    "success": true
+  }
+}

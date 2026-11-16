@@ -1,8 +1,10 @@
-// One shard of the seed runner (Plan 2 Task 19; 11-testing §3.11, rulings R-31 and R-33): a child process of
-// tools/sim/run-seeds.ts that runs the seeds of its input file one after another with the real engine (realEngine),
-// each seed's profile generator (R-31: `edits`, or `faults` with crash injection p = 0.02 per step), the R-32
-// quiescence and the six exit oracles, and prints one JSON line per seed on stdout:
-//   {"seed":…, "profile":…, "ok":true|false, "oracle"?:…, "step"?:…, "message"?:…, "ms":…, "artifacts"?:…}
+// One shard of the seed runner (Plan 2 Task 19, Plan 3 Task 16; 11-testing §3.11, rulings R-31, R-33, R3-47, R3-49, R3-51): a child
+// process of tools/sim/run-seeds.ts that runs the seeds of its input file one after another with each seed's profile composition
+// (tools/sim/profileRun.ts: the real engine; `edits`, `faults` with crash injection p = 0.02 per step, or `holds` through holdsSetup;
+// the R-32 quiescence with holdTimersSettled; exitOracles(ns, {holds: {markers}}), Plan 2's six exit oracles and Plan 3's ten) and
+// prints one JSON line per seed on stdout:
+//   {"seed":…, "profile":…, "ok":true|false, "oracle"?:…, "step"?:…, "message"?:…, "ms":…, "artifacts"?:…,
+//    "peers":…, "steps":…, "kills":…, "kinds":{<op-log kind>: <rows>}}
 // A failed seed keeps its temp root (runSim): `artifacts` names its artifacts directory.
 //
 // Diagnostics of a hang: before a seed starts, `sim:shard start <seed>` goes to stderr. A seed still running after the
@@ -12,21 +14,19 @@
 // seed's partial artifacts are written the same way and their directory is sent back.
 //
 // Usage: tsx tools/sim/run-shard.ts --input <shard.json>   (a ShardInput, tools/sim/seedProtocol.ts)
+//        tsx tools/sim/run-shard.ts --profile edits|faults|holds --seed S [--seed S]... [--peers 3] [--steps N] [--mutant <id>]...
+//          [--seed-timeout-min T]   (Plan 3 Task 16: the same seeds without a file; --steps defaults to PROFILES[profile].steps)
 // Exit: 0 every seed was run (the parent judges the lines), 2 usage or internal error, 3 a seed timed out.
 // Test seams (never set in CI): COWORK_SIM_TEST_HANG_SEED=<seed> makes that seed hang at its step 2;
 // COWORK_SIM_TEST_CRASH_AFTER=<n> makes the shard exit 70 after its n-th seed line.
 // tools/ is outside src/, so the L-CLOCK lint does not apply to performance.now() here.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { seededRandom } from '../../src/ports/random.js';
-import { realEngine } from '../../test/sim/engineAdapter.js';
-import { editGenerator, PROFILES, seedFilesPlan2 } from '../../test/sim/generators.js';
-import { DEFAULT_QUIESCENCE, runSim, type Oracle, type SimContext } from '../../test/sim/harness.js';
-import { exitOracles } from '../../test/sim/oracles.js';
-import { badSeedText, isMutantId, type SeedLine, type SeedRef, type ShardInput } from './seedProtocol.js';
+import { PROFILES } from '../../test/sim/generators.js';
+import { runSim, type OpLogEntry, type Oracle, type SimContext } from '../../test/sim/harness.js';
+import { profileRun } from './profileRun.js';
+import { badSeedText, isMutantId, PROFILES_ALL, type Profile, type SeedLine, type SeedRef, type ShardInput } from './seedProtocol.js';
 
-/** R-31: crash injection of the `faults` profile, per step. */
-const FAULTS_CRASH_RATE = 0.02;
 const KEPT = /; artifacts kept in (.+)$/s;
 const MAX_PEERS = 6;
 
@@ -44,9 +44,67 @@ function readInput(text: string): ShardInput {
   if (!Array.isArray(x.mutants) || !x.mutants.every((m) => typeof m === 'string' && isMutantId(m))) throw new UsageError('mutants: not R-29 switches');
   if (!Array.isArray(x.seeds) || x.seeds.length === 0) throw new UsageError('no seeds');
   for (const s of x.seeds as SeedRef[]) {
-    if (typeof s?.seed !== 'string' || badSeedText(s.seed) !== null || (s.profile !== 'edits' && s.profile !== 'faults')) throw new UsageError(`bad seed entry ${JSON.stringify(s)}`);
+    if (typeof s?.seed !== 'string' || badSeedText(s.seed) !== null || !(PROFILES_ALL as readonly unknown[]).includes(s.profile)) throw new UsageError(`bad seed entry ${JSON.stringify(s)}`);
+    if (s.steps !== undefined && !int(s.steps, 0, 1_000_000)) throw new UsageError(`bad steps in ${JSON.stringify(s)}`);
   }
   return x as ShardInput;
+}
+
+/** Plan 3 Task 16: the --profile form — the same ShardInput built from flags (no file); --steps defaults to the profile's. */
+function flagsInput(argv: readonly string[]): ShardInput {
+  let profile: Profile | null = null;
+  let peers = 3;
+  let steps: number | null = null;
+  let seedTimeoutMs = 0;
+  const seeds: string[] = [];
+  const mutants: ShardInput['mutants'] = [];
+  const once = new Set<string>();
+  for (let i = 0; i < argv.length; i += 2) {
+    const flag = argv[i] as string;
+    const v = argv[i + 1];
+    if (!['--profile', '--seed', '--peers', '--steps', '--mutant', '--seed-timeout-min'].includes(flag)) throw new UsageError(`unknown argument ${flag}`);
+    if (v === undefined || (v.startsWith('--') && flag !== '--seed')) throw new UsageError(`${flag} needs a value`);
+    if (flag !== '--seed' && flag !== '--mutant') {
+      if (once.has(flag)) throw new UsageError(`${flag} is given twice`);
+      once.add(flag);
+    }
+    const intOf = (min: number, max: number): number => {
+      if (!/^(0|[1-9][0-9]*)$/.test(v) || Number(v) < min || Number(v) > max) throw new UsageError(`${flag} needs an integer in ${min}..${max}, got ${v}`);
+      return Number(v);
+    };
+    switch (flag) {
+      case '--profile':
+        if (!(PROFILES_ALL as readonly string[]).includes(v)) throw new UsageError(`--profile is ${PROFILES_ALL.join(', ')}, got ${v}`);
+        profile = v as Profile;
+        break;
+      case '--seed': {
+        const bad = badSeedText(v);
+        if (bad !== null) throw new UsageError(`--seed ${JSON.stringify(v)} ${bad}`);
+        if (seeds.includes(v)) throw new UsageError(`seed ${v} is named twice`);
+        seeds.push(v);
+        break;
+      }
+      case '--peers': peers = intOf(1, MAX_PEERS); break;
+      case '--steps': steps = intOf(0, 1_000_000); break;
+      case '--seed-timeout-min': seedTimeoutMs = intOf(0, 24 * 60) * 60_000; break;
+      case '--mutant':
+        if (!isMutantId(v) || mutants.includes(v)) throw new UsageError(`--mutant ${v}: not an R-29 switch, or given twice`);
+        mutants.push(v);
+        break;
+    }
+  }
+  if (profile === null) throw new UsageError('--profile is required');
+  if (seeds.length === 0) throw new UsageError('at least one --seed');
+  const p = profile;
+  const st = steps ?? PROFILES[p].steps;
+  return { peers, steps: st, mutants, seedTimeoutMs, seeds: seeds.map((seed) => ({ seed, profile: p, steps: st })) };
+}
+
+/** The op-log's rows per kind (sorted by kind) and its `killed` rows (KilledAt ends of an engine step). */
+function opCounts(opLog: readonly OpLogEntry[]): { kills: number; kinds: Record<string, number> } {
+  const kinds: Record<string, number> = {};
+  for (const e of opLog) kinds[e.kind] = (kinds[e.kind] ?? 0) + 1;
+  return { kills: kinds['killed'] ?? 0, kinds: Object.fromEntries(Object.entries(kinds).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) };
 }
 
 const jsonl = (rows: readonly unknown[]): string => rows.map((e) => `${JSON.stringify(e)}\n`).join('');
@@ -80,24 +138,21 @@ const lastStep = (ctx: SimContext | null): number => ctx?.opLog[ctx.opLog.length
 /** One seed of the exit run; never throws (a thrown engine or fixture error is a failed seed named ERROR). */
 async function runSeed(s: SeedRef, a: ShardInput, started: number): Promise<SeedLine> {
   const ms = (): number => Math.round(performance.now() - started);
-  const oracles = [probe(), ...(process.env['COWORK_SIM_TEST_HANG_SEED'] === s.seed ? [hangAt2()] : []), ...exitOracles()];
+  const run = profileRun(s.seed, s.profile, { steps: s.steps ?? a.steps, peers: a.peers, mutants: a.mutants });
+  const oracles = [probe(), ...(process.env['COWORK_SIM_TEST_HANG_SEED'] === s.seed ? [hangAt2()] : []), ...run.oracles];
+  const head = { seed: s.seed, profile: s.profile, peers: run.tuple.peers, steps: run.tuple.ops };
   try {
-    const r = await runSim({ seed: s.seed, peers: a.peers, ops: a.steps }, realEngine({ mutants: new Set(a.mutants) }), oracles, {
-      generator: editGenerator(PROFILES[s.profile]),
-      quiescence: DEFAULT_QUIESCENCE,
-      seedFiles: seedFilesPlan2(seededRandom(`${s.seed}/files`)),
-      ...(s.profile === 'faults' ? { crash: { rate: FAULTS_CRASH_RATE } } : {}),
-    });
-    if (r.ok) return { ...s, ok: true, ms: ms() };
+    const r = await runSim(run.tuple, run.factory, oracles, run.options);
+    if (r.ok) return { ...head, ok: true, ms: ms(), ...opCounts(r.opLog) };
     const f = r.failure;
     return {
-      ...s, ok: false, oracle: f?.oracle ?? 'UNKNOWN', step: f?.step ?? -1, message: f?.message ?? 'runSim returned ok=false without a failure', ms: ms(),
-      ...(r.artifactsDir !== undefined ? { artifacts: r.artifactsDir } : {}),
+      ...head, ok: false, oracle: f?.oracle ?? 'UNKNOWN', step: f?.step ?? -1, message: f?.message ?? 'runSim returned ok=false without a failure', ms: ms(),
+      ...(r.artifactsDir !== undefined ? { artifacts: r.artifactsDir } : {}), ...opCounts(r.opLog),
     };
   } catch (e) {
     const message = e instanceof Error ? (e.stack ?? e.message) : String(e);
     const kept = KEPT.exec(e instanceof Error ? e.message : String(e))?.[1];
-    return { ...s, ok: false, oracle: 'ERROR', message, ms: ms(), ...(kept !== undefined ? { artifacts: kept } : {}) };
+    return { ...head, ok: false, oracle: 'ERROR', message, ms: ms(), ...(kept !== undefined ? { artifacts: kept } : {}), ...opCounts(running.ctx?.opLog ?? []) };
   }
 }
 
@@ -115,8 +170,9 @@ async function runWithTimeout(s: SeedRef, a: ShardInput): Promise<{ line: SeedLi
     const tail = ctx === null ? '' : `; op-log tail ${JSON.stringify(ctx.opLog.slice(-4))}`;
     return {
       line: {
-        ...s, ok: false, oracle: 'TIMEOUT', step: lastStep(ctx), message: `no result after ${a.seedTimeoutMs / 60_000} min (the run reached step ${lastStep(ctx)})${tail}`,
-        ms: Math.round(performance.now() - started), ...(artifacts !== undefined ? { artifacts } : {}),
+        seed: s.seed, profile: s.profile, peers: a.peers, steps: s.steps ?? a.steps, ok: false, oracle: 'TIMEOUT', step: lastStep(ctx),
+        message: `no result after ${a.seedTimeoutMs / 60_000} min (the run reached step ${lastStep(ctx)})${tail}`,
+        ms: Math.round(performance.now() - started), ...(artifacts !== undefined ? { artifacts } : {}), ...opCounts(ctx?.opLog ?? []),
       },
       timedOut: true,
     };
@@ -128,8 +184,12 @@ async function runWithTimeout(s: SeedRef, a: ShardInput): Promise<{ line: SeedLi
 async function main(argv: readonly string[]): Promise<number> {
   let input: ShardInput;
   try {
-    if (argv.length !== 2 || argv[0] !== '--input' || argv[1] === undefined) throw new UsageError('usage: run-shard.ts --input <shard.json>');
-    input = readInput(await readFile(argv[1], 'utf8'));
+    if (argv[0] === '--input') {
+      if (argv.length !== 2 || argv[1] === undefined) throw new UsageError('usage: run-shard.ts --input <shard.json> | --profile <p> --seed <s>...');
+      input = readInput(await readFile(argv[1], 'utf8'));
+    } else {
+      input = flagsInput(argv);
+    }
   } catch (e) {
     if (e instanceof UsageError || (e as NodeJS.ErrnoException).code === 'ENOENT') {
       process.stderr.write(`sim:shard: ${(e as Error).message}\n`);

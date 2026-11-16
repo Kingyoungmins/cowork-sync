@@ -147,13 +147,18 @@ function passes(c: CardVM, f: LogFilter): boolean {
  * The card's template and its parameters, and the teammate free text for the quoted note frame (12 §3.11). The text is never a
  * parameter and never a code: it is placed only in the frame, through textContent. Names come from the page's name tags; a code
  * outside the closed card list (a forged code slot) becomes UI_INTERNAL_ERROR, the renderer's own miss, and shows no text.
+ * (Final review §4a, Group B) {id} is the card's display id, else the request it answers (an answer card's parent); {path} is the
+ * first file chip, else the name of the card's first desk by kind (`deskNameOf`: model/labels.ts deskName over the page's layout;
+ * a request or a hold card carries a desk and no file chip), none at the big table or without a namer.
  */
-export function cardText(c: CardVM, nameOf: (a: ActorVM) => string): { code: string; params: Record<string, string | number>; quoted: string | null } {
+export function cardText(c: CardVM, nameOf: (a: ActorVM) => string, deskNameOf: (d: number) => string | null = () => null): { code: string; params: Record<string, string | number>; quoted: string | null } {
   if (CARD_GROUP[c.code] === undefined) return { code: 'UI_INTERNAL_ERROR', params: {}, quoted: null };
   const params: Record<string, string | number> = { n: c.n };
   if (c.actor !== null) params['name'] = nameOf(c.actor);
   if (c.target !== null) params['target'] = nameOf(c.target);
-  if (c.paths.length > 0) params['path'] = c.paths[0]!;
-  if (c.displayId !== null) params['id'] = c.displayId;
+  const path = c.paths.length > 0 ? c.paths[0]! : c.desks.length > 0 ? deskNameOf(c.desks[0]!) : null;
+  if (path !== null) params['path'] = path;
+  const id = c.displayId ?? c.parent;
+  if (id !== null) params['id'] = id;
   return { code: c.code, params, quoted: c.text };
 }

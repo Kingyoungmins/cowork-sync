@@ -17,5 +17,10 @@ test('package.json declares devDependencies only, ESM and the Node >=20.6 dev fl
   assert.equal(pkg.optionalDependencies, undefined);
   assert.equal(pkg.peerDependencies, undefined);
   assert.deepEqual(pkg.engines, { node: '>=20.6' });
-  assert.deepEqual(Object.keys(pkg.devDependencies as object).sort(), ['@types/node', 'esbuild', 'fast-check', 'tsx', 'typescript']);
+  // Plan 4 Task 1 (R4-09, R4-10): web-tree-sitter and the four grammar packages are devDependencies (exact versions; the
+  // grammar spike test pins them against package-lock.json); esbuild bundles web-tree-sitter into dist/worker.js only.
+  assert.deepEqual(Object.keys(pkg.devDependencies as object).sort(), [
+    '@types/node', 'esbuild', 'fast-check', 'tree-sitter-c-sharp', 'tree-sitter-javascript', 'tree-sitter-python', 'tree-sitter-typescript',
+    'tsx', 'typescript', 'web-tree-sitter',
+  ]);
 });

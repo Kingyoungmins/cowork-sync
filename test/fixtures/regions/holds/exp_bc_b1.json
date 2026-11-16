@@ -1,0 +1,49 @@
+{
+  "name": "exp_bc_b1",
+  "files": {
+    "m.py": "A_CONST = 1\n\n\ndef foo(x, z):\n    y = x + 1\n    w = z - 4\n    return int(y * w)\n\n\ndef bar(x):\n    return x - 1\n"
+  },
+  "steps": [
+    {
+      "peer": 1,
+      "kind": "edit",
+      "path": "m.py",
+      "bytes": "A_CONST = 1\n\n\ndef foo(x, z):\n    y = x + 2  # B fix\n    w = z - 4\n    return int(y * w)\n\n\ndef bar(x):\n    return x - 1\n"
+    },
+    {
+      "peer": 1,
+      "kind": "publish",
+      "path": "m.py"
+    },
+    {
+      "peer": 0,
+      "kind": "claim",
+      "path": "m.py"
+    },
+    {
+      "peer": 0,
+      "kind": "stale_save",
+      "path": "m.py",
+      "bytes": "A_CONST = 1\n\n\ndef foo(x, z):\n    y = x + 1\n    w = z - 4\n    return int(y * w)\n\n\ndef bar(x):\n    return x - 1\n"
+    },
+    {
+      "peer": 2,
+      "kind": "edit",
+      "path": "m.py",
+      "bytes": "A_CONST = 1\nC_CONST_00 = 0\nC_CONST_01 = 1\nC_CONST_02 = 2\nC_CONST_03 = 3\nC_CONST_04 = 4\nC_CONST_05 = 5\nC_CONST_06 = 6\nC_CONST_07 = 7\nC_CONST_08 = 8\nC_CONST_09 = 9\nC_CONST_10 = 10\nC_CONST_11 = 11\nC_CONST_12 = 12\nC_CONST_13 = 13\nC_CONST_14 = 14\nC_CONST_15 = 15\nC_CONST_16 = 16\nC_CONST_17 = 17\nC_CONST_18 = 18\nC_CONST_19 = 19\nC_CONST_20 = 20\nC_CONST_21 = 21\nC_CONST_22 = 22\nC_CONST_23 = 23\nC_CONST_24 = 24\nC_CONST_25 = 25\nC_CONST_26 = 26\nC_CONST_27 = 27\nC_CONST_28 = 28\nC_CONST_29 = 29\nC_CONST_30 = 30\nC_CONST_31 = 31\nC_CONST_32 = 32\nC_CONST_33 = 33\nC_CONST_34 = 34\nC_CONST_35 = 35\nC_CONST_36 = 36\nC_CONST_37 = 37\nC_CONST_38 = 38\nC_CONST_39 = 39\n\n\ndef foo(x, z):\n    y = x + 2  # B fix\n    w = z - 4\n    return int(y * w)\n\n\ndef bar(x):\n    return x - 1\n"
+    },
+    {
+      "peer": 2,
+      "kind": "publish",
+      "path": "m.py"
+    },
+    {
+      "peer": 0,
+      "kind": "publish",
+      "path": "m.py"
+    }
+  ],
+  "claimSteps": [
+    2
+  ]
+}

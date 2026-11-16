@@ -129,12 +129,20 @@ html, body {
 /* The log (12 §3.8): DOM, so text is selectable and read by screen readers. */
 .log {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto 1fr;
   min-height: 0;
   background: var(--bg-panel);
   border-left: 1px solid var(--border);
 }
+/* The now card (12 §3.8.1, rev 2.5, F32): pinned at the top of the log while the room follows someone; not a card of the list. */
+.now {
+  grid-row: 1;
+  padding: 6px 8px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
 .filters {
+  grid-row: 2;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -154,6 +162,7 @@ html, body {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 .cards {
+  grid-row: 3;
   position: relative;
   overflow-y: auto;
   margin: 0;
@@ -233,6 +242,7 @@ html, body {
   padding: 0;
 }
 .new-pill {
+  grid-row: 4;
   position: sticky;
   bottom: 4px;
   left: 50%;

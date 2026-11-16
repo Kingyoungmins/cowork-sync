@@ -2,36 +2,46 @@
 // FaultFs over the real disk per peer and one TraceRecorder (Plan 2 Task 13). bootstrap() is the test-only stand-in
 // for genesis and join until Task 15; pushTeamChange() lands a synthetic teammate's publish. Git is never mocked.
 //
-// Time: every peer clock (and the scheduler's) starts with its wall 60 s after the real now, so files checked out or
-// written by a test are past the 300 ms quiet window; writeWork() sets a written file's mtime to the peer's virtual
-// wall clock minus 1 s (distinct per call) for the same reason. advance(ms) moves every clock together.
+// Time: every peer clock (and the scheduler's) starts with its wall WALL_MARGIN_MS (24 h) after the real now, so files with a
+// real mtime — checked out by the clone, written by the engine's writer (applies, the revert write, --discard) or by a test
+// through node:fs — are past the 300 ms quiet window for the fixture's whole life; writeWork() sets a written file's mtime to
+// the peer's virtual wall clock minus 1 s (distinct per call, in whole milliseconds) for the same reason. advance(ms) moves
+// every clock together.
+//
+// Plan 3 Task EF (item 6): the margin was 60 s. Real time then overtook it under a loaded run (Task 17: a ~6x slowdown on a
+// single-fixture test whose virtual advance stayed small): a writer-made file became "in the future" for the virtual wall, its
+// first tick quiet-excluded it and a capture took the pre-write entry. A fixture never outlives the test that made it, and the
+// longest node:test timeout of any core/engine-fixture test is 60 min (apply.bomcrlf.test.ts), so 24 h keeps every real mtime
+// behind the virtual wall with a 24x reserve. Only the quiet rule (snapshot.ts, loop.ts's hook-path wait) compares a wall time
+// with a file mtime; the 14-day provenance and revert windows the tests cross advance 15 days, far past the extra 24 h.
 import { realpathSync } from 'node:fs';
 import { mkdir, readFile, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { buildBoardCommit, CODE_SUBJECT, liveCommitTrailers, readBoardCommit, type BoardDraft, type CsTrailer, type WriterId } from '../../src/board/boardCommit.js';
-import { foldCommit, Folder, initialFoldState, serializeFold, CHECKPOINT_EVERY } from '../../src/board/fold.js';
+import { buildBoardCommit, CODE_SUBJECT, liveCommitTrailers, type BoardDraft, type WriterId } from '../../src/board/boardCommit.js';
+import { foldCommit, initialFoldState, serializeFold } from '../../src/board/fold.js';
 import { newEpoch, newPeerId } from '../../src/board/ids.js';
 import { serializeOps, type Op } from '../../src/board/ops.js';
 import { Outbox } from '../../src/board/outbox.js';
 import { genesisProtocol } from '../../src/board/protocol.js';
-import { attachState, createEngineCore, type EngineCore } from '../../src/engine/core.js';
-import { humanOnlyAttribution, PLAN2_REGION_SPEC, type EngineDeps, type MutantId } from '../../src/engine/deps.js';
+import { attachCsTable, attachState, createEngineCore, type EngineCore } from '../../src/engine/core.js';
+import { humanOnlyAttribution, noClaude, PLAN2_REGION_SPEC, type EngineDeps, type MutantId } from '../../src/engine/deps.js';
+import { testRegionDeps } from './regionDeps.js';
 import type { Meta } from '../../src/engine/meta.js';
 import { RELEASE_NAMESPACE, refNames } from '../../src/engine/refs.js';
 import { fetchRefs } from '../../src/git/fetch.js';
-import { ABSENT, parseOid, type Oid, type OidOrAbsent } from '../../src/git/oid.js';
+import { plan3Ports } from '../../src/holds/ports.js';
+import { ABSENT, parseOid, type Oid } from '../../src/git/oid.js';
 import { pushSpec, runPush } from '../../src/git/push.js';
-import { GitRepo, type FileMode, type MktreeEntry, type RepoContext } from '../../src/git/repo.js';
 import type { GitRunner } from '../../src/git/runner.js';
 import { alwaysLeased } from '../../src/ports/lease.js';
 import { nullLog } from '../../src/ports/log.js';
 import { realFs } from '../../src/ports/fs.js';
 import { seededRandom } from '../../src/ports/random.js';
-import { validPathSyntax } from '../../src/sec/validators.js';
 import { PLUGIN_VERSION } from '../../src/version.js';
 import { FaultFs } from '../sim/faultfs.js';
 import { clonePeer, seedRemote, type PeerClone } from '../sim/peers.js';
 import { createBareRemote, type BareRemote } from '../sim/remote.js';
+import { teamPush, type TeamWriter } from '../sim/teamWriter.js';
 import { TraceRecorder } from '../sim/traceRecorder.js';
 import { SIM_WALL_EPOCH_MS, VirtualClock } from '../sim/vclock.js';
 import { VirtualScheduler } from '../sim/vscheduler.js';
@@ -44,15 +54,37 @@ export interface CoreFixture {
   advance(ms: number): void;                                   // every peer clock and the scheduler clock
   /** Test-only stand-in for genesis/join until Task 15: L0/B0 built with the Task 5 builders, pushed with ABSENT leases, each peer's state created with A = tree(HEAD), LA_C = L0, LA_B = B0, a new epoch. */
   bootstrap(): Promise<void>;
-  /** A synthetic teammate lands one live commit (bytes or null = delete, stored as given) with Cowork-CS/Cowork-CS-Paths trailers and its board commit, leased. */
-  pushTeamChange(changes: Readonly<Record<string, Buffer | null>>, opts?: { csId?: string }): Promise<{ board: Oid; live: Oid }>;
+  /**
+   * A synthetic teammate lands one live commit (bytes or null = delete) with Cowork-CS/Cowork-CS-Paths trailers and its board commit,
+   * leased. A conforming writer (03-data §3.2): the bytes of a path TIP already holds are stored as canon(bytes, TIP[p]) (as given when
+   * canon refuses, or for a new path); `raw` stores every path's bytes as given, no canon (I-DAT-13's non-conforming writer, Task 6).
+   */
+  pushTeamChange(changes: Readonly<Record<string, Buffer | null>>, opts?: { csId?: string; raw?: boolean }): Promise<{ board: Oid; live: Oid }>;
   cleanup(): Promise<void>;
 }
 
-/** Fixture extension (beyond the contract's options): `platform` replaces EngineDeps.platform of every peer (01-engine test 14 form). */
+/** Plan 3 Task 10 (contract addition 3; rev 2.5, X-15): the Plan 3 ports a test replaces (src/holds cannot name EngineDeps). */
+export type PortsOverride = Partial<Pick<EngineDeps, 'editCheck' | 't0Regions' | 'gate' | 'symbols'>>;
+
+/**
+ * Fixture extension (beyond the contract's options): `platform` replaces EngineDeps.platform of every peer (01-engine test 14 form).
+ * `ports` (Plan 3 Task 10, X-15): every peer binds plan3Ports() and then this override — a static PortsOverride for every peer, or a
+ * function called once per peer with that peer's built deps and its index (so a later plan's override can read deps it builds).
+ */
 export interface CoreOptions {
   n: number; files?: Record<string, Buffer>; autocrlf?: readonly boolean[]; seed?: string; mutants?: ReadonlySet<MutantId>;
   platform?: NodeJS.Platform;
+  ports?: PortsOverride | ((deps: EngineDeps, peerIndex: number) => PortsOverride);
+  /** Plan 5 Task 5 (A5-13): the per-peer daemon port overrides — claude/attribution/lease — applied over the defaults
+   *  AFTER Plan 3's `ports`; each peer has its own ClaudeDaemon, hence the function form. Absent → every peer keeps
+   *  noClaude, humanOnlyAttribution and alwaysLeased (Plan 2/3 behaviour unchanged). */
+  engineDeps?: (peer: number) => Partial<Pick<EngineDeps, 'claude' | 'attribution' | 'lease'>>;
+}
+
+/** The override of peer `i` (X-15): the static object, or the function's answer for that peer's deps. */
+export function portsFor(ports: CoreOptions['ports'], deps: EngineDeps, i: number): PortsOverride {
+  if (ports === undefined) return {};
+  return typeof ports === 'function' ? ports(deps, i) : ports;
 }
 
 const DEFAULT_FILES: Record<string, Buffer> = {
@@ -68,17 +100,24 @@ const callsOf = new WeakMap<PeerFixture, GitCall[]>();
 
 let mtimeSeq = 0;
 
+/** How far every virtual wall clock starts after the real now (see the file comment; Plan 3 Task EF: was 60 s). */
+export const WALL_MARGIN_MS = 24 * 60 * 60_000;
+
 /** The absolute path of a repository path in the peer's work tree. */
 export function workPath(p: PeerFixture, path: string): string {
   return join(p.deps.paths.workTree, ...path.split('/'));
 }
 
-/** Writes a working file (test code, node:fs) and sets its mtime to the peer's virtual wall clock minus 1 s (distinct per call). */
+/**
+ * Writes a working file (test code, node:fs) and sets its mtime to the peer's virtual wall clock minus 1 s, plus a per-call step of
+ * whole milliseconds (0–499), so two calls at one virtual instant give mtimes that differ on every file system: steps of 1 µs were
+ * rounded away on Windows (a same-size rewrite then passed snapshot unchanged()), and 499 ms keeps the mtime clear of QUIET_MS (300).
+ */
 export async function writeWork(p: PeerFixture, path: string, bytes: Buffer | string): Promise<void> {
   const abs = workPath(p, path);
   await mkdir(dirname(abs), { recursive: true });
   await writeFile(abs, typeof bytes === 'string' ? Buffer.from(bytes, 'utf8') : bytes);
-  const t = (p.clock.wallMs() - 1_000 + (mtimeSeq++ % 100_000) / 1_000) / 1_000;
+  const t = (p.clock.wallMs() - 1_000 + (mtimeSeq++ % 500)) / 1_000;
   await utimes(abs, t, t);
 }
 
@@ -97,33 +136,6 @@ export function gitCallsOf(p: PeerFixture): readonly GitCall[] {
   return callsOf.get(p) ?? [];
 }
 
-/**
- * A tree = `base` with whole-path edits, built bottom-up with mktree (test code only: a teammate on another OS can commit
- * names that git for Windows refuses in any index even with core.protectNTFS=false, such as `a:b.txt`).
- */
-async function editTreeRaw(repo: GitRepo, base: Oid, edits: ReadonlyArray<{ path: string; mode: FileMode; oid: Oid } | { path: string; remove: true }>): Promise<Oid> {
-  const leaves = new Map<string, { mode: FileMode; oid: Oid }>();
-  for (const [p, e] of await repo.readTreeMap(base)) leaves.set(p, { mode: e.mode, oid: e.oid });
-  for (const e of edits) {
-    if ('remove' in e) leaves.delete(e.path);
-    else leaves.set(e.path, { mode: e.mode, oid: e.oid });
-  }
-  const build = async (prefix: string): Promise<Oid> => {
-    const entries: MktreeEntry[] = [];
-    const dirs = new Set<string>();
-    for (const [p, e] of leaves) {
-      if (!p.startsWith(prefix)) continue;
-      const rest = p.slice(prefix.length);
-      const slash = rest.indexOf('/');
-      if (slash < 0) entries.push({ name: rest, mode: e.mode, type: e.mode === '160000' ? 'commit' : 'blob', oid: e.oid });
-      else dirs.add(rest.slice(0, slash));
-    }
-    for (const d of dirs) entries.push({ name: d, mode: '040000', type: 'tree', oid: await build(`${prefix}${d}/`) });
-    return repo.mktree(entries);
-  };
-  return build('');
-}
-
 export async function makeCores(label: string, opts: CoreOptions): Promise<CoreFixture> {
   const { root, cleanup } = await makeTempRoot(label);
   try {
@@ -132,8 +144,8 @@ export async function makeCores(label: string, opts: CoreOptions): Promise<CoreF
     const remote = await createBareRemote(root, runner);
     await seedRemote(remote, root, runner, opts.files ?? DEFAULT_FILES);
     const trace = new TraceRecorder();
-    // Every virtual wall clock starts 60 s after the real now (see the file comment).
-    const wallOffsetMs = Date.now() + 60_000 - SIM_WALL_EPOCH_MS;
+    // Every virtual wall clock starts WALL_MARGIN_MS after the real now (see the file comment).
+    const wallOffsetMs = Date.now() + WALL_MARGIN_MS - SIM_WALL_EPOCH_MS;
     const schedClock = new VirtualClock({ wallOffsetMs, startMono: 1_000 });
     const scheduler = new VirtualScheduler(schedClock, seededRandom(`${seed}/scheduler`));
     const refs = refNames(BRANCH, RELEASE_NAMESPACE);
@@ -148,13 +160,19 @@ export async function makeCores(label: string, opts: CoreOptions): Promise<CoreF
       const workTree = realpathSync.native(clone.dir);
       const deps: EngineDeps = {
         ports: { clock, random: seededRandom(`${seed}/${name}`), scheduler, fs, git },
-        trace, log: nullLog, lease: alwaysLeased, attribution: humanOnlyAttribution,
+        trace, log: nullLog, lease: alwaysLeased, attribution: humanOnlyAttribution, claude: noClaude,
         heartbeatMs: () => clock.monoMs(),
         paths: { workTree, gitDir: join(workTree, '.git'), coworkDir: join(workTree, '.git', 'cowork') },
         branch: BRANCH, namespace: RELEASE_NAMESPACE, url: remote.url, display: `Peer ${name}`,
         pluginVersion: PLUGIN_VERSION, pluginSha: PLUGIN_SHA, regionSpec: PLAN2_REGION_SPEC,
         platform: opts.platform ?? process.platform, testBuild: true, testMutants: opts.mutants ?? new Set(),
+        ...plan3Ports(),   // Plan 3 Task 10 (R3-03, R3-04, R3-07), then the test's override (X-15)
+        regions: await testRegionDeps({ clock }),   // Plan 4 Task 5 (R4-36): the test region module (inline workers)
       };
+      Object.assign(deps, portsFor(opts.ports, deps, i));
+      // A5-13: the daemon's claude/attribution/lease overrides, over the defaults (after Plan 3's `ports`; they never name a
+      // plan3Ports field, so the identity contract of X-15 is untouched). Each peer is its own daemon, hence the function form.
+      if (opts.engineDeps !== undefined) Object.assign(deps, opts.engineDeps(i));
       const core = await createEngineCore(deps);
       trace.names.set(core.peerId, name);
       const p: PeerFixture = { name, clone, clock, fs, deps, core };
@@ -162,20 +180,15 @@ export async function makeCores(label: string, opts: CoreOptions): Promise<CoreF
       peers.push(p);
     }
 
-    // The synthetic teammate: its own clone, peer id and epoch, writing with a seq counter.
+    // The synthetic teammate: its own clone, peer id and epoch, writing with a seq counter (test/sim/teamWriter.ts, Plan 3 Task 13).
     const teamRandom = seededRandom(`${seed}/team`);
     const teamPeer = newPeerId(teamRandom);
     const teamEpoch = newEpoch(teamRandom);
-    let teamSeq = 0;
-    let team: GitRepo | null = null;
-    const teamRepo = async (): Promise<GitRepo> => {
+    let team: TeamWriter | null = null;
+    const teamWriter = async (): Promise<TeamWriter> => {
       if (team !== null) return team;
       const clone = await clonePeer(remote, root, { name: 'team', autocrlf: false, withFilter: false }, runner);
-      const workTree = realpathSync.native(clone.dir);
-      const paths = { workTree, gitDir: join(workTree, '.git'), coworkDir: join(workTree, '.git', 'cowork') };
-      await mkdir(paths.coworkDir, { recursive: true });
-      const ctx = (): RepoContext => ({ attrTree: null, filterDrivers: [], identity: { name: 'Teammate', email: `${teamPeer}@cowork.invalid` }, wallMs: () => schedClock.wallMs() });
-      team = new GitRepo(runner, paths, ctx);
+      team = { peer: teamPeer, epoch: teamEpoch, seq: 0, dir: realpathSync.native(clone.dir) };
       return team;
     };
 
@@ -228,50 +241,16 @@ export async function makeCores(label: string, opts: CoreOptions): Promise<CoreF
           };
           const view = await p.core.state.create({ laC: L0, laB: B0, base: tree, snap: tree, meta, fold: s0 });
           attachState(p.core, view);
+          await attachCsTable(p.core, view);   // R3-69 (Plan 3 Task 12a): awaited right after every attachState
+          // Plan 3 Task 8 (R3-59): the provenance journal is loaded as genesis and join load it — empty, at the live code of B0.
+          await p.core.prov.load(L0, L0);
           await p.core.snapshot.reseed(tree);
         }
       },
 
       async pushTeamChange(changes, o): Promise<{ board: Oid; live: Oid }> {
-        const repo = await teamRepo();
-        const f = await fetchRefs(repo, remote.url, refs.fetchSpecs);
-        const T = f.values.get(refs.remoteBoard);
-        if (!f.ok || T === undefined || T === ABSENT) throw new Error('pushTeamChange: no board on the remote (bootstrap first)');
-        const mirror: OidOrAbsent = f.values.get(refs.remoteCode) ?? ABSENT;
-        const b = await repo.readCommit(T);
-        const tip = b.parents[b.parents.length - 1] as Oid;
-        const tipTree = (await repo.readCommit(tip)).tree;
-        const tipMap = await repo.readTreeMap(tipTree);
-        const paths = Object.keys(changes).sort();
-        const edits: Array<{ path: string; mode: FileMode; oid: Oid } | { path: string; remove: true }> = [];
-        for (const path of paths) {
-          const bytes = changes[path] ?? null;
-          if (bytes === null) edits.push({ path, remove: true });
-          else edits.push({ path, mode: tipMap.get(path)?.mode === '100755' ? '100755' : '100644', oid: await repo.hashBytes(bytes, true) });
-        }
-        const tree = await editTreeRaw(repo, tipTree, edits);
-        const seq = ++teamSeq;
-        const writer: WriterId = { peer: teamPeer, epoch: teamEpoch, seq };
-        const csId = o?.csId ?? `${teamPeer}/human/${seq}`;
-        // Cowork-CS-Paths can name only paths that pass validPathSyntax: a change with any other path carries no CS
-        // trailer at all, and the receiver reads it as one change-set of the whole commit (HLD-37).
-        const listable = paths.every((p) => validPathSyntax(p));
-        const cs: CsTrailer[] = listable ? [{ csId, state: 'closed', seq, origin: 'human', checks: 'skipped', paths: paths.length }] : [];
-        const csPaths = new Map<string, string[]>(listable && paths.length <= 256 ? [[csId, paths]] : []);
-        const live = await repo.commitTree({ tree, parents: [tip], subject: CODE_SUBJECT, trailers: liveCommitTrailers(writer, ['human'], cs, csPaths, null) });
-        // A board commit at a checkpoint height carries the fold's checkpoint (PRO-26).
-        const height = (await repo.firstParentCount(T)) - 2 + 1;
-        let checkpoint: Buffer | null = null;
-        if (height % CHECKPOINT_EVERY === 0) {
-          const folded = await new Folder(repo, teamPeer).foldTo(T, null, PLAN2_REGION_SPEC);
-          const protocol = (await readBoardCommit(repo, T)).protocol;
-          const next = foldCommit(folded.state, { liveCode: live, writer, cs, protocol, opsLines: [], checkpoint: null, heldIds: [] }, teamPeer);
-          checkpoint = serializeFold(next.state);
-        }
-        const board = await buildBoardCommit(repo, { prevBoard: T, liveCode: live, writer, ops: [], cs, csPaths, protocol: null, checkpoint });
-        const out = await runPush(repo, remote.url, [pushSpec(board, refs.remoteBoard, T), pushSpec(live, refs.remoteCode, mirror)], []);
-        if (out.statuses.get(refs.remoteBoard) !== 'ok') throw new Error(`pushTeamChange: the board push did not land (exit ${out.code})`);
-        return { board, live };
+        // Plan 3 Task 13: the body moved to teamPush unchanged — a conforming writer unless `raw` (I-DAT-13's non-conforming writer).
+        return teamPush(runner, remote.url, refs, await teamWriter(), changes, { ...(o?.csId === undefined ? {} : { csId: o.csId }), wallMs: schedClock.wallMs(), conform: o?.raw !== true });
       },
 
       cleanup,

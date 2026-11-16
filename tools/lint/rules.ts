@@ -1,4 +1,12 @@
+import { posix } from 'node:path';
 import ts from 'typescript';
+import { p5SourceRules } from './p5rules.js';
+
+// Plan 5 Task 2: the Plan 5 rule bodies live in p5rules.ts; lintSource runs its source part, lint.ts its file scans and import-graph walk.
+export {
+  expectedHooksJson, HOOK_THIN_ROOTS, lintCommandFile, lintDistLoader, lintDistPermission, lintHooksJson, lintHookThin, lintMcpSchema,
+  MCP_DESCRIPTION_SENTENCE, walkHookThin,
+} from './p5rules.js';
 
 export interface LintFinding { rule: string; file: string; line: number; message: string; }
 
@@ -6,19 +14,25 @@ export interface LintFinding { rule: string; file: string; line: number; message
 const ALLOW: Readonly<Record<string, readonly string[]>> = {
   'L-GIT-SPAWN': ['src/git/runner.ts'],
   // src/cli/launch.ts: cowork start spawns the daemon in the background (v0.1.0-preview); it never spawns git.
-  'L-PORTS': ['src/git/runner.ts', 'src/cli/launch.ts'],
+  // Plan 5 (R5-03, A1-9): spawnDaemon() and the SEC fixed-argv ACL runner.
+  'L-PORTS': ['src/git/runner.ts', 'src/cli/launch.ts', 'src/claude/client/spawn.ts', 'src/sec/winAcl.ts'],
   'L-CLOCK': ['src/ports/clock.ts'],
   'L-RANDOM': ['src/ports/random.ts'],
   'L-CRASHPOINTS': ['src/ports/crashpoint.ts'],
-  // Empty in Plan 1. The IPC endpoint module (the only permitted `net` user, 11-testing §3.10
-  // "net (outside IPC)") is added here by the plan that writes it.
-  'L-NET': [],
-  'L-TOKEN': ['src/entry/mcp.ts'],
-  'L-FS-PORT': ['src/ports/fs.ts'],
+  // The local IPC port and the inbox poster (11-testing §3.10 "net (outside IPC)"; Plan 5 A1-9).
+  'L-NET': ['src/ports/ipc.ts', 'src/ports/inbox.ts'],
+  // Plan 5 A1-9 (INV-TOKEN, CCI-49): the MCP server's doorbell is the one reader of the messaging token.
+  'L-TOKEN': ['src/claude/client/mcp/doorbell.ts'],
+  // Plan 5 R5-03, CCI-51 (Task 2): spawnDaemon() is the one daemon spawn.
+  'L-SPAWN': ['src/claude/client/spawn.ts'],
+  // Plan 5 R5-03: the dependency-free hook loader (bundled alone as dist/hook.js) reads its markers with node:fs.
+  'L-FS-PORT': ['src/ports/fs.ts', 'src/entry/hook.ts'],
   // ENG-09, ENG-58: every push argv is built in push.ts (pushSpec, buildPushArgv, deleteProbeRef).
   'L-PUSH-ARGV': ['src/git/push.ts'],
   // PRO-13, INV-ENG-AUTH: the mirror is only a fetched value and a lease (genesis mirror push ENG-51, recover ENG-22 step 5).
   'L-MIRROR': ['src/engine/refs.ts', 'src/engine/fetcher.ts', 'src/engine/publish.ts', 'src/engine/start.ts', 'src/engine/recover.ts'],
+  // REG-01, INV-REG-COORD: the one line-table helper that converts tree-sitter results to rows (Plan 4).
+  'L-OFFSETS': ['src/regions/worker/lineTable.ts'],
 };
 
 // L-OBJ-WRITE (glossary §26.1 W6; an approximation, 01-engine test 47 is the check): the files allowed to build an
@@ -38,7 +52,6 @@ const NET_MODULES: ReadonlySet<string> = new Set(['http', 'https', 'http2', 'tls
 const FS_MODULES: ReadonlySet<string> = new Set(['fs', 'node:fs', 'fs/promises', 'node:fs/promises']);
 const FORBIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set(['checkout', 'checkout-index', 'switch', 'restore', 'stash', 'apply', 'gc']);
 const SET_LIKE: ReadonlySet<string> = new Set(['Set', 'Map', 'WeakSet', 'WeakMap']);
-const MESSAGING_TOKEN = 'CLAUDE_CODE_MESSAGING_TOKEN';
 
 function normalizeFile(file: string): string {
   return file.split('\\').join('/');
@@ -52,7 +65,7 @@ function allowed(rule: string, file: string): boolean {
  * Text of a string literal or a no-substitution template; for a template expression, its literal
  * parts joined with "${}" in place of each substitution (so `+${oid}:refs/x` reads "+${}:refs/x").
  */
-function literalText(node: ts.Node): string | null {
+export function literalText(node: ts.Node): string | null {
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
   if (ts.isTemplateExpression(node)) return node.head.text + node.templateSpans.map((s) => '${}' + s.literal.text).join('');
   return null;
@@ -79,7 +92,7 @@ function boundProperty(b: ts.BindingElement): string | null {
  * The module a node loads, for the five load forms: `import … from 'm'`, `export … from 'm'`,
  * `import x = require('m')`, `require('m')` and `import('m')`. Null for anything else.
  */
-function loadedModule(node: ts.Node): string | null {
+export function loadedModule(node: ts.Node): string | null {
   if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
     && node.moduleSpecifier !== undefined && ts.isStringLiteral(node.moduleSpecifier)) {
     return node.moduleSpecifier.text;
@@ -153,6 +166,53 @@ function forbiddenGit(argv: readonly string[]): string | null {
 }
 
 const PERMISSION_FORBIDDEN: ReadonlySet<string> = new Set(['allow', 'ask']);
+
+// L-HOLD-STORES (05-holds HLD-12, HLD-18; 11-testing §3.10; 05 U2 rev 2.5; glossary §29.3; X-09, F-P3-6; Plan 3 Task 8).
+/** Holding stores other than the one registry (HLD-01, HLD-12). */
+const HOLD_STORE_NAMES: readonly string[] = ['refs/cowork-held/', 'refs/worktree/cowork/', 'cowork/quarantine/', 'cowork/conflicts/'];
+/** The one module allowed to compute and apply -U0 hunks, and its two functions that may call diff / merge-file (HLD-18). */
+const REVERT_FILE = 'src/holds/revert.ts';
+const REVERT_FNS: ReadonlySet<string> = new Set(['revertDetector', 'taintOnlyH1']);
+/** The one `merge-file --ours` caller (Algorithm REV step 4(c), Task 17): the function revertInverse in this file. */
+const REVERT_CS_FILE = 'src/holds/revertCs.ts';
+const OURS_FN = 'revertInverse';
+/**
+ * Ruling G1-FILEFORM (audit #1 #2): the one merge-file executor, runMergeFile. Every call site keeps writing the `merge-file -p --object-id`
+ * argv (L-MERGE-OPTS and the --ours rule above hold there); this file runs that call in the file form over the objects' stored bytes, so
+ * its own argv has no --object-id. It passes the caller's flag words through without naming them (--ours stays revertInverse's alone).
+ */
+const MERGE_FILE_EXECUTOR = 'src/git/merge.ts';
+const U0_TOKENS: ReadonlySet<string> = new Set(['-U0', '--unified=0']);
+const FORBIDDEN_HOLD_KINDS: ReadonlySet<string> = new Set(['SNAPSHOT', 'TRANSFORM']);
+
+/** The names of every named function around a node: declarations, methods, named function expressions and `const f = () => …`. */
+function enclosingFunctions(node: ts.Node): string[] {
+  const out: string[] = [];
+  for (let p: ts.Node | undefined = node.parent; p !== undefined; p = p.parent) {
+    if ((ts.isFunctionDeclaration(p) || ts.isFunctionExpression(p) || ts.isMethodDeclaration(p)) && p.name !== undefined) {
+      const n = propName(p.name);
+      if (n !== null) out.push(n);
+    }
+    if ((ts.isArrowFunction(p) || ts.isFunctionExpression(p)) && ts.isVariableDeclaration(p.parent) && ts.isIdentifier(p.parent.name)) {
+      out.push(p.parent.name.text);
+    }
+  }
+  return out;
+}
+
+/** L-HOLD-STORES for one string literal (or template) of a src/ file: the message, else null. */
+function holdStoreLiteral(lit: string, node: ts.Node, file: string): string | null {
+  if (HOLD_STORE_NAMES.some((n) => lit.includes(n))) return `a holding store other than the registry (HLD-01, HLD-12): ${JSON.stringify(lit)}`;
+  const tokens = lit.split(/\s+/);
+  if (file !== REVERT_FILE && tokens.some((t) => U0_TOKENS.has(t))) return `-U0 hunks only in src/holds/revert.ts (taintOnlyH1 is the single applier, HLD-18, 05 U2)`;
+  if (tokens.includes('--union') || tokens.includes('--theirs')) return `merge-file --union / --theirs is never used (HLD-12, glossary §9)`;
+  if (tokens.includes('--ours') && !(file === REVERT_CS_FILE && enclosingFunctions(node).includes(OURS_FN))) {
+    return `merge-file --ours only inside revertInverse() in ${REVERT_CS_FILE} (glossary §29.3, X-09)`;
+  }
+  if (lit.includes('state=wip')) return `no time-capped WIP publishing: state=wip (HLD-12)`;
+  if (FORBIDDEN_HOLD_KINDS.has(lit)) return `no ${lit} hold kind (HLD-12; FREEZE reasons replace SNAPSHOT)`;
+  return null;
+}
 
 /** `process.kill`, `process['kill']` or `<x>.process.kill` (e.g. globalThis.process.kill). */
 function isProcessKill(callee: ts.Expression): boolean {
@@ -243,10 +303,6 @@ export function lintSource(file: string, text: string): LintFinding[] {
       const imported = (node.propertyName ?? node.name).text;
       if (imported === 'randomBytes' || imported === 'randomUUID') report('L-RANDOM', node, `${imported} imported outside the Random port`);
     }
-    // L-TOKEN: the messaging token as an identifier (process.env.X, destructured or object key).
-    if (ts.isIdentifier(node) && node.text === MESSAGING_TOKEN) {
-      report('L-TOKEN', node, `${MESSAGING_TOKEN} referenced outside src/entry/mcp.ts`);
-    }
     // L-CLASSIFY-TEXT: any identifier stderr / stderrText / message (or o['message']) in the classifiers.
     if (CLASSIFY_FILES.has(f)) {
       const name = ts.isIdentifier(node) ? node.text
@@ -262,8 +318,9 @@ export function lintSource(file: string, text: string): LintFinding[] {
     if (mirror !== null && MIRROR_NAMES.has(mirror)) {
       report('L-MIRROR', node, `.${mirror}: the mirror is never a decision input, only a fetched value and a lease (PRO-13)`);
     }
-    // L-PERMISSION: permissionDecision "allow" / "ask".
-    if ((ts.isPropertyAssignment(node) || ts.isPropertySignature(node) || ts.isPropertyDeclaration(node))
+    // L-PERMISSION: permissionDecision "allow" / "ask" (Plan 1's form, outside src/; in src/** Plan 5's widened form in p5rules.ts flags every
+    // mention, whatever the value).
+    if (!f.startsWith('src/') && (ts.isPropertyAssignment(node) || ts.isPropertySignature(node) || ts.isPropertyDeclaration(node))
       && propName(node.name) === 'permissionDecision') {
       const values: (ts.Node | undefined)[] = ts.isPropertyAssignment(node) ? [node.initializer]
         : ts.isPropertyDeclaration(node) ? [node.type, node.initializer] : [node.type];
@@ -271,7 +328,7 @@ export function lintSource(file: string, text: string): LintFinding[] {
         report('L-PERMISSION', node, `permissionDecision "allow"/"ask" is forbidden (only "deny" is emitted)`);
       }
     }
-    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+    if (!f.startsWith('src/') && ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
       const l = node.left;
       const target = ts.isPropertyAccessExpression(l) ? l.name.text
         : ts.isElementAccessExpression(l) ? literalText(l.argumentExpression) : null;
@@ -279,7 +336,7 @@ export function lintSource(file: string, text: string): LintFinding[] {
         report('L-PERMISSION', node, `permissionDecision "allow"/"ask" is forbidden (only "deny" is emitted)`);
       }
     }
-    // String literals and templates: L-REFS, L-MERGE-OPTS, L-TOKEN, L-GIT-ATOMIC.
+    // String literals and templates: L-REFS, L-MERGE-OPTS, L-GIT-ATOMIC (L-TOKEN: p5rules.ts).
     const lit = literalText(node);
     if (lit !== null) {
       if (lit.includes('refs/worktree/')) report('L-REFS', node, `refs/worktree/ is never used (common namespace only)`);
@@ -295,8 +352,18 @@ export function lintSource(file: string, text: string): LintFinding[] {
         || tokens.includes('--union') || lit.includes('merge=union')) {
         report('L-MERGE-OPTS', node, `-X / --strategy-option / --union / merge=union are forbidden (glossary §18)`);
       }
-      if (lit.includes(MESSAGING_TOKEN)) report('L-TOKEN', node, `${MESSAGING_TOKEN} referenced outside src/entry/mcp.ts`);
       if (tokens.includes('--atomic')) report('L-GIT-ATOMIC', node, `--atomic is never used (glossary §26.2 item 1)`);
+      if (f.startsWith('src/')) {
+        const held = holdStoreLiteral(lit, node, f);
+        if (held !== null) report('L-HOLD-STORES', node, held);
+      }
+    }
+    // L-HOLD-STORES (HLD-18): in src/holds/revert.ts a diff or merge-file call only inside revertDetector and taintOnlyH1.
+    if (f === REVERT_FILE && !enclosingFunctions(node).some((n) => REVERT_FNS.has(n))) {
+      const argv = ts.isArrayLiteralExpression(node) ? argvOf(node) : null;
+      const sub = argv?.[0];
+      if (sub === 'diff' || sub === 'merge-file') report('L-HOLD-STORES', node, `git ${sub} in ${REVERT_FILE} outside revertDetector and taintOnlyH1 (HLD-18)`);
+      if (ts.isCallExpression(node) && calleeName(node.expression) === 'mergeFile') report('L-HOLD-STORES', node, `mergeFile in ${REVERT_FILE} outside revertDetector and taintOnlyH1 (HLD-18)`);
     }
     // Argv-shaped arrays: L-MERGE-BASE, L-MERGE-OPTS (merge-file), L-HASH-STDIN.
     if (ts.isArrayLiteralExpression(node)) {
@@ -314,7 +381,7 @@ export function lintSource(file: string, text: string): LintFinding[] {
         if (sub === 'merge-tree' && !argv.some((a) => a === '--merge-base' || a.startsWith('--merge-base='))) {
           report('L-MERGE-BASE', node, `merge-tree without --merge-base`);
         }
-        if (sub === 'merge-file' && !argv.includes('--object-id')) {
+        if (sub === 'merge-file' && !argv.includes('--object-id') && f !== MERGE_FILE_EXECUTOR) {
           report('L-MERGE-OPTS', node, `merge-file without --object-id`);
         }
         if (sub === 'hash-object' && argv.includes('--stdin') && !argv.includes('--no-filters')
@@ -323,18 +390,28 @@ export function lintSource(file: string, text: string): LintFinding[] {
         }
       }
     }
+    // Plan 4's six rules (appended below).
+    regionRules(f, node, report);
     ts.forEachChild(node, visit);
   };
   visit(sf);
+  p5SourceRules(f, sf, report);
   return out;
 }
 
-/** The rules that also bind test code (test/**). The other rules guard daemon code only. */
-const TEST_RULES: ReadonlySet<string> = new Set(['L-PID-KILL']);
+/** The rules that also bind test code (test/**). The other rules guard daemon code only. Plan 5: L-TOKEN (R5-03, "test files included"). */
+const TEST_RULES: ReadonlySet<string> = new Set(['L-PID-KILL', 'L-TOKEN']);
+/** The rules that bind tooling code (tools/**): L-TOKEN (Plan 5 Task 2). */
+const TOOL_RULES: ReadonlySet<string> = new Set(['L-TOKEN']);
 
 /** Lints a test file: only the rules in TEST_RULES. */
 export function lintTestSource(file: string, text: string): LintFinding[] {
   return lintSource(file, text).filter((f) => TEST_RULES.has(f.rule));
+}
+
+/** Lints a tooling file (tools/**, and a test/** script that is not TypeScript): only the rules in TOOL_RULES. */
+export function lintToolSource(file: string, text: string): LintFinding[] {
+  return lintSource(file, text).filter((f) => TOOL_RULES.has(f.rule));
 }
 
 export function lintCrashpoints(callSites: string[], catalogue: string[]): LintFinding[] {
@@ -346,4 +423,180 @@ export function lintCrashpoints(callSites: string[], catalogue: string[]): LintF
     }
   }
   return out;
+}
+
+// ---- Plan 4 (regions and claims): L-REGION-DEPS, L-REGION-WRITE, L-OFFSETS, L-UTF8-WRITE, L-ONE-MAPPER, L-CLAIMFREE-HOLDS ----
+// Scopes (repo-relative, forward slashes): the module-load clauses read relative specifiers resolved against the file
+// (`'../../git/repo.js'` from src/regions/worker/x.ts names src/git/repo); a type-only import counts like a value import
+// (ruling PF-12) except for the one type-only import L-CLAIMFREE-HOLDS admits.
+
+/** The repo-relative module (extension dropped) a relative specifier names from `file`; null for a package or built-in. */
+function relativeTarget(file: string, spec: string): string | null {
+  if (!spec.startsWith('./') && !spec.startsWith('../')) return null;
+  return posix.normalize(posix.join(posix.dirname(file), spec)).replace(/\.(?:[cm]?js|[cm]?ts)$/, '');
+}
+
+/** `dir/` itself or anything under it (`dir` given without its trailing slash). */
+function under(target: string, dir: string): boolean {
+  return target === dir || target.startsWith(`${dir}/`);
+}
+
+const WORKER_THREADS: ReadonlySet<string> = new Set(['worker_threads', 'node:worker_threads']);
+/** R4-12: the two files that may import node:worker_threads. */
+const WORKER_THREADS_FILES: ReadonlySet<string> = new Set(['src/regions/pool.ts', 'src/entry/worker.ts']);
+/** REG-02, REG-35: GitRepo and Plan 2 writers the region and claim modules never call (object, tree, commit, ref and index writes). */
+const REGION_WRITE_CALLS: ReadonlySet<string> = new Set([
+  'writeTreeMap', 'editTree', 'mktree', 'commitTree', 'casRef', 'deleteLocalRef', 'editIndex', 'readTreeIntoIndex', 'writeTree', 'mergeTree',
+]);
+/** Object-hashing calls and the index of their `write` argument, which must be the literal `false`. */
+const HASH_WRITE_ARG: ReadonlyMap<string, number> = new Map([['hashBytes', 1], ['hashRouteC', 2], ['hashRouteB', 3]]);
+/** The read-only git subcommands a region or claim module may run (hash-object only without -w). */
+const REGION_GIT_READS: ReadonlySet<string> = new Set(['grep', 'ls-tree', 'cat-file', 'check-attr', 'hash-object']);
+/** R4-02: src/regions sits before these directories and imports none of them. */
+const AFTER_REGIONS: readonly string[] = ['src/board', 'src/holds', 'src/claims', 'src/engine'];
+/** L-OFFSETS: tree-sitter byte/UTF-16 offsets. */
+const OFFSET_NAMES: ReadonlySet<string> = new Set(['startIndex', 'endIndex']);
+const POSITION_NAMES: ReadonlySet<string> = new Set(['startPosition', 'endPosition']);
+/** L-CLAIMFREE-HOLDS: the one type-only import src/holds/ports.ts may take from src/regions/editCheck.ts. */
+const EDIT_CHECK_TYPES: ReadonlySet<string> = new Set(['EditCheckEntry', 'EditCheckReason']);
+
+/** The last identifier of a call receiver (`this.deps.log` → log, `getLog()` → getLog), null when it has none. */
+function lastIdentifier(e: ts.Expression): string | null {
+  if (ts.isIdentifier(e)) return e.text;
+  if (ts.isPropertyAccessExpression(e)) return e.name.text;
+  if (ts.isCallExpression(e)) return lastIdentifier(e.expression);
+  if (ts.isElementAccessExpression(e)) return literalText(e.argumentExpression);
+  if (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e)) return lastIdentifier(e.expression);
+  return null;
+}
+
+/** A string literal or template (with or without substitutions). */
+function isStringy(node: ts.Node | undefined): boolean {
+  return node !== undefined && (literalText(node) !== null || ts.isTemplateExpression(node));
+}
+
+/** True when an import is the type-only `import type { EditCheckEntry | EditCheckReason … }` form. */
+function isEditCheckTypeImport(node: ts.Node): boolean {
+  if (!ts.isImportDeclaration(node) || node.importClause === undefined || !node.importClause.isTypeOnly) return false;
+  const c = node.importClause;
+  if (c.name !== undefined || c.namedBindings === undefined || !ts.isNamedImports(c.namedBindings)) return false;
+  return c.namedBindings.elements.every((s) => EDIT_CHECK_TYPES.has((s.propertyName ?? s.name).text));
+}
+
+/** The six Plan 4 rules for one node of `f` (11-testing §3.10, 04 §3.2; the lint table of Plan 4's §Interfaces). */
+function regionRules(f: string, node: ts.Node, report: (rule: string, node: ts.Node, message: string) => void): void {
+  if (!f.startsWith('src/')) return;
+  const inRegions = f.startsWith('src/regions/');
+  const inClaims = f.startsWith('src/claims/');
+  const inWorker = f.startsWith('src/regions/worker/');
+  const regionOrClaim = inRegions || inClaims;
+
+  const mod = loadedModule(node);
+  if (mod !== null) {
+    const target = relativeTarget(f, mod);
+    // L-REGION-DEPS (R4-09, R4-12, 11 L-PORTS region row).
+    if ((mod === 'web-tree-sitter' || mod.startsWith('web-tree-sitter/')) && !inWorker) {
+      report('L-REGION-DEPS', node, `web-tree-sitter imported outside src/regions/worker/ (R4-09)`);
+    }
+    if (WORKER_THREADS.has(mod) && !WORKER_THREADS_FILES.has(f)) {
+      report('L-REGION-DEPS', node, `node:worker_threads imported outside src/regions/pool.ts and src/entry/worker.ts (R4-12)`);
+    }
+    if (inWorker && (FS_MODULES.has(mod) || CHILD_PROCESS.has(mod)
+      || (target !== null && (under(target, 'src/git') || target === 'src/ports/fs')))) {
+      report('L-REGION-DEPS', node, `"${mod}" imported by a region worker module: workers take bytes, never files or git (R4-12)`);
+    }
+    if (target === 'src/regions/worker/inline') {
+      report('L-REGION-DEPS', node, `inlineWorkers imported under src/: it binds unit tests and SIM only (R4-13)`);
+    }
+    // L-REGION-WRITE: the import direction (R4-02).
+    if (inRegions && target !== null && AFTER_REGIONS.some((d) => under(target, d))) {
+      report('L-REGION-WRITE', node, `src/regions imports "${mod}": regions never import src/board, src/holds, src/claims or src/engine (R4-02)`);
+    }
+    // L-ONE-MAPPER (R4-17): no region consumer reads Plan 2's linediff; since Task 5 the same holds for src/holds/mask.ts (R4-83).
+    if (regionOrClaim || f === 'src/holds/mask.ts') {
+      const namesMatchedRows = ts.isImportDeclaration(node) && node.importClause?.namedBindings !== undefined
+        && ts.isNamedImports(node.importClause.namedBindings)
+        && node.importClause.namedBindings.elements.some((s) => (s.propertyName ?? s.name).text === 'matchedRows');
+      if (target === 'src/data/linediff' || namesMatchedRows) {
+        report('L-ONE-MAPPER', node, `src/data/linediff (matchedRows) in a region consumer: FoldMapper/1 is the one line mapper (REG-07)`);
+      }
+    }
+    // L-CLAIMFREE-HOLDS (HLD-06).
+    if (f.startsWith('src/holds/') && target !== null) {
+      if (under(target, 'src/claims')) {
+        report('L-CLAIMFREE-HOLDS', node, `src/holds imports "${mod}": holds read no claim state (HLD-06)`);
+      } else if (under(target, 'src/regions')) {
+        const admitted = (f === 'src/holds/mask.ts' && target === 'src/regions/mapper')
+          || (f === 'src/holds/ports.ts' && target === 'src/regions/editCheck' && isEditCheckTypeImport(node));
+        if (!admitted) {
+          report('L-CLAIMFREE-HOLDS', node, `src/holds imports "${mod}": only mask.ts → regions/mapper and ports.ts' type-only editCheck import (HLD-06)`);
+        }
+      }
+    }
+  }
+
+  // L-OFFSETS (REG-01, INV-REG-COORD): rows only; the one line-table helper is allowed (ALLOW).
+  if (ts.isIdentifier(node) && OFFSET_NAMES.has(node.text)) {
+    report('L-OFFSETS', node, `${node.text}: tree-sitter offsets only in src/regions/worker/lineTable.ts (REG-01)`);
+  }
+  if (ts.isElementAccessExpression(node)) {
+    const key = literalText(node.argumentExpression);
+    if (key !== null && OFFSET_NAMES.has(key)) report('L-OFFSETS', node, `${key}: tree-sitter offsets only in src/regions/worker/lineTable.ts (REG-01)`);
+  }
+  if (ts.isPropertyAccessExpression(node) && node.name.text === 'column' && ts.isPropertyAccessExpression(node.expression)
+    && POSITION_NAMES.has(node.expression.name.text)) {
+    report('L-OFFSETS', node, `${node.expression.name.text}.column: tree-sitter positions are read as rows only (REG-01)`);
+  }
+
+  if (!regionOrClaim) return;
+
+  // L-UTF8-WRITE (04 §3.2 item 3; R4-83): text is decoded read-only and never encoded.
+  if (ts.isIdentifier(node) && node.text === 'TextEncoder') {
+    report('L-UTF8-WRITE', node, `TextEncoder in a region or claim module: text is never encoded (04 §3.2)`);
+  }
+  if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+    const callee = node.expression;
+    if (callee.name.text === 'from' && ts.isIdentifier(callee.expression) && callee.expression.text === 'Buffer'
+      && (isStringy(node.arguments[0]) || isStringy(node.arguments[1]))) {
+      report('L-UTF8-WRITE', node, `Buffer.from(<string>) in a region or claim module: text is never encoded (04 §3.2)`);
+    }
+    if (callee.name.text === 'write' && isStringy(node.arguments[0])) {
+      const receiver = lastIdentifier(callee.expression);
+      if (receiver === null || (receiver !== 'log' && !receiver.endsWith('Log'))) {
+        report('L-UTF8-WRITE', node, `.write(<string>) in a region or claim module: text is never encoded (04 §3.2; Log writes are exempt, R4-83)`);
+      }
+    }
+  }
+
+  if (ts.isCallExpression(node)) {
+    const name = calleeName(node.expression);
+    // L-REGION-WRITE (REG-02, REG-35, R4-40).
+    if (name !== null && REGION_WRITE_CALLS.has(name)) {
+      report('L-REGION-WRITE', node, `${name}() in a region or claim module: they write no object, tree, commit, ref or index entry (REG-02)`);
+    }
+    const writeArg = name === null ? undefined : HASH_WRITE_ARG.get(name);
+    if (writeArg !== undefined && node.arguments[writeArg]?.kind !== ts.SyntaxKind.FalseKeyword) {
+      report('L-REGION-WRITE', node, `${name}() without a literal false write argument in a region or claim module (REG-02)`);
+    }
+    if (name === 'mergeFile' && f !== 'src/claims/editCheckPort.ts') {
+      report('L-REGION-WRITE', node, `mergeFile() outside src/claims/editCheckPort.ts (R4-40)`);
+    }
+    const arg0 = node.arguments[0];
+    if (name === 'run' && arg0 !== undefined && ts.isArrayLiteralExpression(arg0)) {
+      const argv = argvOf(arg0);
+      const sub = argv?.[0];
+      if (argv !== null && sub !== undefined && (!REGION_GIT_READS.has(sub) || (sub === 'hash-object' && argv.includes('-w')))) {
+        report('L-REGION-WRITE', node, `git ${sub} in a region or claim module: only grep, ls-tree, cat-file, check-attr and hash-object without -w (REG-02)`);
+      }
+    }
+  }
+  // L-ONE-MAPPER: no git diff output feeds a region consumer (REG-07).
+  if (ts.isArrayLiteralExpression(node)) {
+    const argv = argvOf(node);
+    const sub = argv?.[0];
+    if (argv !== null && (sub === 'diff' || sub === 'diff-tree'
+      || (sub === 'log' && argv.some((a) => a === '-p' || a === '-u' || a === '--patch')))) {
+      report('L-ONE-MAPPER', node, `git ${sub} output in a region consumer: FoldMapper/1 is the one line mapper (REG-07)`);
+    }
+  }
 }

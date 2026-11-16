@@ -1,16 +1,20 @@
 // CLI: lint every src/**/*.ts under --root (default: the current directory) with every rule, and every test/**/*.ts
-// with the rules that also bind test code (lintTestSource: L-PID-KILL).
+// with the rules that also bind test code (lintTestSource: L-PID-KILL, L-TOKEN).
+// Plan 5 Task 2: every other script of test/** and tools/** with lintToolSource (L-TOKEN); plugin/hooks/*.json (L-HOOKS-JSON) and
+// plugin/commands/*.md (L-HUMAN-ONLY); and L-HOOK-THIN's walk of the import graph of src/entry/core.ts and src/entry/mcp.ts.
 // Exit 0 with no findings, 1 with findings, 2 on a usage or catalogue error.
 // The visualizer rules (vizRules.ts, R-V34, R-V35): lintSource findings that VIZ_ALLOW covers are dropped,
 // lintVizSource findings are added, and — only when <root>/src/viz/client/{tsconfig.json,main.ts} exist — the
 // client program's import closure (L-VIZ-IMPORT) and typecheck (L-VIZ-TYPES), and the check that no other file
 // brings lib DOM into the main program (L-VIZ-TYPES). A client or main program directory that cannot be listed
 // throws (exit 2). The summary counts the src/**/*.ts and test/**/*.ts files only (not the client program's files).
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import ts from 'typescript';
-import { lintCrashpoints, lintSource, lintTestSource, type LintFinding } from './rules.js';
+import {
+  lintCommandFile, lintCrashpoints, lintHooksJson, lintHookThin, lintSource, lintTestSource, lintToolSource, type LintFinding,
+} from './rules.js';
 import { lintVizClientClosure, lintVizClientProgram, lintVizMainProgramDom, lintVizSource, vizAllowed } from './vizRules.js';
 
 const CRASHPOINT_PORT = 'src/ports/crashpoint.ts';
@@ -97,9 +101,60 @@ async function main(argv: string[]): Promise<number> {
     const rel = path.relative(root, full).split(path.sep).join('/');
     findings.push(...lintTestSource(rel, await readFile(full, 'utf8')));
   }
+  // Plan 5 Task 2: L-TOKEN also scans the JavaScript scripts of test/** and every script of tools/** (R5-03, "test files included").
+  const scripts = [
+    ...(await listFiles(path.join(root, 'test'), JS_SCRIPT)),
+    ...(await listFiles(path.join(root, 'tools'), (n) => JS_SCRIPT(n) || (n.endsWith('.ts') && !n.endsWith('.d.ts')))),
+  ];
+  for (const full of scripts) {
+    const rel = path.relative(root, full).split(path.sep).join('/');
+    findings.push(...lintToolSource(rel, await readFile(full, 'utf8')));
+  }
+  // The plugin package (06 §3.2, CCI-03): L-HOOKS-JSON over plugin/hooks/*.json, L-HUMAN-ONLY over plugin/commands/*.md.
+  const hookFiles = await listFiles(path.join(root, 'plugin', 'hooks'), (n) => n.endsWith('.json'));
+  const commandFiles = await listFiles(path.join(root, 'plugin', 'commands'), (n) => n.endsWith('.md'));
+  for (const full of hookFiles) findings.push(...lintHooksJson(path.relative(root, full).split(path.sep).join('/'), await readFile(full, 'utf8')));
+  for (const full of commandFiles) findings.push(...lintCommandFile(path.relative(root, full).split(path.sep).join('/'), await readFile(full, 'utf8')));
+  // L-HOOK-THIN (R5-03): the import graph of src/entry/{core,mcp}.ts, from source (lint runs before build).
+  findings.push(...lintHookThin((rel) => readSource(root, rel)));
   for (const f of findings) process.stderr.write(`${f.rule} ${f.file}:${f.line} ${f.message}\n`);
-  process.stdout.write(`lint: ${files.length + testFiles.length} files, ${findings.length} findings\n`);
+  const count = files.length + testFiles.length + scripts.length + hookFiles.length + commandFiles.length;
+  process.stdout.write(`lint: ${count} files, ${findings.length} findings\n`);
   return findings.length === 0 ? 0 : 1;
+}
+
+const JS_SCRIPT = (name: string): boolean => /\.(?:mjs|cjs|js)$/.test(name);
+
+/** Every file under dir (recursively, sorted by code unit) whose name passes keep; none when dir does not exist. Links are not followed and
+ *  node_modules directories are skipped (a package's own files are not this repository's; fix r1). */
+async function listFiles(dir: string, keep: (name: string) => boolean): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw e;
+  }
+  entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const out: string[] = [];
+  for (const e of entries) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      if (e.name !== 'node_modules') out.push(...(await listFiles(full, keep)));
+    } else if (e.isFile() && keep(e.name)) out.push(full);
+  }
+  return out;
+}
+
+/** A repository-relative source file's text, or null when it does not exist (absent files are absent from the L-HOOK-THIN walk). */
+function readSource(root: string, rel: string): string | null {
+  try {
+    return readFileSync(path.join(root, ...rel.split('/')), 'utf8');
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return null;
+    throw e;
+  }
 }
 
 main(process.argv.slice(2)).then(

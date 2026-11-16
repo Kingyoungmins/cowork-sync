@@ -1,0 +1,2166 @@
+{
+  "note": "Region fixture corpus (cowork-sync Plan 4 Task 2, R4-21): regenerated from the 04/05/11 descriptions; see README.md. Names are paths under test/fixtures/regions/ (built: checked-in) or names resolved by fixture() in test/helpers/regionFixtures.ts (built: generated).",
+  "fixtures": {
+    "README.md": {
+      "built": "checked-in",
+      "source": "04 §7 harness",
+      "spec": "Harness: the TST- deterministic multi-peer simulator (SIM, TST-02/TST-03) on a local bare remote (3–4 peers, a BOM+CRLF file ≥ 5k lines, a clean/smudge filter), plus the sweep/region fixtures (S1–S10, fwd, premerge, rc_touch, rc_valid_errors, rc_dupes).",
+      "feeds": [
+        "T-REG-01",
+        "T-REG-14",
+        "TC-REG-01"
+      ],
+      "how": "This provenance table: one row per fixture with the 04/05/11 sentence it reproduces, the test ids it feeds and how it was built; the harness, the sweep semantics, the bigBomCrlf(5_960) schedule and the pinned values."
+    },
+    "arb/sample.cs": {
+      "built": "generated",
+      "source": "04 §7 T-REG-23",
+      "spec": "For random generated Python/JS/TS/C# files, leaf units, `<imports>` and gap blocks are pairwise disjoint and cover every non-blank line outside `<imports>`.",
+      "feeds": [
+        "T-REG-23"
+      ],
+      "how": "The first sample of unitFileArb('c_sharp') under fast-check seed fcSeed('arb') (first 4 bytes of seededRandom('arb'), little-endian int32): templates (imports, functions, classes with members, consts, comments, blank runs; IIFE bodies for JS; namespaces for C#), one CW-T marker per non-blank template."
+    },
+    "arb/sample.js": {
+      "built": "generated",
+      "source": "04 §7 T-REG-23",
+      "spec": "For random generated Python/JS/TS/C# files, leaf units, `<imports>` and gap blocks are pairwise disjoint and cover every non-blank line outside `<imports>`.",
+      "feeds": [
+        "T-REG-23"
+      ],
+      "how": "The first sample of unitFileArb('javascript') under fast-check seed fcSeed('arb') (first 4 bytes of seededRandom('arb'), little-endian int32): templates (imports, functions, classes with members, consts, comments, blank runs; IIFE bodies for JS; namespaces for C#), one CW-T marker per non-blank template."
+    },
+    "arb/sample.py": {
+      "built": "generated",
+      "source": "04 §7 T-REG-23",
+      "spec": "For random generated Python/JS/TS/C# files, leaf units, `<imports>` and gap blocks are pairwise disjoint and cover every non-blank line outside `<imports>`.",
+      "feeds": [
+        "T-REG-23"
+      ],
+      "how": "The first sample of unitFileArb('python') under fast-check seed fcSeed('arb') (first 4 bytes of seededRandom('arb'), little-endian int32): templates (imports, functions, classes with members, consts, comments, blank runs; IIFE bodies for JS; namespaces for C#), one CW-T marker per non-blank template."
+    },
+    "arb/sample.ts": {
+      "built": "generated",
+      "source": "04 §7 T-REG-23",
+      "spec": "For random generated Python/JS/TS/C# files, leaf units, `<imports>` and gap blocks are pairwise disjoint and cover every non-blank line outside `<imports>`.",
+      "feeds": [
+        "T-REG-23"
+      ],
+      "how": "The first sample of unitFileArb('typescript') under fast-check seed fcSeed('arb') (first 4 bytes of seededRandom('arb'), little-endian int32): templates (imports, functions, classes with members, consts, comments, blank runs; IIFE bodies for JS; namespaces for C#), one CW-T marker per non-blank template."
+    },
+    "big26k_bomcrlf.py": {
+      "built": "generated",
+      "source": "04 §7 T-REG-15",
+      "spec": "26,436-line BOM+CRLF fixture: gate p95 ≤ 15 ms from cache",
+      "feeds": [
+        "T-REG-15",
+        "T-REG-29",
+        "TC-REG-09"
+      ],
+      "how": "bigBomCrlf(26_436) = oneDotThreeMb() = Plan 1 generateBigBomCrlf(26_436, seededRandom('regions-26436')): 26,436 BOM+CRLF rows, 1,303,282 bytes (pinned at the first green run); size and timing only."
+    },
+    "big_lf.py": {
+      "built": "generated",
+      "source": "04 §7 T-REG-03",
+      "spec": "`big_wt.py` (BOM+CRLF) vs `big_lf.py` (LF): 0 mapper hunks, identical tables (432 units); exact-equality control shows 5,960 changed lines.",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-03",
+        "T-REG-06",
+        "T-REG-20",
+        "TC-REG-02",
+        "TC-REG-03"
+      ],
+      "how": "bigLf(5_960): the LF, BOM-less stored form of big_wt.py; the base of every Python rc_touch and fwd post."
+    },
+    "big_wt.py": {
+      "built": "generated",
+      "source": "04 §7 T-REG-03",
+      "spec": "`big_wt.py` (BOM+CRLF) vs `big_lf.py` (LF): 0 mapper hunks, identical tables (432 units); exact-equality control shows 5,960 changed lines.",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-03",
+        "T-REG-14",
+        "T-REG-20",
+        "TC-REG-03",
+        "TC-REG-07"
+      ],
+      "how": "bigBomCrlf(5_960): BOM + CRLF form of big_lf.py (the working form of a core.autocrlf=true peer); the hot zone is at rows 5300-5346 (HOT_ZONE), 432 leaf units by construction (schedule below); the BOM+CRLF file of at least 5k lines of the 04 section 7 harness; the hot zone is also the input of TC-REG-07 and T-REG-17."
+    },
+    "csharp/Svc.Part2.cs": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-10",
+      "spec": "S6(b) inserting `Calc(decimal)` while `Calc(int)` is held: held; `Calc(long)` added in `Svc.Part2.cs`: held via the partial grep",
+      "feeds": [
+        "T-REG-10"
+      ],
+      "how": "The other partial declaration of N.Svc with Name() only (found by the partial-type grep)."
+    },
+    "csharp/Svc.Part2.long.cs": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-10",
+      "spec": "S6(b) inserting `Calc(decimal)` while `Calc(int)` is held: held; `Calc(long)` added in `Svc.Part2.cs`: held via the partial grep",
+      "feeds": [
+        "T-REG-10"
+      ],
+      "how": "Svc.Part2.cs with `public long Calc(long x)` added above Name() (rows 5-9): a group-name hit through the partial grep."
+    },
+    "csharp/Svc.cs": {
+      "built": "checked-in",
+      "source": "04 §3.12",
+      "spec": "VERIFIED rc_touch R2 `cs_new_overload_not_adjacent_to_held`: range test disjoint, group-name hit `Calc@30`, result touch.",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-10",
+        "T-REG-20",
+        "TC-REG-02"
+      ],
+      "how": "`namespace N`, `public partial class Svc`: Reset() rows 5-8, Calc(int x) rows 12-15, Calc(double x) rows 17-20, Describe() rows 22-28, row 29 empty, Log(string) rows 30-33."
+    },
+    "csharp/Svc.new_overload.cs": {
+      "built": "checked-in",
+      "source": "04 §3.12",
+      "spec": "VERIFIED rc_touch R2 `cs_new_overload_not_adjacent_to_held`: range test disjoint, group-name hit `Calc@30`, result touch.",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-10",
+        "T-REG-20",
+        "TC-REG-02"
+      ],
+      "how": "Svc.cs with `public decimal Calc(decimal x)` inserted as rows 30-33 plus an empty row 34 (the Calc@30 group-name hit; range test disjoint from the held Calc(int))."
+    },
+    "csharp/overloads.post.ts": {
+      "built": "checked-in",
+      "source": "04 §3.12",
+      "spec": "For C# methods, constructors, operators and indexers, and for TypeScript function overload sets",
+      "feeds": [
+        "T-REG-10",
+        "T-REG-02"
+      ],
+      "how": "overloads.ts with `function f(x: boolean): boolean;` added after the string signature (an added overload: group-name)."
+    },
+    "csharp/overloads.ts": {
+      "built": "checked-in",
+      "source": "04 §3.12",
+      "spec": "For C# methods, constructors, operators and indexers, and for TypeScript function overload sets",
+      "feeds": [
+        "T-REG-10",
+        "T-REG-02"
+      ],
+      "how": "A TS overload set: `function f(x: number): number;`, `function f(x: string): string;` and the implementation `function f(x: any): any`."
+    },
+    "dupes/rc_dupes.py": {
+      "built": "checked-in",
+      "source": "04 §3.15",
+      "spec": "VERIFIED rc_dupes.mjs (`Account.value` ×2 getter/setter and `open_console` ×2 platform branches in a valid base)",
+      "feeds": [
+        "T-REG-08",
+        "TC-REG-05"
+      ],
+      "how": "Account.value getter (`@property`) and setter (`@value.setter`), and open_console defined in both branches of `if sys.platform == \"win32\":`.",
+      "definitions": {
+        "value#0": 13,
+        "value#1": 17,
+        "open_console#0": 24,
+        "open_console#1": 28
+      }
+    },
+    "editcheck/1/conflict_markers.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "conflict markers in `M` (1)",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "The candidate lib.py holds conflict-marker rows 4-8 (M = R since TIP = A): check 1, line = the first marker row."
+    },
+    "editcheck/1/new_error_node.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "**fail** with the right `check` for an unclosed paren or half-typed boundary insertion (1)",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "An unclosed paren in foo (row 3, `return round(a * b`): a new ERROR node; its line is pinned at Task 10's first green run."
+    },
+    "editcheck/1/new_error_node@tip.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "Unit table on the rc_touch, X7, x2/x3 and S7 fixtures with `TIP = A` and with `TIP ≠ A` (engine-merged `M`)",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "TIP != A: TIP already has an ERROR node in lib.py (legacy, row 11); the CS adds an unclosed paren in foo (row 3); the reported line is the new node's row, not the old one (pinned at Task 10)."
+    },
+    "editcheck/1/undecodable.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "a UTF-8 file made undecodable (1)",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "The CS rewrites the Korean comment of lib.py row 1 in cp949 (B0 A1 for 가): the merged file does not decode as UTF-8 while TIP did; no line.",
+      "form": true,
+      "bytes": [
+        {
+          "at": "R.lib.py",
+          "hex": "b0a1",
+          "note": "cp949 가 in row 1"
+        }
+      ]
+    },
+    "editcheck/2/incompatible_caller.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "`foo(a,b)→foo(a)` with an un-updated definite caller (2)",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "param_removed: foo(a, b) becomes foo(a); the definite caller `foo(price, qty)` sits in orders.py, a file outside the CS: path orders.py, line = its TIP row 14."
+    },
+    "editcheck/2/incompatible_caller@tip.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "Unit table on the rc_touch, X7, x2/x3 and S7 fixtures with `TIP = A` and with `TIP ≠ A` (engine-merged `M`)",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "TIP != A: TIP inserted two rows at the top of orders.py, so the un-updated caller is TIP row 16."
+    },
+    "editcheck/2/orphan_call.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "a new 2-argument call to a callee TIP made 1-argument (2, `orphanCalls`)",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "TIP made foo 1-argument (with its callers updated); the CS adds a new 2-argument call `foo(1, 2)` in sample(): orphanCalls, line = its row 12 in M[orders.py]."
+    },
+    "editcheck/2/param_renamed.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "a removed, reordered or new required parameter",
+      "feeds": [
+        "T-REG-28",
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "param_renamed: send(to, subject) becomes send(to, title); the caller in notify.py row 5 passes the keyword `subject=`."
+    },
+    "editcheck/2/param_reordered.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "a removed, reordered or new required parameter",
+      "feeds": [
+        "T-REG-28",
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "param_reordered: area(width, height=1) becomes area(height, width); the 1-argument caller in rooms.py row 5 no longer satisfies the required parameters."
+    },
+    "editcheck/2/tip_caller.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "a caller added on the TIP side (present only in the merged tree) and not updated → fail",
+      "feeds": [
+        "T-REG-28",
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "param_removed with the TIP-side caller not updated: TIP added `foo(order.price, order.quantity)` in orders.py (row 9, present only in the merged tree); the CS made foo 1-argument."
+    },
+    "editcheck/2/varargs_removed.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "a removed, reordered or new required parameter",
+      "feeds": [
+        "T-REG-28",
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "varargs_removed: log(*parts) becomes log(part); the 2-argument caller in trace.py row 5 is now incompatible."
+    },
+    "editcheck/3/removed_name_called.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "a removed function still called in the same file (3)",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "helper is removed while total() in the same file still calls it (row 7 of the candidate)."
+    },
+    "editcheck/3/unresolved_import.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "`from m import n` after this CS removed `n` (3)",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "The CS removes n from m.py while app.py (outside the CS) still has `from m import n` at row 1."
+    },
+    "editcheck/3/unresolved_import@tip.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "Unit table on the rc_touch, X7, x2/x3 and S7 fixtures with `TIP = A` and with `TIP ≠ A` (engine-merged `M`)",
+      "feeds": [
+        "T-REG-28",
+        "TC-REG-10",
+        "05-U10"
+      ],
+      "how": "TIP != A (merge awareness): the CS adds `from m import n` to app.py (R alone passes) while TIP removed n from m.py; the merged tree lacks n: row 1 of M[app.py]."
+    },
+    "editcheck/4/emptied.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "a 60 % shrink and an emptied file (4)",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "fmt.py (no caller anywhere) is emptied."
+    },
+    "editcheck/4/label_count.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "a duplicated `def` via the merge (4)",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "TIP added `def dup()` after foo, the CS adds its own `def dup()` at the end: a duplicated def via the merge (count 2 > max(TIP 1, R 1))."
+    },
+    "editcheck/4/shrink.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "a 60 % shrink and an emptied file (4)",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "fmt.py (no caller anywhere) keeps 4 of its 12 functions: about a 60 % shrink against TIP."
+    },
+    "editcheck/burst.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-29",
+      "spec": "a burst of 20 edits in 2 s runs at most one check at a time with one queued and ends with the newest passing content as the ready pair",
+      "feeds": [
+        "T-REG-29",
+        "05-U10"
+      ],
+      "how": "20 successive contents of orders.py, each changing compute_total's row 4, at 0, 95, 190, ... 1,805 ms (all within 2 s)."
+    },
+    "editcheck/forms/cp949_crlf.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-10",
+      "spec": "**form invariance**: the same logical content in BOM+CRLF, LF, cp949 and UTF-16LE forms gives the same verdict",
+      "feeds": [
+        "TC-REG-10",
+        "05-U10"
+      ],
+      "how": "A 25-row cp949 C# file with CRLF (not UTF-8: grammarless, checks 1-3 pass trivially), one comment row edited: the size part of check 4 passes.",
+      "form": true,
+      "bytes": [
+        {
+          "at": "A.legacy.cs",
+          "hex": "b0a1",
+          "note": "cp949 가 (row 1)"
+        },
+        {
+          "at": "R.legacy.cs",
+          "hex": "b0a1",
+          "note": "cp949 가 (rows 1 and 6)"
+        }
+      ]
+    },
+    "editcheck/forms/cp949_lf.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-10",
+      "spec": "**form invariance**: the same logical content in BOM+CRLF, LF, cp949 and UTF-16LE forms gives the same verdict",
+      "feeds": [
+        "TC-REG-10",
+        "05-U10"
+      ],
+      "how": "A 25-row cp949 C# file (not UTF-8: grammarless, checks 1-3 pass trivially), one comment row edited: the size part of check 4 passes.",
+      "form": true,
+      "bytes": [
+        {
+          "at": "A.legacy.cs",
+          "hex": "b0a1",
+          "note": "cp949 가 (row 1)"
+        },
+        {
+          "at": "R.legacy.cs",
+          "hex": "b0a1",
+          "note": "cp949 가 (rows 1 and 6)"
+        }
+      ]
+    },
+    "editcheck/forms/py_lf.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-10",
+      "spec": "**form invariance**: the same logical content in BOM+CRLF, LF, cp949 and UTF-16LE forms gives the same verdict",
+      "feeds": [
+        "TC-REG-10",
+        "05-U10"
+      ],
+      "how": "A body-only edit in LF; its BOM+CRLF partner is formVariant of each side (same verdict)."
+    },
+    "editcheck/forms/utf16le.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-10",
+      "spec": "**form invariance**: the same logical content in BOM+CRLF, LF, cp949 and UTF-16LE forms gives the same verdict",
+      "feeds": [
+        "TC-REG-10",
+        "05-U10"
+      ],
+      "how": "A UTF-16LE C# file (NUL bytes: binary, path class 2), one row edited: checks 1-3 pass trivially, the size part of check 4 passes.",
+      "form": true,
+      "bytes": [
+        {
+          "at": "A.report.cs",
+          "hex": "2f002f00",
+          "note": "`//` in UTF-16LE"
+        },
+        {
+          "at": "R.report.cs",
+          "hex": "2f002f00",
+          "note": "`//` in UTF-16LE"
+        }
+      ]
+    },
+    "editcheck/forms/utf16le_bom.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-10",
+      "spec": "**form invariance**: the same logical content in BOM+CRLF, LF, cp949 and UTF-16LE forms gives the same verdict",
+      "feeds": [
+        "TC-REG-10",
+        "05-U10"
+      ],
+      "how": "A UTF-16LE C# file with the FF FE BOM (NUL bytes: binary, path class 2), one row edited: checks 1-3 pass trivially, the size part of check 4 passes.",
+      "form": true,
+      "bytes": [
+        {
+          "at": "A.report.cs",
+          "hex": "fffe2f002f00",
+          "note": "the BOM, then `//` in UTF-16LE"
+        },
+        {
+          "at": "R.report.cs",
+          "hex": "fffe2f002f00",
+          "note": "the BOM, then `//` in UTF-16LE"
+        }
+      ]
+    },
+    "editcheck/none/merge_conflict.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "`cs.merged = conflicted | absent`, `NO_TABLE{budget}` and a missing object fail",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "The CS and TIP change foo's row 3 differently: merge-tree conflicts, the entry carries reason merge_conflict and no check."
+    },
+    "editcheck/pass/appended_default_param.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "an appended parameter with a default",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "foo gains an appended parameter with a default; the 2-argument caller stays compatible."
+    },
+    "editcheck/pass/body_only.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "**pass** for a body-only edit",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "A body-only edit of foo."
+    },
+    "editcheck/pass/callers_updated.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "a signature change whose callers the same CS updated",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "foo(a, b) becomes foo(a) and the caller in orders.py is updated in the same CS."
+    },
+    "editcheck/pass/grammarless_250.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "an edit to a grammarless 250-line file and to a `.ipynb`",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "An edit to a 250-row Markdown file (no grammar: checks 1-3 pass trivially, the size part of check 4 passes)."
+    },
+    "editcheck/pass/new_function.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "a signature change whose callers the same CS updated, a new function",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "A new function bar."
+    },
+    "editcheck/pass/note_json_key_rename.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "notes only (possible callers, a stoplist name, a JSON key rename) pass",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "The JSON key `currency` is renamed `currency_code` while settings.py still reads the old key: JSON key paths are notes, never failures."
+    },
+    "editcheck/pass/note_possible_caller.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "notes only (possible callers, a stoplist name, a JSON key rename) pass",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "foo(a, b) becomes foo(a); the only call `obj.foo(1, 2)` is on an unknown receiver (possible only): a note, no failure."
+    },
+    "editcheck/pass/note_stoplist_get.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "notes only (possible callers, a stoplist name, a JSON key rename) pass",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "get(a, b) becomes get(a) with an un-updated 2-argument caller, but `get` is a stoplist name: a note, no failure."
+    },
+    "editcheck/pass/notebook.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "an edit to a grammarless 250-line file and to a `.ipynb`",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "An edit to a .ipynb (path class 3: whole-file, checks 1-3 pass trivially)."
+    },
+    "editcheck/pass/preexisting_error_in_tip.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-28",
+      "spec": "a pre-existing ERROR node in TIP that the CS does not add to",
+      "feeds": [
+        "T-REG-28",
+        "05-U10"
+      ],
+      "how": "TIP (not A) carries an ERROR node in lib.py (legacy, `return x +`); the CS edits foo's body; the merged lib.py has the same error count as TIP."
+    },
+    "editcheck/pass/shrink_49.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "a 49 % shrink → pass",
+      "feeds": [
+        "T-REG-28",
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "docs/notes.md keeps 51 of its 100 equal-length rows (61 bytes each): exactly a 49 % shrink against TIP, in bytes and in rows (under 50 %), so check 4 passes."
+    },
+    "editcheck/tc09/cs/1_fail.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "A half-typed `if (amount > ` inside Price(decimal, int) adds an ERROR node."
+    },
+    "editcheck/tc09/cs/1_pass.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "TIP = A already carries an ERROR node (Legacy, `return 1 + ;`); the CS edits Price(decimal)'s body only."
+    },
+    "editcheck/tc09/cs/2_fail.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "overload_gone: Price(decimal, int) is removed and only Price(decimal) remains, so no overload accepts the 2-argument call `Pricing.Price(amounts[i], qtys[i])` in Checkout.cs row 10."
+    },
+    "editcheck/tc09/cs/2_pass.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "Price(decimal, int) gains a required `tax`; its caller in Checkout.cs is updated in the same CS."
+    },
+    "editcheck/tc09/cs/3_fail.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "Discount is removed while `Pricing.Discount(total)` in Checkout.cs row 12 still calls it."
+    },
+    "editcheck/tc09/cs/3_pass.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "Discount is removed together with its only call."
+    },
+    "editcheck/tc09/cs/4_fail.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "TIP added Round(decimal) after Price(decimal), the CS adds its own Round(decimal) after Discount: the clean merge holds Shop.Pricing.Round (decimal) twice."
+    },
+    "editcheck/tc09/cs/4_pass.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "A new method Tax: no count growth of an existing key, no shrink."
+    },
+    "editcheck/tc09/py/1_fail.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "A half-typed block `    if amount >` inside price adds an ERROR node absent from TIP."
+    },
+    "editcheck/tc09/py/1_pass.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "TIP = A already carries an ERROR node (legacy, `return amount +`); the CS edits price's body and adds no error."
+    },
+    "editcheck/tc09/py/2_fail.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "required_added: price gains a required `tax`; the definite caller `pricing.price(line.amount, line.qty)` in checkout.py (outside the CS) is not updated: entry at checkout.py row 7."
+    },
+    "editcheck/tc09/py/2_pass.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "price gains a required `tax` (required_added) and its only caller in checkout.py is updated in the same CS."
+    },
+    "editcheck/tc09/py/3_fail.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "discount is renamed apply_discount (a removal plus an addition); `pricing.discount(total)` in checkout.py row 8 still calls the removed name."
+    },
+    "editcheck/tc09/py/3_pass.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "discount is removed and its only call is removed in the same CS."
+    },
+    "editcheck/tc09/py/4_fail.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "TIP added `def rebate` between price and discount, the CS adds its own `def rebate` at the end: the clean merge holds two rebate definitions (count 2 > max(TIP 1, R 1))."
+    },
+    "editcheck/tc09/py/4_pass.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "A new function: label counts grow by a new key only, no shrink."
+    },
+    "editcheck/tc09/tsjs/1_fail.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "A half-typed `  if (amount >` inside price adds an ERROR node."
+    },
+    "editcheck/tc09/tsjs/1_pass.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "TIP = A already carries an ERROR node (legacy, `return a + ;`); the CS edits price's body only."
+    },
+    "editcheck/tc09/tsjs/2_fail.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "param_removed: price loses `qty`; the definite caller `price(line.amount, line.qty)` in checkout.ts row 6 passes 2 arguments to a 1-parameter function."
+    },
+    "editcheck/tc09/tsjs/2_pass.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "price gains a required `tax` and its caller in checkout.ts is updated in the same CS."
+    },
+    "editcheck/tc09/tsjs/3_fail.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "The discount export is removed while checkout.js (outside the CS) still imports it (row 1) and calls it (row 8): check 3, first entry the import."
+    },
+    "editcheck/tc09/tsjs/3_pass.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "The discount export is removed together with its import and call."
+    },
+    "editcheck/tc09/tsjs/4_fail.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "notes.js loses two thirds of its comment block: more than a 50 % shrink against TIP, no other check involved."
+    },
+    "editcheck/tc09/tsjs/4_pass.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-09",
+      "spec": "One pass and one fail fixture per check, in Python, TS/JS and C#",
+      "feeds": [
+        "TC-REG-09",
+        "05-U10"
+      ],
+      "how": "notes.js grows by a new function."
+    },
+    "errors/S7/cs_brace/broken.cs": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-07",
+      "spec": "S7 fixtures (unclosed triple quote, unclosed paren, JS and C# unclosed brace) as TIP and as local post-image",
+      "feeds": [
+        "T-REG-07",
+        "T-REG-28",
+        "TC-REG-08"
+      ],
+      "how": "clean.cs with one changed row 7: a missing `}` (`if (x < 0) { return 0;` in Calc(int)).",
+      "definitions": {
+        "brokenRow": 7
+      }
+    },
+    "errors/S7/cs_brace/clean.cs": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-07",
+      "spec": "S7 fixtures (unclosed triple quote, unclosed paren, JS and C# unclosed brace) as TIP and as local post-image",
+      "feeds": [
+        "T-REG-07",
+        "T-REG-28",
+        "TC-REG-08"
+      ],
+      "how": "The clean file of the S7 cs_brace pair."
+    },
+    "errors/S7/js_brace/broken.js": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-07",
+      "spec": "S7 fixtures (unclosed triple quote, unclosed paren, JS and C# unclosed brace) as TIP and as local post-image",
+      "feeds": [
+        "T-REG-07",
+        "T-REG-28",
+        "TC-REG-08"
+      ],
+      "how": "clean.js with one changed row 11: a missing `}` (`if (!item) { continue;` in render).",
+      "definitions": {
+        "brokenRow": 11
+      }
+    },
+    "errors/S7/js_brace/clean.js": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-07",
+      "spec": "S7 fixtures (unclosed triple quote, unclosed paren, JS and C# unclosed brace) as TIP and as local post-image",
+      "feeds": [
+        "T-REG-07",
+        "T-REG-28",
+        "TC-REG-08"
+      ],
+      "how": "The clean file of the S7 js_brace pair."
+    },
+    "errors/S7/py_paren/broken.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-07",
+      "spec": "S7 fixtures (unclosed triple quote, unclosed paren, JS and C# unclosed brace) as TIP and as local post-image",
+      "feeds": [
+        "T-REG-07",
+        "T-REG-28",
+        "TC-REG-08"
+      ],
+      "how": "clean.py with one changed row 26: an unclosed `(` (`compute(order_total(order), 1` in report).",
+      "definitions": {
+        "brokenRow": 26
+      }
+    },
+    "errors/S7/py_paren/clean.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-07",
+      "spec": "S7 fixtures (unclosed triple quote, unclosed paren, JS and C# unclosed brace) as TIP and as local post-image",
+      "feeds": [
+        "T-REG-07",
+        "T-REG-28",
+        "TC-REG-08"
+      ],
+      "how": "The clean file of the S7 py_paren pair."
+    },
+    "errors/S7/py_triple_quote/broken.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-07",
+      "spec": "S7 fixtures (unclosed triple quote, unclosed paren, JS and C# unclosed brace) as TIP and as local post-image",
+      "feeds": [
+        "T-REG-07",
+        "T-REG-28",
+        "TC-REG-08"
+      ],
+      "how": "clean.py with one changed row 15: an unclosed `\"\"\"` (the docstring of order_total).",
+      "definitions": {
+        "brokenRow": 15
+      }
+    },
+    "errors/S7/py_triple_quote/clean.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-07",
+      "spec": "S7 fixtures (unclosed triple quote, unclosed paren, JS and C# unclosed brace) as TIP and as local post-image",
+      "feeds": [
+        "T-REG-07",
+        "T-REG-28",
+        "TC-REG-08"
+      ],
+      "how": "The clean file of the S7 py_triple_quote pair."
+    },
+    "errors/rc_valid_errors.cs": {
+      "built": "checked-in",
+      "source": "04 §3.15",
+      "spec": "VERIFIED rc_valid_errors.mjs (valid C# with `#if/#else` around a method header yields `MISSING ';'`, `ERROR` and `MISSING #endif` in tree-sitter-c-sharp 0.23.5)",
+      "feeds": [
+        "T-REG-08"
+      ],
+      "how": "Valid C#: `#if DEBUG` / `#else` / `#endif` around the header of one method only (`public string Describe()` under `#if DEBUG`, `internal string Describe()` under `#else`, one body after `#endif`); tree-sitter-c-sharp 0.23.5 gives `MISSING ';'` on row 10, an `ERROR` on the `#endif` row 13 and a `MISSING #endif`; the two headers are two label keys with the branch ordinals #0 and #1.",
+      "definitions": {
+        "Describe#0": 10,
+        "Describe#1": 12
+      }
+    },
+    "errors/rc_valid_errors.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-08",
+      "spec": "rc_valid_errors C# `#if/#else` file and the Python getter/setter + platform-branch file: unrelated edits publish (no false hold)",
+      "feeds": [
+        "T-REG-08"
+      ],
+      "how": "Account.value getter (`@property`) and setter (`@value.setter`), and open_console defined in both branches of `if sys.platform == \"win32\":`.",
+      "definitions": {
+        "value#0": 10,
+        "value#1": 14,
+        "open_console#0": 19,
+        "open_console#1": 22
+      }
+    },
+    "forms/sample.bom.crlf.cs": {
+      "built": "checked-in",
+      "source": "11 TC-REG-03",
+      "spec": "Form invariance: BOM+CRLF vs LF forms give identical region tables and 0 mapper hunks",
+      "feeds": [
+        "T-REG-03",
+        "TC-REG-03",
+        "TC-REG-10"
+      ],
+      "how": "formVariant(sample.cs, {bom: true, crlf: true}): EF BB BF and CRLF row endings.",
+      "form": true
+    },
+    "forms/sample.bom.crlf.js": {
+      "built": "checked-in",
+      "source": "11 TC-REG-03",
+      "spec": "Form invariance: BOM+CRLF vs LF forms give identical region tables and 0 mapper hunks",
+      "feeds": [
+        "T-REG-03",
+        "TC-REG-03",
+        "TC-REG-10"
+      ],
+      "how": "formVariant(sample.js, {bom: true, crlf: true}): EF BB BF and CRLF row endings.",
+      "form": true
+    },
+    "forms/sample.bom.crlf.py": {
+      "built": "checked-in",
+      "source": "11 TC-REG-03",
+      "spec": "Form invariance: BOM+CRLF vs LF forms give identical region tables and 0 mapper hunks",
+      "feeds": [
+        "T-REG-03",
+        "TC-REG-03",
+        "TC-REG-10"
+      ],
+      "how": "formVariant(sample.py, {bom: true, crlf: true}): EF BB BF and CRLF row endings.",
+      "form": true
+    },
+    "forms/sample.bom.crlf.ts": {
+      "built": "checked-in",
+      "source": "11 TC-REG-03",
+      "spec": "Form invariance: BOM+CRLF vs LF forms give identical region tables and 0 mapper hunks",
+      "feeds": [
+        "T-REG-03",
+        "TC-REG-03",
+        "TC-REG-10"
+      ],
+      "how": "formVariant(sample.ts, {bom: true, crlf: true}): EF BB BF and CRLF row endings.",
+      "form": true
+    },
+    "forms/sample.bom.crlf.tsx": {
+      "built": "checked-in",
+      "source": "11 TC-REG-03",
+      "spec": "Form invariance: BOM+CRLF vs LF forms give identical region tables and 0 mapper hunks",
+      "feeds": [
+        "T-REG-03",
+        "TC-REG-03",
+        "TC-REG-10"
+      ],
+      "how": "formVariant(sample.tsx, {bom: true, crlf: true}): EF BB BF and CRLF row endings.",
+      "form": true
+    },
+    "forms/sample.cs": {
+      "built": "checked-in",
+      "source": "11 TC-REG-03",
+      "spec": "property test that tree-sitter rows equal 0x0A-split line numbers for BOM, CRLF, Hangul, astral emoji, U+2028",
+      "feeds": [
+        "T-REG-03",
+        "TC-REG-03",
+        "TC-REG-10"
+      ],
+      "how": "LF UTF-8 .cs with Hangul, U+1F600, curly quotes U+2018/2019/201C/201D and U+2028 inside a string literal (a verbatim string: C# treats U+2028 as a new-line character)."
+    },
+    "forms/sample.js": {
+      "built": "checked-in",
+      "source": "11 TC-REG-03",
+      "spec": "property test that tree-sitter rows equal 0x0A-split line numbers for BOM, CRLF, Hangul, astral emoji, U+2028",
+      "feeds": [
+        "T-REG-03",
+        "TC-REG-03",
+        "TC-REG-10"
+      ],
+      "how": "LF UTF-8 .js with Hangul, U+1F600, curly quotes U+2018/2019/201C/201D and U+2028 inside a string literal."
+    },
+    "forms/sample.py": {
+      "built": "checked-in",
+      "source": "11 TC-REG-03",
+      "spec": "property test that tree-sitter rows equal 0x0A-split line numbers for BOM, CRLF, Hangul, astral emoji, U+2028",
+      "feeds": [
+        "T-REG-03",
+        "TC-REG-03",
+        "TC-REG-10"
+      ],
+      "how": "LF UTF-8 .py with Hangul, U+1F600, curly quotes U+2018/2019/201C/201D and U+2028 inside a string literal."
+    },
+    "forms/sample.ts": {
+      "built": "checked-in",
+      "source": "11 TC-REG-03",
+      "spec": "property test that tree-sitter rows equal 0x0A-split line numbers for BOM, CRLF, Hangul, astral emoji, U+2028",
+      "feeds": [
+        "T-REG-03",
+        "TC-REG-03",
+        "TC-REG-10"
+      ],
+      "how": "LF UTF-8 .ts with Hangul, U+1F600, curly quotes U+2018/2019/201C/201D and U+2028 inside a string literal."
+    },
+    "forms/sample.tsx": {
+      "built": "checked-in",
+      "source": "11 TC-REG-03",
+      "spec": "property test that tree-sitter rows equal 0x0A-split line numbers for BOM, CRLF, Hangul, astral emoji, U+2028",
+      "feeds": [
+        "T-REG-03",
+        "TC-REG-03",
+        "TC-REG-10"
+      ],
+      "how": "LF UTF-8 .tsx with Hangul, U+1F600, curly quotes U+2018/2019/201C/201D and U+2028 inside a string literal."
+    },
+    "forms/sample.utf16le.txt": {
+      "built": "checked-in",
+      "source": "11 TC-REG-10",
+      "spec": "**form invariance**: the same logical content in BOM+CRLF, LF, cp949 and UTF-16LE forms gives the same verdict",
+      "feeds": [
+        "TC-REG-10",
+        "TC-REG-03"
+      ],
+      "how": "UTF-16LE with the FF FE BOM: NUL bytes in its first 8,000 bytes (binary, path class 2).",
+      "form": true
+    },
+    "fwd/directly_above.block.py": {
+      "built": "checked-in",
+      "source": "04 §3.4",
+      "spec": "VERIFIED fwd_results.json: exact mapping in 4/4 insertion variants including the same-tail case.",
+      "feeds": [
+        "T-REG-01",
+        "T-REG-20",
+        "TC-REG-01"
+      ],
+      "how": "The 22-row block of the fwd directly_above variant: a complete function and two blank rows."
+    },
+    "fwd/directly_above.post.py": {
+      "built": "generated",
+      "source": "04 §3.4",
+      "spec": "VERIFIED fwd_results.json: exact mapping in 4/4 insertion variants including the same-tail case.",
+      "feeds": [
+        "T-REG-01",
+        "T-REG-20",
+        "TC-REG-01"
+      ],
+      "how": "big_lf.py with fwd/directly_above.block.py inserted after row 5330."
+    },
+    "fwd/directly_after.block.py": {
+      "built": "checked-in",
+      "source": "04 §3.4",
+      "spec": "VERIFIED fwd_results.json: exact mapping in 4/4 insertion variants including the same-tail case.",
+      "feeds": [
+        "T-REG-01",
+        "T-REG-20",
+        "TC-REG-01"
+      ],
+      "how": "The 22-row block of the fwd directly_after variant: a complete function and two blank rows."
+    },
+    "fwd/directly_after.post.py": {
+      "built": "generated",
+      "source": "04 §3.4",
+      "spec": "VERIFIED fwd_results.json: exact mapping in 4/4 insertion variants including the same-tail case.",
+      "feeds": [
+        "T-REG-01",
+        "T-REG-20",
+        "TC-REG-01"
+      ],
+      "how": "big_lf.py with fwd/directly_after.block.py inserted after row 5341."
+    },
+    "fwd/far_above.block.py": {
+      "built": "checked-in",
+      "source": "04 §3.4",
+      "spec": "VERIFIED fwd_results.json: exact mapping in 4/4 insertion variants including the same-tail case.",
+      "feeds": [
+        "T-REG-01",
+        "T-REG-20",
+        "TC-REG-01"
+      ],
+      "how": "The 22-row block of the fwd far_above variant: a complete function and two blank rows."
+    },
+    "fwd/far_above.post.py": {
+      "built": "generated",
+      "source": "04 §3.4",
+      "spec": "VERIFIED fwd_results.json: exact mapping in 4/4 insertion variants including the same-tail case.",
+      "feeds": [
+        "T-REG-01",
+        "T-REG-20",
+        "TC-REG-01"
+      ],
+      "how": "big_lf.py with fwd/far_above.block.py inserted after row 100."
+    },
+    "fwd/same_tail.block.py": {
+      "built": "checked-in",
+      "source": "04 §3.4",
+      "spec": "VERIFIED fwd_results.json: exact mapping in 4/4 insertion variants including the same-tail case.",
+      "feeds": [
+        "T-REG-01",
+        "T-REG-20",
+        "TC-REG-01"
+      ],
+      "how": "The 22-row block of the fwd same_tail variant: a complete function and two blank rows ending `    return round(total, 2)`, empty, empty (same tail as compute_total)."
+    },
+    "fwd/same_tail.post.py": {
+      "built": "generated",
+      "source": "04 §3.4",
+      "spec": "VERIFIED fwd_results.json: exact mapping in 4/4 insertion variants including the same-tail case.",
+      "feeds": [
+        "T-REG-01",
+        "T-REG-20",
+        "TC-REG-01"
+      ],
+      "how": "big_lf.py with fwd/same_tail.block.py inserted after row 5341."
+    },
+    "holds/exp_a.json": {
+      "built": "checked-in",
+      "source": "05 P5",
+      "spec": "P5: INV-HLD-CLAIMFREE. exp_a and exp_bc with claims on, off and racing randomly give identical S_pub and record sequences (HLD-06).",
+      "feeds": [
+        "05-P5",
+        "05-P4"
+      ],
+      "how": "exp_a: B fixes foo row 5 and publishes; A's seat claims foo and its Claude edits row 7; A's stale editor buffer (opened before B's fix, holding the Claude line) is saved: it reverts B's fix inside the claimed function. The claim must not launder the revert: the revert is held, the Claude line publishes, with claims on, off and racing alike."
+    },
+    "holds/exp_bc_b1.json": {
+      "built": "checked-in",
+      "source": "05 P5",
+      "spec": "P5: INV-HLD-CLAIMFREE. exp_a and exp_bc with claims on, off and racing randomly give identical S_pub and record sequences (HLD-06).",
+      "feeds": [
+        "05-P5",
+        "05-P4"
+      ],
+      "how": "exp_bc b1 (a reverted line change): B fixes row 5; A's stale save restores `y = x + 1`; C then inserts 40 constant rows above foo, so the held revert moves from row 5 to row 45; C's rows and B's fix must both survive on the live ref."
+    },
+    "holds/exp_bc_b2.json": {
+      "built": "checked-in",
+      "source": "05 P5",
+      "spec": "P5: INV-HLD-CLAIMFREE. exp_a and exp_bc with claims on, off and racing randomly give identical S_pub and record sequences (HLD-06).",
+      "feeds": [
+        "05-P5",
+        "05-P4"
+      ],
+      "how": "exp_bc b2 (a reverted insertion): B inserts the guard row 6 `    y = max(y, 0)  # B guard`; A's stale save lacks it (the insertion is reverted); the guard must stay on the live ref."
+    },
+    "holds/exp_bc_c1.json": {
+      "built": "checked-in",
+      "source": "05 P5",
+      "spec": "P5: INV-HLD-CLAIMFREE. exp_a and exp_bc with claims on, off and racing randomly give identical S_pub and record sequences (HLD-06).",
+      "feeds": [
+        "05-P5",
+        "05-P4"
+      ],
+      "how": "exp_bc c1 (a revert mixed with a new own edit in one save): A's stale save both restores `y = x + 1` (row 5, B's fix reverted) and changes row 6 to `    w = z - 5` (A's own edit): the own edit publishes, the revert is held."
+    },
+    "hooks/curly_quotes/after.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "The file after the tool: old_string written with straight quotes for a line holding U+201C/U+201D and U+2019 (0 raw matches, 1 after quote folding); the host keeps the curly quotes"
+    },
+    "hooks/curly_quotes/before.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "The file before the tool: old_string written with straight quotes for a line holding U+201C/U+201D and U+2019 (0 raw matches, 1 after quote folding); the host keeps the curly quotes"
+    },
+    "hooks/curly_quotes/post.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "Edit post payload: old_string written with straight quotes for a line holding U+201C/U+201D and U+2019 (0 raw matches, 1 after quote folding); the host keeps the curly quotes"
+    },
+    "hooks/curly_quotes/pre.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "Edit pre payload: old_string written with straight quotes for a line holding U+201C/U+201D and U+2019 (0 raw matches, 1 after quote folding); the host keeps the curly quotes"
+    },
+    "hooks/lf_old_string_on_bomcrlf/after.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "The file after the tool: an LF two-row old_string on a BOM+CRLF file (the raw file holds it 0 times, the normalized view once); the host writes the edit in the file's own CRLF form",
+      "form": true
+    },
+    "hooks/lf_old_string_on_bomcrlf/before.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "The file before the tool: an LF two-row old_string on a BOM+CRLF file (the raw file holds it 0 times, the normalized view once); the host writes the edit in the file's own CRLF form",
+      "form": true
+    },
+    "hooks/lf_old_string_on_bomcrlf/post.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "Edit post payload: an LF two-row old_string on a BOM+CRLF file (the raw file holds it 0 times, the normalized view once); the host writes the edit in the file's own CRLF form"
+    },
+    "hooks/lf_old_string_on_bomcrlf/pre.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "Edit pre payload: an LF two-row old_string on a BOM+CRLF file (the raw file holds it 0 times, the normalized view once); the host writes the edit in the file's own CRLF form"
+    },
+    "hooks/multiedit_two_edits/after.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "The file after the tool: MultiEdit with two edits, one in compute_total and one in compute_tax, applied in order"
+    },
+    "hooks/multiedit_two_edits/before.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "The file before the tool: MultiEdit with two edits, one in compute_total and one in compute_tax, applied in order"
+    },
+    "hooks/multiedit_two_edits/post.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "MultiEdit post payload: MultiEdit with two edits, one in compute_total and one in compute_tax, applied in order"
+    },
+    "hooks/multiedit_two_edits/pre.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "MultiEdit pre payload: MultiEdit with two edits, one in compute_total and one in compute_tax, applied in order"
+    },
+    "hooks/notebook_edit/after.ipynb": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "The file after the tool: NotebookEdit replacing the source of cell c1-total (a whole-file path for the region module)"
+    },
+    "hooks/notebook_edit/before.ipynb": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "The file before the tool: NotebookEdit replacing the source of cell c1-total (a whole-file path for the region module)"
+    },
+    "hooks/notebook_edit/post.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "NotebookEdit post payload: NotebookEdit replacing the source of cell c1-total (a whole-file path for the region module)"
+    },
+    "hooks/notebook_edit/pre.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "NotebookEdit pre payload: NotebookEdit replacing the source of cell c1-total (a whole-file path for the region module)"
+    },
+    "hooks/old_string_two_units/after.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "The file after the tool: one old_string spanning the last row of compute_total, the blank pair and the def row of compute_tax"
+    },
+    "hooks/old_string_two_units/before.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "The file before the tool: one old_string spanning the last row of compute_total, the blank pair and the def row of compute_tax"
+    },
+    "hooks/old_string_two_units/post.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "Edit post payload: one old_string spanning the last row of compute_total, the blank pair and the def row of compute_tax"
+    },
+    "hooks/old_string_two_units/pre.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "Edit pre payload: one old_string spanning the last row of compute_total, the blank pair and the def row of compute_tax"
+    },
+    "hooks/replace_all_5_functions/after.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "The file after the tool: replace_all: true over five functions that share the row `    return round(total, 2)` (5 matches)"
+    },
+    "hooks/replace_all_5_functions/before.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "The file before the tool: replace_all: true over five functions that share the row `    return round(total, 2)` (5 matches)"
+    },
+    "hooks/replace_all_5_functions/post.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "Edit post payload: replace_all: true over five functions that share the row `    return round(total, 2)` (5 matches)"
+    },
+    "hooks/replace_all_5_functions/pre.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "Edit pre payload: replace_all: true over five functions that share the row `    return round(total, 2)` (5 matches)"
+    },
+    "hooks/write_whole_file/after.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "The file after the tool: Write replaces the whole file; the predicted hunks come from the diff of the normalized views"
+    },
+    "hooks/write_whole_file/before.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "The file before the tool: Write replaces the whole file; the predicted hunks come from the diff of the normalized views"
+    },
+    "hooks/write_whole_file/post.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "Write post payload: Write replaces the whole file; the predicted hunks come from the diff of the normalized views"
+    },
+    "hooks/write_whole_file/pre.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-11",
+      "spec": "Scripted real Claude Code session with a stdin-dumping hook: LF `old_string` on a BOM+CRLF file; curly quotes; `replace_all` across 5 functions; `old_string` spanning two units; MultiEdit; NotebookEdit.",
+      "feeds": [
+        "T-REG-11"
+      ],
+      "how": "Write pre payload: Write replaces the whole file; the predicted hunks come from the diff of the normalized views"
+    },
+    "interface/X7/base/lib.py": {
+      "built": "checked-in",
+      "source": "04 §3.10",
+      "spec": "VERIFIED X7 (x5x6x7.log): the re-merged tree published a 2-argument caller, a peer hit a TypeError, and an AST caller-arity scan of the merged tree found `orders.py:14`.",
+      "feeds": [
+        "T-REG-09",
+        "T-REG-28"
+      ],
+      "how": "X7 base lib.py: lib.py `def foo(a, b)`; orders.py calls foo(price, qty) at row 7."
+    },
+    "interface/X7/base/orders.py": {
+      "built": "checked-in",
+      "source": "04 §3.10",
+      "spec": "VERIFIED X7 (x5x6x7.log): the re-merged tree published a 2-argument caller, a peer hit a TypeError, and an AST caller-arity scan of the merged tree found `orders.py:14`.",
+      "feeds": [
+        "T-REG-09",
+        "T-REG-28"
+      ],
+      "how": "X7 base orders.py: lib.py `def foo(a, b)`; orders.py calls foo(price, qty) at row 7."
+    },
+    "interface/X7/ours/lib.py": {
+      "built": "checked-in",
+      "source": "04 §3.10",
+      "spec": "VERIFIED X7 (x5x6x7.log): the re-merged tree published a 2-argument caller, a peer hit a TypeError, and an AST caller-arity scan of the merged tree found `orders.py:14`.",
+      "feeds": [
+        "T-REG-09",
+        "T-REG-28"
+      ],
+      "how": "X7 ours lib.py: The CS that changes the signature: lib.py `def foo(a)` (param_removed) and its caller at orders.py row 7 updated."
+    },
+    "interface/X7/ours/orders.py": {
+      "built": "checked-in",
+      "source": "04 §3.10",
+      "spec": "VERIFIED X7 (x5x6x7.log): the re-merged tree published a 2-argument caller, a peer hit a TypeError, and an AST caller-arity scan of the merged tree found `orders.py:14`.",
+      "feeds": [
+        "T-REG-09",
+        "T-REG-28"
+      ],
+      "how": "X7 ours orders.py: The CS that changes the signature: lib.py `def foo(a)` (param_removed) and its caller at orders.py row 7 updated."
+    },
+    "interface/X7/theirs/lib.py": {
+      "built": "checked-in",
+      "source": "04 §3.10",
+      "spec": "VERIFIED X7 (x5x6x7.log): the re-merged tree published a 2-argument caller, a peer hit a TypeError, and an AST caller-arity scan of the merged tree found `orders.py:14`.",
+      "feeds": [
+        "T-REG-09",
+        "T-REG-28"
+      ],
+      "how": "X7 theirs lib.py: The other side adds orders.py row 14 `    total = foo(price, qty)` (a 2-argument call) and uses it at row 15; real merge-tree exits 0 and the merged orders.py row 14 is the old-arity call."
+    },
+    "interface/X7/theirs/orders.py": {
+      "built": "checked-in",
+      "source": "04 §3.10",
+      "spec": "VERIFIED X7 (x5x6x7.log): the re-merged tree published a 2-argument caller, a peer hit a TypeError, and an AST caller-arity scan of the merged tree found `orders.py:14`.",
+      "feeds": [
+        "T-REG-09",
+        "T-REG-28"
+      ],
+      "how": "X7 theirs orders.py: The other side adds orders.py row 14 `    total = foo(price, qty)` (a 2-argument call) and uses it at row 15; real merge-tree exits 0 and the merged orders.py row 14 is the old-arity call."
+    },
+    "interface/x2/E1/pricing.py": {
+      "built": "checked-in",
+      "source": "04 §3.10",
+      "spec": "VERIFIED x2/x3: the TypeError/ImportError cases passed `py_compile` (syntax-smoke-check-misses-python-atomicity-breaks).",
+      "feeds": [
+        "T-REG-09",
+        "T-REG-28"
+      ],
+      "how": "x2 E1: compute_price gains a required currency (required_added) and legacy_total is removed."
+    },
+    "interface/x2/E2/orders.py": {
+      "built": "checked-in",
+      "source": "04 §3.10",
+      "spec": "VERIFIED x2/x3: the TypeError/ImportError cases passed `py_compile` (syntax-smoke-check-misses-python-atomicity-breaks).",
+      "feeds": [
+        "T-REG-09",
+        "T-REG-28"
+      ],
+      "how": "x2 E2: orders.py updated to compute_price(amount, currency)."
+    },
+    "interface/x2/E3/reports.py": {
+      "built": "checked-in",
+      "source": "04 §3.10",
+      "spec": "VERIFIED x2/x3: the TypeError/ImportError cases passed `py_compile` (syntax-smoke-check-misses-python-atomicity-breaks).",
+      "feeds": [
+        "T-REG-09",
+        "T-REG-28"
+      ],
+      "how": "x2 E3: reports.py updated; until E3 lands reports.py calls the 1-argument form and the removed legacy_total (TypeError/NameError at run time, py_compile passes)."
+    },
+    "interface/x2/base/orders.py": {
+      "built": "checked-in",
+      "source": "04 §3.10",
+      "spec": "VERIFIED x2/x3: the TypeError/ImportError cases passed `py_compile` (syntax-smoke-check-misses-python-atomicity-breaks).",
+      "feeds": [
+        "T-REG-09",
+        "T-REG-28"
+      ],
+      "how": "x2 base: a caller of compute_price(amount)."
+    },
+    "interface/x2/base/pricing.py": {
+      "built": "checked-in",
+      "source": "04 §3.10",
+      "spec": "VERIFIED x2/x3: the TypeError/ImportError cases passed `py_compile` (syntax-smoke-check-misses-python-atomicity-breaks).",
+      "feeds": [
+        "T-REG-09",
+        "T-REG-28"
+      ],
+      "how": "x2 base: compute_price(amount) and legacy_total."
+    },
+    "interface/x2/base/reports.py": {
+      "built": "checked-in",
+      "source": "04 §3.10",
+      "spec": "VERIFIED x2/x3: the TypeError/ImportError cases passed `py_compile` (syntax-smoke-check-misses-python-atomicity-breaks).",
+      "feeds": [
+        "T-REG-09",
+        "T-REG-28"
+      ],
+      "how": "x2 base: calls compute_price(amount) and legacy_total."
+    },
+    "interface/x3/base/app.py": {
+      "built": "checked-in",
+      "source": "04 §3.10",
+      "spec": "VERIFIED x2/x3: the TypeError/ImportError cases passed `py_compile` (syntax-smoke-check-misses-python-atomicity-breaks).",
+      "feeds": [
+        "T-REG-09",
+        "T-REG-28"
+      ],
+      "how": "x3: app.py has `from m import n` (row 1)."
+    },
+    "interface/x3/base/m.py": {
+      "built": "checked-in",
+      "source": "04 §3.10",
+      "spec": "VERIFIED x2/x3: the TypeError/ImportError cases passed `py_compile` (syntax-smoke-check-misses-python-atomicity-breaks).",
+      "feeds": [
+        "T-REG-09",
+        "T-REG-28"
+      ],
+      "how": "x3 base: m.py defines n and other."
+    },
+    "interface/x3/ours/m.py": {
+      "built": "checked-in",
+      "source": "04 §3.10",
+      "spec": "VERIFIED x2/x3: the TypeError/ImportError cases passed `py_compile` (syntax-smoke-check-misses-python-atomicity-breaks).",
+      "feeds": [
+        "T-REG-09",
+        "T-REG-28"
+      ],
+      "how": "x3 ours: n removed from m.py while app.py still imports it (ImportError at run time, py_compile passes)."
+    },
+    "manifest.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-01",
+      "spec": "every corrupting case (S2, S3×3, S4, S5×2, S6×2, S8, S9) ends in a held CS or a conflict hold with zero pushes of the affected merge output",
+      "feeds": [
+        "T-REG-01",
+        "TC-REG-01"
+      ],
+      "how": "The same table, machine-readable (FIXTURE_MANIFEST), with corrupting/caughtBy/duplicatedKey per corrupting scenario (R4-80), form and bytes declarations, and definition rows."
+    },
+    "premerge/base.py": {
+      "built": "checked-in",
+      "source": "04 §3.7",
+      "spec": "VERIFIED premerge_results.json: `merge-tree` moved `return round(total, 2)` into `compute_tax` with exit 0",
+      "feeds": [
+        "T-REG-01",
+        "T-REG-06",
+        "TC-REG-01"
+      ],
+      "how": "compute_total (rows 1-9, last row `    return round(total, 2)`), two empty rows, compute_tax (rows 12-14, the same last row), two empty rows, compute_fee. Git 2.55 merge-tree merges ours and theirs cleanly, both appends where their authors put them (pinned by the integration test); the misplacement is reproduced by premerge/same_head."
+    },
+    "premerge/ours.py": {
+      "built": "checked-in",
+      "source": "04 §3.7",
+      "spec": "VERIFIED premerge_results.json: `merge-tree` moved `return round(total, 2)` into `compute_tax` with exit 0",
+      "feeds": [
+        "T-REG-01",
+        "T-REG-06",
+        "TC-REG-01"
+      ],
+      "how": "The requester appends `    audit(\"order\", total)` after compute_total's last row (row 10)."
+    },
+    "premerge/same_head/base.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-06",
+      "spec": "premerge fixture, claimed: gate holds the requester's CS; unclaimed: identity sub-check routes the path to the conflict function; `compute_tax` is byte-identical to its owner's version in every pushed blob.",
+      "feeds": [
+        "T-REG-01",
+        "T-REG-06",
+        "TC-REG-01"
+      ],
+      "how": "compute_total, two empty rows, compute_tax under two decorator rows (`@functools.lru_cache(maxsize=None)`, `@traced`), two empty rows, compute_fee; both functions end with `    return round(total, 2)`."
+    },
+    "premerge/same_head/ours.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-06",
+      "spec": "premerge fixture, claimed: gate holds the requester's CS; unclaimed: identity sub-check routes the path to the conflict function; `compute_tax` is byte-identical to its owner's version in every pushed blob.",
+      "feeds": [
+        "T-REG-01",
+        "T-REG-06",
+        "TC-REG-01"
+      ],
+      "how": "The requester adds compute_vat directly above compute_tax under the same two decorator rows: a same-head insertion (its first two rows equal the two rows below the insertion point), which a merge slides two rows down."
+    },
+    "premerge/same_head/theirs.py": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-06",
+      "spec": "premerge fixture, claimed: gate holds the requester's CS; unclaimed: identity sub-check routes the path to the conflict function; `compute_tax` is byte-identical to its owner's version in every pushed blob.",
+      "feeds": [
+        "T-REG-01",
+        "T-REG-06",
+        "TC-REG-01"
+      ],
+      "how": "compute_tax's owner edits its first decorator row to `@functools.lru_cache(maxsize=128)` (the rc_touch decorator-only edit). Git 2.55 merge-tree exits 0 and puts that row on compute_vat while compute_tax keeps `maxsize=None` (the misplacement of 04 Review Focus 1, pinned by the integration test)."
+    },
+    "premerge/theirs.py": {
+      "built": "checked-in",
+      "source": "04 §3.7",
+      "spec": "VERIFIED premerge_results.json: `merge-tree` moved `return round(total, 2)` into `compute_tax` with exit 0",
+      "feeds": [
+        "T-REG-01",
+        "T-REG-06",
+        "TC-REG-01"
+      ],
+      "how": "compute_tax's owner appends `    audit(\"tax\", total)` after compute_tax's last row (row 15)."
+    },
+    "rc_touch/account.js": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-02",
+      "spec": "touch for body edit, append after last body line (step 4), decorator under attached comment, attached comment added above, half-typed boundary insertion (ERROR), decorator-only edit, append to setter body (py and JS), C# new same-name overload (group-name)",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-20",
+        "TC-REG-02"
+      ],
+      "how": "JS class Account with the held setter `set balance(value)` at rows 6-9 (claim Account.balance#set); base of the two JS rc_touch rows."
+    },
+    "rc_touch/js_append_setter_body.post.js": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-02",
+      "spec": "touch for body edit, append after last body line (step 4), decorator under attached comment, attached comment added above, half-typed boundary insertion (ERROR), decorator-only edit, append to setter body (py and JS), C# new same-name overload (group-name)",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-20",
+        "TC-REG-02"
+      ],
+      "how": "account.js with `    this._audit.push(value);` inserted after row 8 (inside the 6-9 setter): touch insert-inside."
+    },
+    "rc_touch/js_getter_above_setter.post.js": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-02",
+      "spec": "no touch for new def after, same-tail def after, `@overload` stubs above, sibling edit, new method after setter, JS getter above held setter",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-20",
+        "TC-REG-02"
+      ],
+      "how": "account.js with a 3-row `get balance()` inserted after row 5 (directly above the held setter): no touch."
+    },
+    "rc_touch/py_append_after_last_line.post.py": {
+      "built": "generated",
+      "source": "04 §3.6",
+      "spec": "appending a statement after the last line of `compute_total` touches only via step 4 (post extent 5331–5340)",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-20",
+        "TC-REG-02"
+      ],
+      "how": "big_lf.py with `    audit(total)` inserted after row 5339 (post rows 5331-5340 are compute_total); RC_TOUCH_R2 expects touch boundary-in-extent."
+    },
+    "rc_touch/py_append_setter_body.post.py": {
+      "built": "generated",
+      "source": "04 §7 T-REG-02",
+      "spec": "touch for body edit, append after last body line (step 4), decorator under attached comment, attached comment added above, half-typed boundary insertion (ERROR), decorator-only edit, append to setter body (py and JS), C# new same-name overload (group-name)",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-20",
+        "TC-REG-02"
+      ],
+      "how": "big_lf.py with `        self._audit.append(value)` inserted after row 5314; RC_TOUCH_R2 expects touch boundary-in-extent (Account.balance#setter)."
+    },
+    "rc_touch/py_attached_comment_above.post.py": {
+      "built": "generated",
+      "source": "04 §7 T-REG-02",
+      "spec": "touch for body edit, append after last body line (step 4), decorator under attached comment, attached comment added above, half-typed boundary insertion (ERROR), decorator-only edit, append to setter body (py and JS), C# new same-name overload (group-name)",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-20",
+        "TC-REG-02"
+      ],
+      "how": "big_lf.py with `# Totals are in the order currency.` inserted after row 5330; RC_TOUCH_R2 expects touch boundary-in-extent."
+    },
+    "rc_touch/py_body_edit.post.py": {
+      "built": "generated",
+      "source": "04 §7 T-REG-02",
+      "spec": "touch for body edit, append after last body line (step 4), decorator under attached comment, attached comment added above, half-typed boundary insertion (ERROR), decorator-only edit, append to setter body (py and JS), C# new same-name overload (group-name)",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-20",
+        "TC-REG-02"
+      ],
+      "how": "big_lf.py with row 5335 changed to `        price = item.price * item.quantity * item.weight`; RC_TOUCH_R2 expects touch base-overlap."
+    },
+    "rc_touch/py_boundary_insert_half_typed.post.py": {
+      "built": "generated",
+      "source": "04 §7 T-REG-02",
+      "spec": "touch for body edit, append after last body line (step 4), decorator under attached comment, attached comment added above, half-typed boundary insertion (ERROR), decorator-only edit, append to setter body (py and JS), C# new same-name overload (group-name)",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-20",
+        "TC-REG-02"
+      ],
+      "how": "big_lf.py with `def half(` inserted at column 0 after row 5339 (outside the post extent, inside an ERROR span); RC_TOUCH_R2 expects touch boundary-in-error."
+    },
+    "rc_touch/py_decorator_only_edit.post.py": {
+      "built": "generated",
+      "source": "04 §7 T-REG-02",
+      "spec": "touch for body edit, append after last body line (step 4), decorator under attached comment, attached comment added above, half-typed boundary insertion (ERROR), decorator-only edit, append to setter body (py and JS), C# new same-name overload (group-name)",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-20",
+        "TC-REG-02"
+      ],
+      "how": "big_lf.py with row 5317 changed to `@functools.lru_cache(maxsize=128)`; RC_TOUCH_R2 expects touch base-overlap (parse)."
+    },
+    "rc_touch/py_decorator_under_attached_comment.post.py": {
+      "built": "generated",
+      "source": "04 §7 T-REG-02",
+      "spec": "touch for body edit, append after last body line (step 4), decorator under attached comment, attached comment added above, half-typed boundary insertion (ERROR), decorator-only edit, append to setter body (py and JS), C# new same-name overload (group-name)",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-20",
+        "TC-REG-02"
+      ],
+      "how": "big_lf.py with `@traced` inserted after row 5331; RC_TOUCH_R2 expects touch insert-inside."
+    },
+    "rc_touch/py_new_def_after.post.py": {
+      "built": "generated",
+      "source": "04 §7 T-REG-02",
+      "spec": "no touch for new def after, same-tail def after, `@overload` stubs above, sibling edit, new method after setter, JS getter above held setter",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-20",
+        "TC-REG-02"
+      ],
+      "how": "big_lf.py with a 4-row `def compute_shipping` (3 rows + empty) inserted after row 5341; RC_TOUCH_R2 expects no touch."
+    },
+    "rc_touch/py_new_method_after_setter.post.py": {
+      "built": "generated",
+      "source": "04 §7 T-REG-02",
+      "spec": "no touch for new def after, same-tail def after, `@overload` stubs above, sibling edit, new method after setter, JS getter above held setter",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-20",
+        "TC-REG-02"
+      ],
+      "how": "big_lf.py with `    def reset(self):`, `        self._balance = 0`, empty inserted after row 5315; RC_TOUCH_R2 expects no touch (Account.balance#setter)."
+    },
+    "rc_touch/py_overload_stubs_above.post.py": {
+      "built": "generated",
+      "source": "04 §7 T-REG-02",
+      "spec": "no touch for new def after, same-tail def after, `@overload` stubs above, sibling edit, new method after setter, JS getter above held setter",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-20",
+        "TC-REG-02"
+      ],
+      "how": "big_lf.py with `@overload`, `def compute_total(items: list) -> float: ...`, empty inserted after row 5330; RC_TOUCH_R2 expects no touch."
+    },
+    "rc_touch/py_same_tail_def_after.post.py": {
+      "built": "generated",
+      "source": "04 §3.4",
+      "spec": "git placed a 9-line same-tail insertion after line 5339 while the bundled Myers placed it after 5341; both exact, but different",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-06",
+        "T-REG-20",
+        "TC-REG-02"
+      ],
+      "how": "big_lf.py with the 9-row same-tail block `def compute_discount(items):`, five body rows, `    return round(total, 2)`, empty, empty inserted after row 5341; git 2.55 diff and FoldMapper/1 both place it after 5341 (04 section 3.4 says git placed it after 5339: spec-edit note; the git-vs-FoldMapper/1 divergence is same_tail/git_vs_foldmapper); RC_TOUCH_R2 expects no touch."
+    },
+    "rc_touch/py_sibling_edit.post.py": {
+      "built": "generated",
+      "source": "04 §7 T-REG-02",
+      "spec": "no touch for new def after, same-tail def after, `@overload` stubs above, sibling edit, new method after setter, JS getter above held setter",
+      "feeds": [
+        "T-REG-02",
+        "T-REG-20",
+        "TC-REG-02"
+      ],
+      "how": "big_lf.py with row 5320 inside parse changed to `    fields = dict()`; RC_TOUCH_R2 expects no touch."
+    },
+    "s9/step0.txt": {
+      "built": "generated",
+      "source": "04 §7 T-REG-21",
+      "spec": "S9 800-block generator: a holder claim with 3,000 lines of peer churn is re-anchored once D crosses 1,000",
+      "feeds": [
+        "T-REG-01",
+        "T-REG-20",
+        "T-REG-21",
+        "TC-REG-01",
+        "TC-REG-04"
+      ],
+      "how": "s9Generator('s9-0') step 0 holder: 800 blank-line blocks (path class 6 under a grammarless name), the claimed block between the rows S9-CLAIM-BEGIN and S9-CLAIM-END (block 400). Each later step: an optional holder edit inside the block (holder), then 1-3 peer operations inserting 1-16 unique churn rows (`    # s9 churn <step>.<op>.<i>`) or deleting up to 16 blank or churn rows above, inside or below it (peer; no blank row is ever inserted, so every minimal diff matches both marker rows); oracle = the block's rows in peer. Corrupting (04 section 7 lists S9): a peer change inside the claimed block is stopped by the B1 gate.",
+      "corrupting": true,
+      "caughtBy": "b1"
+    },
+    "same_tail/git_vs_foldmapper.json": {
+      "built": "checked-in",
+      "source": "04 §3.4",
+      "spec": "git placed a 9-line same-tail insertion after line 5339 while the bundled Myers placed it after 5341; both exact, but different",
+      "feeds": [
+        "T-REG-20"
+      ],
+      "how": "The pinned placements of same_tail/git_vs_foldmapper.post.py: git `@@ -5320 +5320 @@` and `@@ -5341,0 +5342,9 @@` (measured by the integration test); FoldMapper/1 row 5320 changed and 9 rows inserted after base row 5338, and the image [[5331, 5348]] of compute_total (derived from 04 section 3.4 steps 1-3 by the unit test; Task 3's golden recomputes them)."
+    },
+    "same_tail/git_vs_foldmapper.post.py": {
+      "built": "generated",
+      "source": "04 §3.4",
+      "spec": "git placed a 9-line same-tail insertion after line 5339 while the bundled Myers placed it after 5341; both exact, but different",
+      "feeds": [
+        "T-REG-20"
+      ],
+      "how": "big_lf.py with the rc_touch edits py_sibling_edit (row 5320 changed) and py_same_tail_def_after (the 9-row same-tail block after row 5341), in one post."
+    },
+    "special/attributes": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-13",
+      "spec": "`filter=secret` file, `working-tree-encoding` file, notebook, cp949 file, a 250-line and a 900-line Markdown file",
+      "feeds": [
+        "T-REG-13"
+      ],
+      "how": "The .gitattributes lines Task 4 reads for T-REG-13: `secret.env filter=secret` and `utf16.txt working-tree-encoding=UTF-16LE`."
+    },
+    "special/big.md": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-13",
+      "spec": "`filter=secret` file, `working-tree-encoding` file, notebook, cp949 file, a 250-line and a 900-line Markdown file",
+      "feeds": [
+        "T-REG-13",
+        "TC-REG-10"
+      ],
+      "how": "Markdown, exactly 900 rows in blank-line-separated blocks: path class 6 (block table)."
+    },
+    "special/legacy_cp949.crlf.cs": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-13",
+      "spec": "`filter=secret` file, `working-tree-encoding` file, notebook, cp949 file, a 250-line and a 900-line Markdown file",
+      "feeds": [
+        "T-REG-13",
+        "TC-REG-10"
+      ],
+      "how": "legacy_cp949.cs with CRLF row endings.",
+      "form": true
+    },
+    "special/legacy_cp949.cs": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-13",
+      "spec": "`filter=secret` file, `working-tree-encoding` file, notebook, cp949 file, a 250-line and a 900-line Markdown file",
+      "feeds": [
+        "T-REG-13",
+        "TC-REG-10",
+        "TC-REG-03"
+      ],
+      "how": "C# source in cp949 (Korean comments, `가` = B0 A1), 320 rows, LF: not UTF-8, so a raw 0x0A-split block table (path class 6).",
+      "form": true
+    },
+    "special/nb.ipynb": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-13",
+      "spec": "`filter=secret` file, `working-tree-encoding` file, notebook, cp949 file, a 250-line and a 900-line Markdown file",
+      "feeds": [
+        "T-REG-13",
+        "TC-REG-10"
+      ],
+      "how": "A two-cell notebook (path class 3, whole-file claims)."
+    },
+    "special/small.md": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-13",
+      "spec": "`filter=secret` file, `working-tree-encoding` file, notebook, cp949 file, a 250-line and a 900-line Markdown file",
+      "feeds": [
+        "T-REG-13",
+        "TC-REG-10"
+      ],
+      "how": "Markdown, exactly 250 rows in blank-line-separated blocks: path class 5 (`file` claims)."
+    },
+    "sweep/S1/scenario.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-04",
+      "spec": "S1 with injected board lag and with the board ahead of the code: in both orders the requester's edit inside the renamed body is blocked.",
+      "feeds": [
+        "T-REG-01",
+        "TC-REG-01",
+        "T-REG-04",
+        "TC-REG-06"
+      ],
+      "how": "The holder renames compute_total to compute_order_total and edits row 15 (theirs, the landed TIP); the requester edits row 12 inside the old body (ours). Run with board lag and with the board ahead of the code: the requester CS is held either way; the live tree stays theirs (oracle). Plain git merges it cleanly (the bypass of the removed name-keyed design).",
+      "corrupting": false
+    },
+    "sweep/S10a/scenario.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-01",
+      "spec": "Run S1–S10 and the fwd/premerge fixtures through the real gate, merge, placement check and tripwires.",
+      "feeds": [
+        "T-REG-01",
+        "TC-REG-01"
+      ],
+      "how": "The requester changes compute_total's last row (row 16, inside the claim) and adds compute_fee right after it: git joins them into one hunk; the removed design withdrew the claimed half (a conservative hold); here the whole CS is held at B1 and the live tree stays theirs (oracle).",
+      "corrupting": false
+    },
+    "sweep/S10b/scenario.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-01",
+      "spec": "Run S1–S10 and the fwd/premerge fixtures through the real gate, merge, placement check and tripwires.",
+      "feeds": [
+        "T-REG-01",
+        "TC-REG-01"
+      ],
+      "how": "The requester adds compute_fee directly above the held compute_total (blank-separated) and deletes the adjacent compute_tax below it; neither touches the claim; the holder edits row 11; the merge equals the oracle.",
+      "corrupting": false
+    },
+    "sweep/S2a/scenario.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-05",
+      "spec": "S2 within a file and across files: before the holder's push the tombstone blocks the requester's edit at the old location",
+      "feeds": [
+        "T-REG-01",
+        "TC-REG-01",
+        "T-REG-05",
+        "TC-REG-06"
+      ],
+      "how": "The holder moves compute_total below compute_tax (with an edit of its row 15) and its tombstone covers the old rows 8-16; the requester edits row 12 at the old location: held by the tombstone at B1 (plain git aligns the move as compute_tax moving up, so merge-file exits 0 here). corruptOut (the removed splice-and-key design) keeps the requester's stale copy at the old place: two compute_total definitions in one file, caught by tripwire form (b).",
+      "corrupting": true,
+      "caughtBy": "tripwire_b",
+      "duplicatedKey": "function\u0000compute_total\u0000"
+    },
+    "sweep/S2b/scenario.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-05",
+      "spec": "S2 within a file and across files: before the holder's push the tombstone blocks the requester's edit at the old location",
+      "feeds": [
+        "T-REG-01",
+        "TC-REG-01",
+        "T-REG-05",
+        "TC-REG-06"
+      ],
+      "how": "The holder moves compute_total from orders.py to the new totals.py (tombstone on orders.py rows 8-16); the requester edits row 12 at the old location: held at B1 by the tombstone (caughtBy b1, pinned). corruptOut resurrects the requester's copy in orders.py beside the moved one in totals.py: two compute_total definitions across the output tree (hazard path * = summed over every file), which no per-file tripwire sees.",
+      "corrupting": true,
+      "caughtBy": "b1"
+    },
+    "sweep/S3a/scenario.json": {
+      "built": "checked-in",
+      "source": "04 §3.12",
+      "spec": "The rule does not apply to Python or JavaScript (`@overload` stubs and a getter beside a held setter raise no conflict, VERIFIED rc_touch R2); a merged duplicate there is caught by the label-count tripwire.",
+      "feeds": [
+        "T-REG-01",
+        "TC-REG-01",
+        "T-REG-10"
+      ],
+      "how": "The requester adds two @overload stubs above the held compute_total (blank-separated: no touch, no group-name rule for Python); the holder edits row 15. The merge is clean and equals the oracle. corruptOut (the ordinal-keyed splice) adds a second copy of the implementation: compute_total label count 4 = max(TIP 1, local 3) + 1.",
+      "corrupting": true,
+      "caughtBy": "tripwire_b",
+      "duplicatedKey": "function\u0000compute_total\u0000"
+    },
+    "sweep/S3b/scenario.json": {
+      "built": "checked-in",
+      "source": "04 §3.12",
+      "spec": "The rule does not apply to Python or JavaScript (`@overload` stubs and a getter beside a held setter raise no conflict, VERIFIED rc_touch R2); a merged duplicate there is caught by the label-count tripwire.",
+      "feeds": [
+        "T-REG-01",
+        "TC-REG-01",
+        "T-REG-10"
+      ],
+      "how": "The requester adds `get balance()` directly above the held setter (no touch); the holder edits the setter body. Clean merge = oracle. corruptOut (the removed design) replaced the getter by a second copy of the setter: two setters, no getter.",
+      "corrupting": true,
+      "caughtBy": "tripwire_b",
+      "duplicatedKey": "method\u0000Account.balance\u0000set"
+    },
+    "sweep/S3c/scenario.json": {
+      "built": "checked-in",
+      "source": "04 §3.15",
+      "spec": "VERIFIED rc_dupes.mjs (`Account.value` ×2 getter/setter and `open_console` ×2 platform branches in a valid base)",
+      "feeds": [
+        "T-REG-01",
+        "TC-REG-01"
+      ],
+      "how": "default_shell is defined in both branches of `if sys.platform == \"win32\":`; the holder holds the else-branch definition (rows 8-9) and edits it; the requester edits the win32 branch (no touch). Clean merge = oracle. corruptOut keeps the stale else-branch definition beside the holder's: two definitions in the else branch (label key with branch ordinal #1 counted twice; pinned on the assumption that the ordinal is per branch).",
+      "corrupting": true,
+      "caughtBy": "tripwire_b",
+      "duplicatedKey": "function\u0000default_shell\u0000#1"
+    },
+    "sweep/S4/scenario.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-01",
+      "spec": "every corrupting case (S2, S3×3, S4, S5×2, S6×2, S8, S9) ends in a held CS or a conflict hold with zero pushes of the affected merge output",
+      "feeds": [
+        "T-REG-01",
+        "TC-REG-01"
+      ],
+      "how": "The holder holds the top-level route block rows 8-10 (a gap-block claim) and adds a route inside it; the requester deletes rows 8-11: a base-overlap touch, held at B1 (caughtBy b1, pinned). corruptOut is the requester's file: every claimed row of base is gone (the coalesced-run splice of the removed design).",
+      "corrupting": true,
+      "caughtBy": "b1"
+    },
+    "sweep/S5a/scenario.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-01",
+      "spec": "every corrupting case (S2, S3×3, S4, S5×2, S6×2, S8, S9) ends in a held CS or a conflict hold with zero pushes of the affected merge output",
+      "feeds": [
+        "T-REG-01",
+        "TC-REG-01"
+      ],
+      "how": "The holder changes the route decorator of the held get_order and adds @lru_cache; the requester edits the same decorator row (a decorator-only edit: base-overlap, held at B1; caughtBy b1, pinned). corruptOut (a bare-keyed and a decorated-keyed peer spliced into each other) carries the route decorator twice above one def; the label count does not change, so no tripwire sees it.",
+      "corrupting": true,
+      "caughtBy": "b1"
+    },
+    "sweep/S5b/scenario.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-01",
+      "spec": "every corrupting case (S2, S3×3, S4, S5×2, S6×2, S8, S9) ends in a held CS or a conflict hold with zero pushes of the affected merge output",
+      "feeds": [
+        "T-REG-01",
+        "TC-REG-01"
+      ],
+      "how": "The holder adds @lru_cache under the route decorator of the held get_order; the requester adds @login_required under the attached comment (insert-inside: held at B1; caughtBy b1, pinned). corruptOut stacks the route decorator twice above the one def.",
+      "corrupting": true,
+      "caughtBy": "b1"
+    },
+    "sweep/S6a/scenario.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-10",
+      "spec": "S6(b) inserting `Calc(decimal)` while `Calc(int)` is held: held; `Calc(long)` added in `Svc.Part2.cs`: held via the partial grep",
+      "feeds": [
+        "T-REG-01",
+        "TC-REG-01",
+        "T-REG-10"
+      ],
+      "how": "The holder edits the held Calc(int); the requester edits Reset (row 7) and adds `public string Calc(string x)` after Calc(double): a group-name hit, the whole CS held at B1 (caughtBy b1, pinned). corruptOut (the removed overload-group span splice) lost Reset's `Log(\"reset\");` row.",
+      "corrupting": true,
+      "caughtBy": "b1"
+    },
+    "sweep/S6b/scenario.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-10",
+      "spec": "S6(b) inserting `Calc(decimal)` while `Calc(int)` is held: held; `Calc(long)` added in `Svc.Part2.cs`: held via the partial grep",
+      "feeds": [
+        "T-REG-01",
+        "TC-REG-01",
+        "T-REG-10"
+      ],
+      "how": "The holder edits the held Calc(int); the requester inserts `public decimal Calc(decimal x)` as rows 30-33 (a group-name hit, held at B1). corruptOut (the pairwise splice) puts a second `public double Calc(double x)` where Calc(decimal) was: a duplicated label key, caught by tripwire form (b).",
+      "corrupting": true,
+      "caughtBy": "tripwire_b",
+      "duplicatedKey": "method\u0000N.Svc.Calc\u0000(double)"
+    },
+    "sweep/S6c/scenario.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-10",
+      "spec": "S6(b) inserting `Calc(decimal)` while `Calc(int)` is held: held; `Calc(long)` added in `Svc.Part2.cs`: held via the partial grep",
+      "feeds": [
+        "T-REG-01",
+        "TC-REG-01",
+        "T-REG-10"
+      ],
+      "how": "The holder edits the held Calc(int) in Svc.cs; the requester adds `public long Calc(long x)` to the other partial declaration in Svc.Part2.cs: held through the partial-type grep (group-name); the live tree stays theirs (oracle).",
+      "corrupting": false
+    },
+    "sweep/S7/scenario.json": {
+      "built": "checked-in",
+      "source": "11 TC-REG-08",
+      "spec": "ERROR trees (S7 fixtures): existing claims still block; no claim computed from an erroring tree.",
+      "feeds": [
+        "T-REG-01",
+        "TC-REG-01",
+        "T-REG-07",
+        "TC-REG-08"
+      ],
+      "how": "The base already carries the S7 py_paren break (row 26, unclosed `(` in report); the holder edits the held load_orders (row 6), the requester edits compute (row 11): the claim still maps by rows, the requester's edit publishes, and the merge equals the oracle (relative tripwires: no new ERROR against TIP).",
+      "corrupting": false
+    },
+    "sweep/S8/scenario.json": {
+      "built": "checked-in",
+      "source": "04 §7 T-REG-01",
+      "spec": "every corrupting case (S2, S3×3, S4, S5×2, S6×2, S8, S9) ends in a held CS or a conflict hold with zero pushes of the affected merge output",
+      "feeds": [
+        "T-REG-01",
+        "TC-REG-01"
+      ],
+      "how": "The requester's row 6 lost the last byte of U+AE08 (EA B8 88 cut to EA B8, the byte-offset drift of the removed design); the holder edits the held count. Plain merge-tree exits 0 with that undecodable output (= corruptOut) while theirs decodes: tripwire form (c) holds it (T0).",
+      "corrupting": true,
+      "caughtBy": "tripwire_c",
+      "form": true,
+      "bytes": [
+        {
+          "at": "files.notes.py.ours",
+          "hex": "eab80a",
+          "note": "row 6 ends EA B8: U+AE08 cut after 2 of its 3 bytes"
+        },
+        {
+          "at": "corruptOut.notes.py",
+          "hex": "eab80a",
+          "note": "the merge output keeps the cut U+AE08"
+        }
+      ]
+    }
+  }
+}

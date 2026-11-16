@@ -4,8 +4,11 @@
 // foldCommit is the 7-step algorithm for one board commit: pure (the previous state is never mutated), total
 // (any BoardDraft folds; malformed input is a no-op, never an exception) and deterministic. It reads only its
 // draft: no clock, no network, no local seat state. Plan 2 implements the effects of join, leave, seat_start,
-// seat_end, event, caps and save; claim, release, request, request_status, answer, note, presume_absent and
-// hold are generically checked and then fold as no-ops, so claims, requests, holds and notes stay empty (R-12).
+// seat_end, event, caps and save; claim, release, request, request_status, answer, note and presume_absent are
+// generically checked and then fold as no-ops, so claims, requests and notes stay empty (R-12). Plan 3 Task 3 adds
+// the `hold` row (PRO-21: owner, prev_rev, the local_only stub and the held/ subtree rules; the effect stores the
+// latest op with its owner and terminal_height; by controller ruling a terminal record stays terminal and keeps its
+// first terminal_height, see applyHold), its own-rejection reasons (PRO-24) and its compaction (PRO-27).
 //
 // Folder walks a real board's first-parent chain: incrementally from a persisted (board, state), or, for a
 // joiner or lost state, from the newest checkpoint at or below the tip, trusted (glossary §24 default 9).
@@ -16,10 +19,14 @@
 import { isOid, type Oid } from '../git/oid.js';
 import type { GitRepo } from '../git/repo.js';
 import { validId } from '../sec/validators.js';
+import type { ClaimLabel } from './ops.js';
 import { readBoardCommit, RemoteContentError, type BoardCommitData, type BoardDraft, type WriterId } from './boardCommit.js';
 import { canonicalBytes, type Json } from './canonicalJson.js';
 import { parseOpId, type EpochId, type OpId, type PeerId } from './ids.js';
-import { OPS_MAX_BYTES, OPS_MAX_LINES, parseOpLine, PLAN2_FOLDED_TYPES, REASON_CODE_RE, type EventKind, type JoinOp, type Op, type OpType, type TeamCaps } from './ops.js';
+import {
+  OPS_MAX_BYTES, OPS_MAX_LINES, parseHoldFields, parseOpLine, PLAN2_FOLDED_TYPES, REASON_CODE_RE,
+  type EventKind, type HoldOp, type HoldOpGuard, type JoinOp, type Op, type OpType, type TeamCaps,
+} from './ops.js';
 import { PROTO, type ProtocolJson } from './protocol.js';
 
 export interface PeerRec {
@@ -28,31 +35,64 @@ export interface PeerRec {
   config_fingerprint: Json; coauthor_optin: false | string; last_seq: number; last_height: number;
 }
 export interface FoldEvent { kind: EventKind; refs: string[]; reason_code: string; op_id: string; height: number; }
+/**
+ * FoldState.holds[hold_id] (02-protocol §3.3 "holds"; PRO-21, R3-24): the latest valid op's fields except id, type and
+ * prev_rev, plus owner (the writer of the creating op) and terminal_height (the height of the op that entered a terminal
+ * state; present exactly while the state is terminal). No blob oid and no text field (PRO-05).
+ */
+export interface FoldedHold {
+  rev: number; kind: HoldOp['kind']; residence: HoldOp['residence']; state: HoldOp['state']; offer: HoldOp['offer'];
+  guards: HoldOpGuard[]; paths: string[]; origin: string; cs_ids: string[]; peer_authors: string[]; local_only: boolean;
+  owner: PeerId; terminal_height?: number;
+}
+/** A go-first grant on a claim record (glossary §3.3) — Task 5 type-only; Task 8 adds the grant effects (R4-26). */
+export interface ClaimGrant { req_id: string; grantee: { peer: string; epoch: string; seat: string }; cs_id: string; since_height: number; }
+/** The claim record of the fold — Task 5 type-only; Task 8 fills FoldState.claims with it (R4-26, A-2). */
+export interface ClaimRec {
+  path: string; anchor: string; base_blob: string | null; ranges: Array<[number, number]>; tombstones: Array<{ anchor: string; ranges: Array<[number, number]> }>;
+  granularity: 'symbol' | 'block' | 'file'; label: ClaimLabel; regionSpec: string; cs_id: string;
+  holder: { peer: string; epoch: string; seat: string; agent: string }; op_id: string;
+  state: 'HELD' | 'STALE' | 'RELEASED'; release_reason?: string; terminal_height?: number;
+  reserved_for_req?: string; grant?: ClaimGrant;
+}
 export interface FoldState {
   v: 1; height: number; proto: number; teamRegionSpec: string;
   caps: TeamCaps | null;
   peers: Record<PeerId, PeerRec>;
   /** Keyed `<peer>/<epoch>/<seat_id>`. */
   seats: Record<string, { status: 'live' | 'ended'; permission_mode: string; ended_height?: number }>;
-  /** Empty in Plan 2 (R-12). */
-  claims: Record<string, Json>; requests: Record<string, Json>; holds: Record<string, Json>; notes: Record<string, Json>;
+  /** Empty until Plans 4 and 6 (R-12). */
+  claims: Record<string, Json>; requests: Record<string, Json>; notes: Record<string, Json>;
+  /** Keyed by hold_id (Plan 3 Task 3). */
+  holds: Record<string, FoldedHold>;
   /** Keyed by the cid the op carried (never re-derived). */
   events: Record<string, FoldEvent>;
   last_save: { save_commit: string; saved_live: string; chain_base: string; height: number } | null;
-  /** Claims, requests, holds, events, notes and ended seats (02-protocol §2 "record"). */
+  /** Claims, requests, holds, events, notes and ended seats (02-protocol §2 "record"; holds included, PRO-06). */
   record_count: number;
 }
 /**
- * An op of a commit written by this peer that folded as a no-op (02-protocol §2 "own-op rejection").
- * generic: step 3b (writer, seq or epoch: PRO-24 first bullet, renumber); type: the op failed its schema
- * (type 'unknown' for an unknown type) or its type-specific validity. A line without a parsable op id is not
- * reported, and lines past the first 1,000 / 64 KiB are not read at all.
+ * Why an own op folded as a no-op (PRO-24 fold reasons). generic: step 3b (writer, seq or epoch: PRO-24 first bullet,
+ * renumber), for every type, `hold` included; type: the op failed its schema (type 'unknown' for an unknown type) or its
+ * type-specific validity — for a `hold` op, a writer that is not the record's owner or an op that would take a terminal
+ * record back to a non-terminal state; prev_rev: a hold op whose prev_rev is not the folded rev (null on create);
+ * validator: an own `hold` line that fails parsing (a SEC-35 validator, a malformed field, over 16 KiB); held_subtree: a
+ * non-terminal, non-local_only hold op with paths whose carrying tree has no held/<hold_id>/; local_only_stub: a
+ * local_only hold op whose carrying tree has held/<hold_id>/.
  */
-export interface OwnRejection { opId: string; type: OpType | 'unknown'; reason: 'generic' | 'type'; }
+export type OwnRejectionReason = 'generic' | 'type' | 'prev_rev' | 'validator' | 'held_subtree' | 'local_only_stub';
+/**
+ * An op of a commit written by this peer that folded as a no-op (02-protocol §2 "own-op rejection"). holdId: the hold_id
+ * of a `hold` op (null for every other type, and for a hold line without a valid hold_id); foldedRev: that record's folded
+ * rev when the op was folded (null when the fold holds no record of that id, and for every other type). A line without a
+ * parsable op id is not reported, and lines past the first 1,000 / 64 KiB are not read at all.
+ */
+export interface OwnRejection { opId: string; type: OpType | 'unknown'; reason: OwnRejectionReason; holdId: string | null; foldedRev: number | null; }
 /**
  * Plan 8a (R-V03; 12 §2 "op verdict", §9.7 item 1): what the fold decided for one ops.jsonl line, for every writer.
- * effective: applied by a type with an effect in this build; unfolded: generic- and type-valid, folded as a deterministic
- * no-op (a type outside PLAN2_FOLDED_TYPES, R-12); rejected: the rest.
+ * effective: applied by a type with an effect in this build (PLAN2_FOLDED_TYPES, which holds `hold` since Plan 3 Task 3);
+ * unfolded: generic- and type-valid, folded as a deterministic no-op (a type outside PLAN2_FOLDED_TYPES, R-12); rejected:
+ * the rest.
  */
 export type OpVerdictKind = 'effective' | 'unfolded' | 'rejected';
 export interface OpVerdict {
@@ -63,17 +103,22 @@ export interface OpVerdict {
   type: OpType | 'unknown';
   verdict: OpVerdictKind;
   /**
-   * Only with 'rejected': malformed = parseOpLine or parseOpId null; generic = genericOk false, a line past the
-   * 1,000-line/64 KiB loop bounds or a commit without an attributable writer (such lines are never parsed: opId null,
-   * type 'unknown'); type = applyOp false.
+   * Only with 'rejected': malformed = parseOpLine or parseOpId null (a `hold` line that fails its validators included: the
+   * own-rejection reason 'validator'); generic = genericOk false, a line past the 1,000-line/64 KiB loop bounds or a commit
+   * without an attributable writer (such lines are never parsed: opId null, type 'unknown'); type = step 3c refused the op
+   * (applyOp false, or for a `hold` op any applyHold reason: type, prev_rev, held_subtree, local_only_stub).
    */
   reason?: 'malformed' | 'generic' | 'type';
 }
 /**
  * landedOwnOpIds: this peer's ops of the commit that folded without rejection (disjoint from ownRejections).
+ * compactedHolds: the hold ids PRO-27 compaction dropped at this height, sorted ([] unless h ≡ 0 mod 256); the writer of
+ * the commit removes their held/ subtrees in it (holdsCompactedAt predicts them).
  * opVerdicts (Plan 8a, R-V03): one entry per opsLines element, in line order; independent of `self`.
  */
-export interface FoldStepResult { state: FoldState; ownRejections: OwnRejection[]; landedOwnOpIds: string[]; protoMismatch: boolean; opVerdicts: OpVerdict[]; }
+export interface FoldStepResult {
+  state: FoldState; ownRejections: OwnRejection[]; landedOwnOpIds: string[]; protoMismatch: boolean; compactedHolds: string[]; opVerdicts: OpVerdict[];
+}
 
 export const CHECKPOINT_EVERY = 256;
 export const COMPACT_AGE = 512;
@@ -88,6 +133,8 @@ const OP_TYPES: ReadonlySet<string> = new Set<OpType>([
 const HOST_THROTTLED = 'HOST_THROTTLED';
 /** An H() value: 8 Crockford base32 characters. */
 const CID_RE = /^[0-9A-HJKMNP-TV-Z]{8}$/;
+/** The terminal hold states (glossary §9; record.ts's TERMINAL_STATES, which src/board cannot import). */
+const HOLD_TERMINAL: ReadonlySet<string> = new Set<HoldOp['state']>(['SUBSUMED', 'GONE', 'RESOLVED_PUBLISH', 'RESOLVED_DISCARD']);
 
 type Seat = FoldState['seats'][string];
 type Obj = Record<string, unknown>;
@@ -202,14 +249,62 @@ function applyOp(s: FoldState, w: WriterId, op: Op, seq: number, h: number): boo
       // PRO-23: released_claim_ids would release the writer's own seats' claims; Plan 2 has none (R-12).
       s.last_save = { save_commit: op.save_commit, saved_live: op.saved_live, chain_base: op.chain_base, height: h };
       return true;
+    case 'hold':
+      // Handled by applyHold (its rejection carries a reason of its own); never reached.
+      return false;
     default:
-      // claim, release, request, request_status, answer, note, presume_absent, hold: no-ops in Plan 2 (R-12).
+      // claim, release, request, request_status, answer, note, presume_absent: no-ops until Plans 4 and 6 (R-12).
       return true;
   }
 }
 
-/** An own malformed line is reported only when it carries a parsable op id (else there is no op to act on). */
-function malformedRejection(line: string): OwnRejection | null {
+const foldedHold = (s: FoldState, holdId: string): FoldedHold | undefined => (has(s.holds, holdId) ? s.holds[holdId] : undefined);
+
+/**
+ * The `hold` row of step 3c (PRO-21), checked in this order: the writer is the record's owner (the writer of its
+ * creating op) else 'type'; prev_rev equals the folded rev (null when the fold holds no record of that id) else
+ * 'prev_rev' (rev > prev_rev is the parser's); a terminal record stays terminal, else 'type'; local_only ⇒ no
+ * held/<hold_id>/ in the carrying tree, else 'local_only_stub'; non-terminal ∧ ¬local_only ∧ paths ≠ [] ⇒
+ * held/<hold_id>/ present, else 'held_subtree'. Effect: the record is the op's fields (without id, type, prev_rev) plus
+ * owner, and terminal_height = h when the op enters a terminal state.
+ *
+ * Controller ruling (Plan 3 Task 3 fix round 1; spec-edit list PRO-21): a terminal hold record never returns to a
+ * non-terminal state — the reviving op is the owner's own 'type' no-op — and a terminal → terminal op applies but keeps
+ * the first terminal_height. A record that must hold bytes again is a new record with a new hold_id. Glossary §9 /
+ * Table 1 and the registry have no transition out of a terminal state; the rule makes compaction at h a function of the
+ * state before the commit at h (holdsCompactedAt), so the writer of that commit removes exactly the held/ subtrees the
+ * fold drops. Returns null when the op applied.
+ */
+function applyHold(s: FoldState, w: WriterId, op: HoldOp, held: ReadonlySet<string>, h: number): OwnRejectionReason | null {
+  const cur = foldedHold(s, op.hold_id);
+  if (cur !== undefined && cur.owner !== w.peer) return 'type';
+  if ((cur?.rev ?? null) !== op.prev_rev) return 'prev_rev';
+  const terminal = HOLD_TERMINAL.has(op.state);
+  const wasTerminal = cur !== undefined && HOLD_TERMINAL.has(cur.state);
+  if (wasTerminal && !terminal) return 'type';
+  if (op.local_only && held.has(op.hold_id)) return 'local_only_stub';
+  if (!terminal && !op.local_only && op.paths.length > 0 && !held.has(op.hold_id)) return 'held_subtree';
+  const entry: FoldedHold = {
+    rev: op.rev, kind: op.kind, residence: op.residence, state: op.state, offer: op.offer,
+    guards: op.guards.map((g) => ({ name: g.name, class: g.class, owner: g.owner })), paths: [...op.paths], origin: op.origin,
+    cs_ids: [...op.cs_ids], peer_authors: [...op.peer_authors], local_only: op.local_only, owner: cur?.owner ?? w.peer,
+  };
+  if (terminal) entry.terminal_height = wasTerminal && cur.terminal_height !== undefined ? cur.terminal_height : h;
+  s.holds[op.hold_id] = entry;
+  return null;
+}
+
+/** An own rejection of `op` (holdId and foldedRev for a `hold` op, read from the state as the commit changed it so far). */
+function rejectionOf(s: FoldState, op: Op, reason: OwnRejectionReason): OwnRejection {
+  if (op.type !== 'hold') return { opId: op.id, type: op.type, reason, holdId: null, foldedRev: null };
+  return { opId: op.id, type: 'hold', reason, holdId: op.hold_id, foldedRev: foldedHold(s, op.hold_id)?.rev ?? null };
+}
+
+/**
+ * An own malformed line is reported only when it carries a parsable op id (else there is no op to act on): 'type', or for
+ * a `hold` line 'validator' with its hold_id when that is a ULID (else null) and the folded rev of that id (PRO-24).
+ */
+function malformedRejection(s: FoldState, line: string): OwnRejection | null {
   let v: unknown;
   try {
     v = JSON.parse(line);
@@ -220,7 +315,12 @@ function malformedRejection(line: string): OwnRejection | null {
   const id = (v as Obj)['id'];
   const type = (v as Obj)['type'];
   if (typeof id !== 'string' || parseOpId(id) === null) return null;
-  return { opId: id, type: typeof type === 'string' && OP_TYPES.has(type) ? (type as OpType) : 'unknown', reason: 'type' };
+  if (type === 'hold') {
+    const hid = (v as Obj)['hold_id'];
+    const holdId = typeof hid === 'string' && validId('ulid', hid) ? hid : null;
+    return { opId: id, type: 'hold', reason: 'validator', holdId, foldedRev: holdId === null ? null : (foldedHold(s, holdId)?.rev ?? null) };
+  }
+  return { opId: id, type: typeof type === 'string' && OP_TYPES.has(type) ? (type as OpType) : 'unknown', reason: 'type', holdId: null, foldedRev: null };
 }
 
 /** Step 6 (PRO-48): switch to X′ when every peer of R announced X′ in its latest join. */
@@ -231,12 +331,33 @@ function reevaluateTeamRegionSpec(s: FoldState): void {
   if (x !== s.teamRegionSpec && r.every((p) => s.peers[p]!.regionSpec === x)) s.teamRegionSpec = x;
 }
 
+/** The terminal holds of `s` with terminal_height <= h − 512, sorted; [] unless h ≡ 0 (mod 256). */
+function compactableHolds(s: FoldState, h: number): string[] {
+  if (h % CHECKPOINT_EVERY !== 0) return [];
+  const limit = h - COMPACT_AGE;
+  return Object.keys(s.holds).filter((id) => {
+    const x = s.holds[id]!;
+    return HOLD_TERMINAL.has(x.state) && x.terminal_height !== undefined && x.terminal_height <= limit;
+  }).sort();
+}
+
 /**
- * Step 7 (PRO-27): drop terminal records with terminal_height <= h − 512. In Plan 2 those are events
- * (terminal at creation) and ended seats; no claim or request exists to reference a seat (R-12).
- * Live seats are never dropped.
+ * PRO-27: the hold ids compaction drops at height h ([] unless h ≡ 0 mod 256), from the state before the commit at h
+ * (s at height h − 1). Equal to foldCommit's compactedHolds there, whatever that commit carries: an op of h cannot
+ * change which records are terminal with terminal_height ≤ h − 512 (a terminal record stays terminal and keeps its
+ * terminal_height; a record entering a terminal state at h gets terminal_height h). The writer of the commit at h
+ * removes their held/ subtrees (Task 4).
  */
-function compact(s: FoldState, h: number): void {
+export function holdsCompactedAt(s: FoldState, h: number): string[] {
+  return compactableHolds(s, h);
+}
+
+/**
+ * Step 7 (PRO-27): drop terminal records with terminal_height <= h − 512: events (terminal at creation), ended seats
+ * (no claim or request exists to reference a seat, R-12) and terminal holds. Live seats and non-terminal holds are
+ * never dropped. Returns the dropped hold ids, sorted.
+ */
+function compact(s: FoldState, h: number): string[] {
   const limit = h - COMPACT_AGE;
   for (const [cid, e] of Object.entries(s.events)) {
     if (e.height <= limit) delete s.events[cid];
@@ -244,6 +365,9 @@ function compact(s: FoldState, h: number): void {
   for (const [key, seat] of Object.entries(s.seats)) {
     if (seat.status === 'ended' && seat.ended_height !== undefined && seat.ended_height <= limit) delete s.seats[key];
   }
+  const dropped = compactableHolds(s, h);
+  for (const id of dropped) delete s.holds[id];
+  return dropped;
 }
 
 function countRecords(s: FoldState): number {
@@ -275,6 +399,8 @@ export function foldCommit(prev: FoldState, c: BoardDraft, self: PeerId): FoldSt
   const w = validWriter(c.writer);
   if (w !== null) {
     const own = w.peer === self;
+    // The held/<hold_id>/ subtrees of the carrying commit's tree (PRO-21).
+    const held: ReadonlySet<string> = new Set(Array.isArray(c.heldIds) ? c.heldIds : []);
     let prevSeq = 0;
     let bytes = 0;
     const n = Math.min(c.opsLines.length, OPS_MAX_LINES);
@@ -286,7 +412,7 @@ export function foldCommit(prev: FoldState, c: BoardDraft, self: PeerId): FoldSt
       const op = parseOpLine(line);
       if (op === null) {
         opVerdicts[i] = { line: i, opId: null, type: 'unknown', verdict: 'rejected', reason: 'malformed' };
-        const r = own ? malformedRejection(line) : null;
+        const r = own ? malformedRejection(s, line) : null;
         if (r !== null) ownRejections.push(r);
         continue;
       }
@@ -301,13 +427,18 @@ export function foldCommit(prev: FoldState, c: BoardDraft, self: PeerId): FoldSt
       if (id.peer === w.peer && id.epoch === w.epoch && id.seq > prevSeq) prevSeq = id.seq;
       if (!ok) {
         opVerdicts[i] = { line: i, opId: op.id, type: op.type, verdict: 'rejected', reason: 'generic' };
-        if (own) ownRejections.push({ opId: op.id, type: op.type, reason: 'generic' });
+        if (own) ownRejections.push(rejectionOf(s, op, 'generic'));
         continue;
       }
       // Step 3c.
-      if (!applyOp(s, w, op, id.seq, h)) {
-        opVerdicts[i] = { line: i, opId: op.id, type: op.type, verdict: 'rejected', reason: 'type' };
-        if (own) ownRejections.push({ opId: op.id, type: op.type, reason: 'type' });
+      const rejected = op.type === 'hold' ? applyHold(s, w, op, held, h) : applyOp(s, w, op, id.seq, h) ? null : 'type';
+      if (rejected !== null) {
+        // The verdict's reason is the class of the own-rejection reason: 'generic' (the step 3b class) stays 'generic';
+        // every step 3c reason ('type', and a hold's 'prev_rev', 'held_subtree' or 'local_only_stub') is 'type'.
+        // applyHold never returns 'generic' and 'validator' never reaches step 3c (such a line is 'malformed' at step 3a):
+        // the 'generic' arm keeps the mapping total over OwnRejectionReason.
+        opVerdicts[i] = { line: i, opId: op.id, type: op.type, verdict: 'rejected', reason: rejected === 'generic' ? 'generic' : 'type' };
+        if (own) ownRejections.push(rejectionOf(s, op, rejected));
         continue;
       }
       opVerdicts[i] = { line: i, opId: op.id, type: op.type, verdict: PLAN2_FOLDED_TYPES.has(op.type) ? 'effective' : 'unfolded' };
@@ -324,9 +455,9 @@ export function foldCommit(prev: FoldState, c: BoardDraft, self: PeerId): FoldSt
   // Step 6.
   reevaluateTeamRegionSpec(s);
   // Step 7.
-  if (h % CHECKPOINT_EVERY === 0) compact(s, h);
+  const compactedHolds = h % CHECKPOINT_EVERY === 0 ? compact(s, h) : [];
   s.record_count = countRecords(s);
-  return { state: s, ownRejections, landedOwnOpIds, protoMismatch: proto !== PROTO, opVerdicts };
+  return { state: s, ownRejections, landedOwnOpIds, protoMismatch: proto !== PROTO, compactedHolds, opVerdicts };
 }
 
 /** RFC 8785 canonical JSON of the state (integers only): the checkpoint/state.json and journal bytes. */
@@ -381,6 +512,29 @@ function toEvent(v: unknown): FoldEvent | null {
   return { kind: kind as EventKind, refs, reason_code: rc, op_id: opId, height };
 }
 
+const HOLD_KEYS = ['cs_ids', 'guards', 'kind', 'local_only', 'offer', 'origin', 'owner', 'paths', 'peer_authors', 'residence', 'rev', 'state'];
+const TERMINAL_HOLD_KEYS = [...HOLD_KEYS, 'terminal_height'].sort();
+
+/**
+ * A folded hold entry: exactly the FoldedHold keys, the op fields as parseOpLine checks them, owner a peer id, and
+ * terminal_height a height (an integer ≥ 0) present exactly when the state is terminal (the fold never writes another shape).
+ */
+function toHold(v: unknown): FoldedHold | null {
+  if (!isObj(v) || typeof v['state'] !== 'string') return null;
+  const terminal = HOLD_TERMINAL.has(v['state']);
+  if (!keysAre(v, terminal ? TERMINAL_HOLD_KEYS : HOLD_KEYS)) return null;
+  const f = parseHoldFields(v);
+  const owner = v['owner'];
+  if (f === null || typeof owner !== 'string' || !validId('hex128', owner)) return null;
+  const entry: FoldedHold = { ...f, owner };
+  if (terminal) {
+    const th = v['terminal_height'];
+    if (!isInt(th, 0)) return null;
+    entry.terminal_height = th;
+  }
+  return entry;
+}
+
 /** Each value through `conv`, every key through `keyOk` (checked before it is used as a property name). */
 function toRecord<T>(v: unknown, keyOk: (k: string) => boolean, conv: (x: unknown) => T | null): Record<string, T> | null {
   if (!isObj(v)) return null;
@@ -420,7 +574,7 @@ function toFoldState(v: unknown): FoldState | null {
   const opaque = (x: unknown): Record<string, Json> | null => (isObj(x) ? (x as Record<string, Json>) : null);
   const claims = opaque(v['claims']);
   const requests = opaque(v['requests']);
-  const holds = opaque(v['holds']);
+  const holds = toRecord(v['holds'], (k) => validId('ulid', k), toHold);
   const notes = opaque(v['notes']);
   if (peers === null || seats === null || events === null || claims === null || requests === null || holds === null || notes === null) return null;
   const s: FoldState = {
@@ -612,6 +766,14 @@ export class Folder {
   private mismatch: boolean;
   /** The last tip whose height this Folder counted (heightOf). */
   private known: { tip: Oid; height: number } | null = null;
+  /** Own `hold` rejections foldTo reported since the last takeHoldRejections, oldest first. */
+  private holdRejections: OwnRejection[] = [];
+  /**
+   * `<height> <op id>` of every own `hold` rejection ever queued, drained or not: a later foldTo that folds the same heights
+   * again (a `from` behind them, a joiner's fold from the checkpoint, a P2-REFOLD) never queues it twice. It is never pruned
+   * (a refold can restart from genesis); own hold rejections are rare and a Folder lives one daemon run.
+   */
+  private readonly holdRejectionKeys = new Set<string>();
 
   constructor(repo: GitRepo, self: PeerId, restored?: FoldVerification | null) {
     this.repo = repo;
@@ -624,6 +786,18 @@ export class Folder {
   verification(): FoldVerification {
     const v = this.verified;
     return { verified: v === null ? null : { board: v.board, height: v.height }, checkpointMismatch: this.mismatch };
+  }
+
+  /**
+   * Drains the own `hold` rejections foldTo reported since the last call, oldest first (each call's final reports, a
+   * P2-REFOLD's replacements included, never the reports they replaced). Each (height, op id) is queued once per Folder,
+   * however often its height is folded again. They also stay in that call's FoldOutcome.ownRejections; non-hold rejections
+   * are only there. Task 4's mirrorSync acts on them (R3-27). In memory: a restart drains nothing it folded before.
+   */
+  takeHoldRejections(): OwnRejection[] {
+    const out = this.holdRejections;
+    this.holdRejections = [];
+    return out;
   }
 
   async foldTo(tip: Oid, from: { board: Oid; state: FoldState } | null, ownRegionSpec: string): Promise<FoldOutcome> {
@@ -656,6 +830,13 @@ export class Folder {
       ownRejections.push(...r.ownRejections);
       landedOwnOpIds.push(...r.landedOwnOpIds);
       throttleEventsFolded += r.throttle;
+      // The final reports only (a P2-REFOLD has replaced the ones it recomputed), each (height, op id) once per Folder.
+      for (const x of r.ownRejections) {
+        const key = `${h} ${x.opId}`;
+        if (x.type !== 'hold' || this.holdRejectionKeys.has(key)) continue;
+        this.holdRejectionKeys.add(key);
+        this.holdRejections.push(x);
+      }
     }
     return {
       board: tip, state, newCommits, ownRejections, landedOwnOpIds,
@@ -792,13 +973,14 @@ export class Folder {
 
   /**
    * One board commit, from the call's cache or read (readBoardCommit's errors propagate typed). checkpoint/state.json is
-   * read only when the caller compares or parses it (a checkpoint height, the starting checkpoint); held/ never (Plan 2
-   * reads no held/ subtree). Every size and type check still runs on both.
+   * read only when the caller compares or parses it (a checkpoint height, the starting checkpoint); the held/ tree object's
+   * names always (Plan 3 Task 3: a non-terminal `hold` op needs its held/<hold_id>/ in the same commit, PRO-21, else
+   * 'held_subtree'; readCost counts every held id). Every size and type check still runs on both.
    */
   private async read(oid: Oid, withCheckpoint: boolean, cache: ReadCache): Promise<BoardCommitData> {
     const hit = cache.get(oid, withCheckpoint);
     if (hit !== undefined) return hit;
-    const c = await readBoardCommit(this.repo, oid, { checkpoint: withCheckpoint, held: false });
+    const c = await readBoardCommit(this.repo, oid, { checkpoint: withCheckpoint, held: true });
     cache.put(c);
     return c;
   }

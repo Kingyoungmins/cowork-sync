@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { BOARD_SUBJECT, readBoardCommit } from '../../src/board/boardCommit.js';
 import { readProtocol, serializeProtocol } from '../../src/board/protocol.js';
 import { foldPatch } from '../../src/engine/core.js';
+import { evaluateRecords } from '../../src/engine/holdOps.js';
 import { regionSpecId } from '../../src/engine/deps.js';
 import { DaemonLock, daemonLockHeld, Engine, LOOP_ACTIVE_MS, LOOP_IDLE_MS, runLoop, type MaskViolation } from '../../src/engine/loop.js';
 import type { StatusJson } from '../../src/engine/status.js';
@@ -811,7 +812,10 @@ test('an INV-MASK violation (ENG-28) stops the capture and every publish of its 
   });
 });
 
-test('NOT_CONVERGED carries each cause with its 01-engine §2 qualifier: an incoming change over an ignored local file is not_applicable with guard collision', async () => {
+// Plan 3 Task 12a fix round 1 (finding 5): re-scoped. Under R3-61 the degraded message of this state is the INCOMING record's hold code,
+// so status.json no longer shows NOT_CONVERGED's params here; the per-path cause and qualifier are checked in not_converged and
+// EngineInspection.notConvergedWhy (NOT_CONVERGED{cause, check, paths, causes} itself stays covered by the INV-MASK test above).
+test('not_converged carries each cause with its 01-engine §2 qualifier: an incoming change over an ignored local file is not_applicable with guard collision, and the degraded message is its INCOMING_COLLISION hold code (R3-61)', async () => {
   const files = { '.gitignore': buf('.env\n'), 'README.md': buf('# nc\n'), 'a.txt': buf('a\n') };
   await withEngines('loop-nc-collision', { n: 1, files }, async (fx) => {
     await fx.startAll();
@@ -824,9 +828,12 @@ test('NOT_CONVERGED carries each cause with its 01-engine §2 qualifier: an inco
     assert.equal(await storedText(p, 'a.txt'), 'a2\n', 'the rest of the change applied');
     assert.deepEqual(await readWork(p, '.env'), buf('LOCAL_SECRET=1\n'), 'the local bytes untouched');
     const s = await statusOf(p);
-    assert.deepEqual([s.state, s.message_code, s.message_params, s.pending.not_converged], [
-      'degraded', 'NOT_CONVERGED', { cause: 'not_applicable', guard: 'collision', paths: ['.env'], causes: [{ cause: 'not_applicable', guard: 'collision' }] }, ['.env'],
-    ]);
+    // Plan 3 Task 12a (R3-61): with only not_converged entries making the state degraded, the newest hold code is the message —
+    // here the INCOMING `collision` record's INCOMING_COLLISION {id, path} (Task 6, through recordStep's incomingStep); the path keeps
+    // its cause and qualifier in not_converged.
+    const rec = p.core.holds.nonTerminal().find((r) => r.kind === 'INCOMING' && r.paths[0] === '.env');
+    assert.ok(rec !== undefined, 'the not-applicable path has its INCOMING collision record (HLD-53)');
+    assert.deepEqual([s.state, s.message_code, s.message_params, s.pending.not_converged], ['degraded', 'INCOMING_COLLISION', { id: rec.id, path: '.env' }, ['.env']]);
     assert.deepEqual((await p.engine.inspect()).notConvergedWhy, { '.env': { cause: 'not_applicable', guard: 'collision' } });
   });
 });
@@ -1088,11 +1095,13 @@ async function keptLostRestart(atRestart: 'reachable' | 'unreachable'): Promise<
     assert.equal(await readWork(p, 'made.txt'), null, 'made.txt stays absent on disk');
     assert.deepEqual(p.core.cs.ready(), [], 'the pair, which only created made.txt, left');
     assert.equal(p.core.cs.openPaths().size, 0);
-    // The mechanism. Reachable: the restart itself dropped made.txt from its pair and journaled the pairs. Unreachable: the
-    // pair the still-kept intent names stays whole, and made.txt waits in pending again (re-closed once the loop resolved
-    // the intent: loop.ts's capture right after the discard).
+    // The mechanism. Reachable: the restart itself dropped made.txt from its pair and journaled the pairs; the delete CS the cache
+    // carries over the restart (R3-69, Plan 3 Task 12a's attachCsTable: closed with no journaled pair, so its capture is due) still
+    // lists made.txt until that capture, where a path absent from both trees leaves it. Unreachable: the pair the still-kept intent
+    // names stays whole, and made.txt waits in pending again (re-closed once the loop resolved the intent: the loop's capture runs
+    // after the resolution).
     assert.deepEqual(atRestartState, atRestart === 'reachable'
-      ? { inPairs: false, inJournal: false, pending: false }
+      ? { inPairs: false, inJournal: false, pending: true }
       : { inPairs: true, inJournal: true, pending: true }, 'the ready pairs and pending right after the restart');
   });
 }
@@ -1336,7 +1345,7 @@ test('final review FC-4: a ready pair that waits only for its window still re-it
   });
 });
 
-test('final review FC-5: resume after NONRETRYABLE ends the host-reject PIN (05-holds: lifted by resume, the publish is retried), so the next iterations retry the rejected publish once and it lands', async () => {
+test('final review FC-5 (R3-39): resume after NONRETRYABLE releases the host-reject guard (05-holds: lifted by resume, the publish is retried), so the next iterations retry the rejected publish once and it lands', async () => {
   await withEngines('loop-fc5-resume', { n: 1 }, async (fx) => {
     await fx.startAll();
     const p = fx.peers[0]!;
@@ -1369,9 +1378,22 @@ test('final review FC-5: resume after NONRETRYABLE ends the host-reject PIN (05-
     assert.ok(landedAt >= 0, `the rejected change-set was retried and published (attempts since the pause: ${p.core.pushAttempts - pushes})`);
     assert.equal(landedAt - pushes, 1, 'one retry');
     assert.equal((await remoteLiveFiles(fx, p)).get('a.txt'), 'rejected, then resumed\n');
+    // Plan 3 Task 8 (R3-39, superseding FC-5's RESOLVED_PUBLISH): resume released the host-reject guard, the record stays until
+    // R1 (Task 12's recordStep in the loop), which ends it SUBSUMED once the retried publish is in A.
+    const released = p.core.holds.get(nonretryable.hold_id)!;
+    assert.deepEqual([released.state, released.guards], ['ACTIVE', []], 'the guard released at resume');
+    // Plan 3 EF3 (HLD-24 "every path of every ON_DISK record", R3-46): the status the landing iteration wrote still lists the released
+    // (guard-less, ON_DISK ACTIVE) PIN's path, with the record's kind as its guard: that iteration's R1 ran before its publish landed.
+    const atLanding = await statusOf(p);
+    assert.deepEqual([atLanding.state, atLanding.pending.not_converged], ['degraded', ['a.txt']], 'HLD-24: listed until R1 ends the PIN');
+    assert.deepEqual((await p.engine.inspect()).notConvergedWhy?.['a.txt'], { cause: 'blocked_publish', guard: 'pin' });
+    await evaluateRecords(p.core, await prep(p, true), new Set(), []);
     const ended = p.core.holds.get(nonretryable.hold_id)!;
-    assert.deepEqual([ended.state, ended.residence], ['RESOLVED_PUBLISH', null], 'the host-reject PIN ended');
+    assert.deepEqual([ended.state, ended.residence], ['SUBSUMED', null], 'the host-reject PIN ended');
     assert.ok(!p.core.holds.nonTerminal().some((r) => r.id === nonretryable.hold_id));
+    // The next status write, after R1 ended the PIN: converged.
+    fx.advance(LOOP_ACTIVE_MS);
+    await p.engine.iterate();
     const s = await statusOf(p);
     assert.deepEqual([s.state, s.pending.not_converged], ['ok', []]);
   });
@@ -1382,15 +1404,21 @@ test('final review FC-8: --publish=all local work at genesis goes through the lo
   await withEngines('loop-fc8-start-all', { n: 1, files }, async (fx) => {
     const p = fx.peers[0]!;
     // Local work before the first start: a matched row's ending changes in a MIXED file (canon refuses, R-07), and an
-    // ordinary edit that publishes.
+    // ordinary edit in the same change-set. Plan 3 Task 10 (HLD-42, D-07): the eol-bom record withholds mixed.txt whole, so the
+    // rest of its publication group waits with it in one dependency PIN instead of publishing alone.
     await writeWork(p, 'mixed.txt', 'a\nb\nc\nd\nE\n');
     await writeWork(p, 'README.md', '# eol at start, edited\n');
     await fx.startAll({ publishLocal: 'all' });
-    for (let i = 0; i < 8 && (await remoteLiveFiles(fx, p)).get('README.md') !== '# eol at start, edited\n'; i++) await fx.rounds(1);
-    assert.equal((await remoteLiveFiles(fx, p)).get('README.md'), '# eol at start, edited\n', 'the local work published');
+    const dependency = (): string[] => p.core.holds.nonTerminal().filter((r) => r.kind === 'PIN' && r.guards.some((g) => g.name.startsWith('dependency:'))).map((r) => r.id);
+    for (let i = 0; i < 8 && dependency().length === 0; i++) await fx.rounds(1);
+    assert.equal(dependency().length, 1, 'one dependency PIN holds the local work with the refused path');
+    await fx.rounds(2);
+    assert.equal((await remoteLiveFiles(fx, p)).get('README.md'), '# eol at start\n', 'the rest of the change-set waits with the refused path (D-07)');
     assert.equal((await remoteLiveFiles(fx, p)).get('mixed.txt'), 'a\r\nb\nc\r\nd\n', 'nothing of the refused bytes is published');
     const recs = p.core.holds.nonTerminal().filter((r) => r.paths.includes('mixed.txt') && r.guards.some((g) => g.name === 'eol-bom'));
     assert.equal(recs.length, 1, 'one eol-bom hold masks the refused path');
+    assert.deepEqual(p.core.holds.get(dependency()[0]!)!.guards.map((g) => g.name), [`dependency:${recs[0]!.id}`]);
+    assert.equal((await readWork(p, 'README.md'))?.toString('utf8'), '# eol at start, edited\n', 'the held edit stays on disk');
     assert.equal((await readWork(p, 'mixed.txt'))?.toString('utf8'), 'a\nb\nc\nd\nE\n', 'the local bytes stay on disk');
   });
 });

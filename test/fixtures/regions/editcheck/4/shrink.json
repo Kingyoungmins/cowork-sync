@@ -1,0 +1,14 @@
+{
+  "name": "4/shrink",
+  "check": 4,
+  "lang": "python",
+  "expect": "fail",
+  "reason": "shrink",
+  "tipEqualsA": true,
+  "A": {
+    "fmt.py": "\"\"\"Formatting helpers kept for the reports.\"\"\"\n\ndef fmt_0(x):\n    \"\"\"Format value 0 for the report table.\"\"\"\n    return f\"{x:>4}\"\n\n\ndef fmt_1(x):\n    \"\"\"Format value 1 for the report table.\"\"\"\n    return f\"{x:>5}\"\n\n\ndef fmt_2(x):\n    \"\"\"Format value 2 for the report table.\"\"\"\n    return f\"{x:>6}\"\n\n\ndef fmt_3(x):\n    \"\"\"Format value 3 for the report table.\"\"\"\n    return f\"{x:>7}\"\n\n\ndef fmt_4(x):\n    \"\"\"Format value 4 for the report table.\"\"\"\n    return f\"{x:>8}\"\n\n\ndef fmt_5(x):\n    \"\"\"Format value 5 for the report table.\"\"\"\n    return f\"{x:>9}\"\n\n\ndef fmt_6(x):\n    \"\"\"Format value 6 for the report table.\"\"\"\n    return f\"{x:>10}\"\n\n\ndef fmt_7(x):\n    \"\"\"Format value 7 for the report table.\"\"\"\n    return f\"{x:>11}\"\n\n\ndef fmt_8(x):\n    \"\"\"Format value 8 for the report table.\"\"\"\n    return f\"{x:>12}\"\n\n\ndef fmt_9(x):\n    \"\"\"Format value 9 for the report table.\"\"\"\n    return f\"{x:>13}\"\n\n\ndef fmt_10(x):\n    \"\"\"Format value 10 for the report table.\"\"\"\n    return f\"{x:>14}\"\n\n\ndef fmt_11(x):\n    \"\"\"Format value 11 for the report table.\"\"\"\n    return f\"{x:>15}\"\n\n\n"
+  },
+  "R": {
+    "fmt.py": "\"\"\"Formatting helpers kept for the reports.\"\"\"\n\ndef fmt_0(x):\n    \"\"\"Format value 0 for the report table.\"\"\"\n    return f\"{x:>4}\"\n\n\ndef fmt_1(x):\n    \"\"\"Format value 1 for the report table.\"\"\"\n    return f\"{x:>5}\"\n\n\ndef fmt_2(x):\n    \"\"\"Format value 2 for the report table.\"\"\"\n    return f\"{x:>6}\"\n\n\ndef fmt_3(x):\n    \"\"\"Format value 3 for the report table.\"\"\"\n    return f\"{x:>7}\"\n\n\n"
+  }
+}

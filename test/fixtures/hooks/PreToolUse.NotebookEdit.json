@@ -1,0 +1,17 @@
+{
+  "session_id": "3f9a1c2e-5b7d-4e8f-9a0b-1c2d3e4f5a6b",
+  "transcript_path": "/home/me/.claude/projects/-home-me-repo/3f9a1c2e-5b7d-4e8f-9a0b-1c2d3e4f5a6b.jsonl",
+  "cwd": "/home/me/repo",
+  "hook_event_name": "PreToolUse",
+  "permission_mode": "default",
+  "prompt_id": "361954a0-1111-4222-8333-444455556666",
+  "tool_name": "NotebookEdit",
+  "tool_use_id": "toolu_01NoteAAAAAAAAAAAAAAAAAA",
+  "tool_input": {
+    "notebook_path": "/home/me/repo/nb/x.ipynb",
+    "cell_id": "cell-3",
+    "new_source": "print(1)",
+    "cell_type": "code",
+    "edit_mode": "replace"
+  }
+}

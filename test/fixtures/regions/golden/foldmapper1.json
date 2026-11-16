@@ -1,0 +1,1383 @@
+{
+  "mapper": "FoldMapper/1",
+  "note": "T-REG-20 golden (04 section 3.4 step 6): FoldMapper/1 hunks and fold-mode images over the rc_touch R2 pairs, the four fwd variants, the same-tail git-vs-FoldMapper/1 variant and the first 50 steps of s9Generator(s9-0): per step the hunks of its own change, the count and sha256 of the direct hunks from step 0's holder, and the direct image of step 0's oracle (the claim). Images are given for the big_lf.py pairs only (the named ranges are big_lf.py rows). Regenerate only with COWORK_UPDATE_GOLDEN=foldmapper1 and a reviewed diff.",
+  "named": {
+    "compute_total": [
+      [5331, 5339]
+    ],
+    "parse": [
+      [5317, 5328]
+    ],
+    "setter": [
+      [5310, 5314]
+    ]
+  },
+  "rc_touch": [
+    {
+      "name": "py_body_edit",
+      "base": "big_lf.py",
+      "post": "rc_touch/py_body_edit.post.py",
+      "hunks": [
+        { "aLo": 5335, "aHi": 5335, "bLo": 5335, "bHi": 5335 }
+      ],
+      "images": {
+        "compute_total": [
+          [5331, 5339]
+        ],
+        "parse": [
+          [5317, 5328]
+        ],
+        "setter": [
+          [5310, 5314]
+        ]
+      }
+    },
+    {
+      "name": "py_append_after_last_line",
+      "base": "big_lf.py",
+      "post": "rc_touch/py_append_after_last_line.post.py",
+      "hunks": [
+        { "aLo": 5340, "aHi": 5339, "bLo": 5340, "bHi": 5340 }
+      ],
+      "images": {
+        "compute_total": [
+          [5331, 5339]
+        ],
+        "parse": [
+          [5317, 5328]
+        ],
+        "setter": [
+          [5310, 5314]
+        ]
+      }
+    },
+    {
+      "name": "py_decorator_under_attached_comment",
+      "base": "big_lf.py",
+      "post": "rc_touch/py_decorator_under_attached_comment.post.py",
+      "hunks": [
+        { "aLo": 5332, "aHi": 5331, "bLo": 5332, "bHi": 5332 }
+      ],
+      "images": {
+        "compute_total": [
+          [5331, 5340]
+        ],
+        "parse": [
+          [5317, 5328]
+        ],
+        "setter": [
+          [5310, 5314]
+        ]
+      }
+    },
+    {
+      "name": "py_attached_comment_above",
+      "base": "big_lf.py",
+      "post": "rc_touch/py_attached_comment_above.post.py",
+      "hunks": [
+        { "aLo": 5331, "aHi": 5330, "bLo": 5331, "bHi": 5331 }
+      ],
+      "images": {
+        "compute_total": [
+          [5332, 5340]
+        ],
+        "parse": [
+          [5317, 5328]
+        ],
+        "setter": [
+          [5310, 5314]
+        ]
+      }
+    },
+    {
+      "name": "py_boundary_insert_half_typed",
+      "base": "big_lf.py",
+      "post": "rc_touch/py_boundary_insert_half_typed.post.py",
+      "hunks": [
+        { "aLo": 5340, "aHi": 5339, "bLo": 5340, "bHi": 5340 }
+      ],
+      "images": {
+        "compute_total": [
+          [5331, 5339]
+        ],
+        "parse": [
+          [5317, 5328]
+        ],
+        "setter": [
+          [5310, 5314]
+        ]
+      }
+    },
+    {
+      "name": "py_decorator_only_edit",
+      "base": "big_lf.py",
+      "post": "rc_touch/py_decorator_only_edit.post.py",
+      "hunks": [
+        { "aLo": 5317, "aHi": 5317, "bLo": 5317, "bHi": 5317 }
+      ],
+      "images": {
+        "compute_total": [
+          [5331, 5339]
+        ],
+        "parse": [
+          [5317, 5328]
+        ],
+        "setter": [
+          [5310, 5314]
+        ]
+      }
+    },
+    {
+      "name": "py_append_setter_body",
+      "base": "big_lf.py",
+      "post": "rc_touch/py_append_setter_body.post.py",
+      "hunks": [
+        { "aLo": 5315, "aHi": 5314, "bLo": 5315, "bHi": 5315 }
+      ],
+      "images": {
+        "compute_total": [
+          [5332, 5340]
+        ],
+        "parse": [
+          [5318, 5329]
+        ],
+        "setter": [
+          [5310, 5314]
+        ]
+      }
+    },
+    {
+      "name": "js_append_setter_body",
+      "base": "rc_touch/account.js",
+      "post": "rc_touch/js_append_setter_body.post.js",
+      "hunks": [
+        { "aLo": 9, "aHi": 8, "bLo": 9, "bHi": 9 }
+      ],
+      "images": null
+    },
+    {
+      "name": "cs_new_overload_not_adjacent_to_held",
+      "base": "csharp/Svc.cs",
+      "post": "csharp/Svc.new_overload.cs",
+      "hunks": [
+        { "aLo": 30, "aHi": 29, "bLo": 30, "bHi": 34 }
+      ],
+      "images": null
+    },
+    {
+      "name": "py_new_def_after",
+      "base": "big_lf.py",
+      "post": "rc_touch/py_new_def_after.post.py",
+      "hunks": [
+        { "aLo": 5342, "aHi": 5341, "bLo": 5342, "bHi": 5345 }
+      ],
+      "images": {
+        "compute_total": [
+          [5331, 5339]
+        ],
+        "parse": [
+          [5317, 5328]
+        ],
+        "setter": [
+          [5310, 5314]
+        ]
+      }
+    },
+    {
+      "name": "py_same_tail_def_after",
+      "base": "big_lf.py",
+      "post": "rc_touch/py_same_tail_def_after.post.py",
+      "hunks": [
+        { "aLo": 5342, "aHi": 5341, "bLo": 5342, "bHi": 5350 }
+      ],
+      "images": {
+        "compute_total": [
+          [5331, 5339]
+        ],
+        "parse": [
+          [5317, 5328]
+        ],
+        "setter": [
+          [5310, 5314]
+        ]
+      }
+    },
+    {
+      "name": "py_overload_stubs_above",
+      "base": "big_lf.py",
+      "post": "rc_touch/py_overload_stubs_above.post.py",
+      "hunks": [
+        { "aLo": 5331, "aHi": 5330, "bLo": 5331, "bHi": 5333 }
+      ],
+      "images": {
+        "compute_total": [
+          [5334, 5342]
+        ],
+        "parse": [
+          [5317, 5328]
+        ],
+        "setter": [
+          [5310, 5314]
+        ]
+      }
+    },
+    {
+      "name": "py_sibling_edit",
+      "base": "big_lf.py",
+      "post": "rc_touch/py_sibling_edit.post.py",
+      "hunks": [
+        { "aLo": 5320, "aHi": 5320, "bLo": 5320, "bHi": 5320 }
+      ],
+      "images": {
+        "compute_total": [
+          [5331, 5339]
+        ],
+        "parse": [
+          [5317, 5328]
+        ],
+        "setter": [
+          [5310, 5314]
+        ]
+      }
+    },
+    {
+      "name": "py_new_method_after_setter",
+      "base": "big_lf.py",
+      "post": "rc_touch/py_new_method_after_setter.post.py",
+      "hunks": [
+        { "aLo": 5316, "aHi": 5315, "bLo": 5316, "bHi": 5318 }
+      ],
+      "images": {
+        "compute_total": [
+          [5334, 5342]
+        ],
+        "parse": [
+          [5320, 5331]
+        ],
+        "setter": [
+          [5310, 5314]
+        ]
+      }
+    },
+    {
+      "name": "js_getter_above_setter",
+      "base": "rc_touch/account.js",
+      "post": "rc_touch/js_getter_above_setter.post.js",
+      "hunks": [
+        { "aLo": 6, "aHi": 5, "bLo": 6, "bHi": 8 }
+      ],
+      "images": null
+    }
+  ],
+  "fwd": [
+    {
+      "name": "far_above",
+      "base": "big_lf.py",
+      "post": "fwd/far_above.post.py",
+      "hunks": [
+        { "aLo": 101, "aHi": 100, "bLo": 101, "bHi": 122 }
+      ],
+      "images": {
+        "compute_total": [
+          [5353, 5361]
+        ],
+        "parse": [
+          [5339, 5350]
+        ],
+        "setter": [
+          [5332, 5336]
+        ]
+      }
+    },
+    {
+      "name": "directly_above",
+      "base": "big_lf.py",
+      "post": "fwd/directly_above.post.py",
+      "hunks": [
+        { "aLo": 5331, "aHi": 5330, "bLo": 5331, "bHi": 5352 }
+      ],
+      "images": {
+        "compute_total": [
+          [5353, 5361]
+        ],
+        "parse": [
+          [5317, 5328]
+        ],
+        "setter": [
+          [5310, 5314]
+        ]
+      }
+    },
+    {
+      "name": "directly_after",
+      "base": "big_lf.py",
+      "post": "fwd/directly_after.post.py",
+      "hunks": [
+        { "aLo": 5342, "aHi": 5341, "bLo": 5342, "bHi": 5363 }
+      ],
+      "images": {
+        "compute_total": [
+          [5331, 5339]
+        ],
+        "parse": [
+          [5317, 5328]
+        ],
+        "setter": [
+          [5310, 5314]
+        ]
+      }
+    },
+    {
+      "name": "same_tail",
+      "base": "big_lf.py",
+      "post": "fwd/same_tail.post.py",
+      "hunks": [
+        { "aLo": 5342, "aHi": 5341, "bLo": 5342, "bHi": 5363 }
+      ],
+      "images": {
+        "compute_total": [
+          [5331, 5339]
+        ],
+        "parse": [
+          [5317, 5328]
+        ],
+        "setter": [
+          [5310, 5314]
+        ]
+      }
+    }
+  ],
+  "same_tail_variant": {
+    "name": "git_vs_foldmapper",
+    "base": "big_lf.py",
+    "post": "same_tail/git_vs_foldmapper.post.py",
+    "hunks": [
+      { "aLo": 5320, "aHi": 5320, "bLo": 5320, "bHi": 5320 },
+      { "aLo": 5339, "aHi": 5338, "bLo": 5339, "bHi": 5347 }
+    ],
+    "images": {
+      "compute_total": [
+        [5331, 5348]
+      ],
+      "parse": [
+        [5317, 5328]
+      ],
+      "setter": [
+        [5310, 5314]
+      ]
+    }
+  },
+  "s9": {
+    "seed": "s9-0",
+    "claim": [
+      [1417, 1421]
+    ],
+    "steps": [
+      {
+        "step": 0,
+        "hunks": [],
+        "direct": {
+          "count": 0,
+          "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "image": [
+          [1417, 1421]
+        ]
+      },
+      {
+        "step": 1,
+        "hunks": [
+          { "aLo": 547, "aHi": 546, "bLo": 547, "bHi": 547 },
+          { "aLo": 1419, "aHi": 1419, "bLo": 1420, "bHi": 1420 },
+          { "aLo": 1783, "aHi": 1783, "bLo": 1784, "bHi": 1783 },
+          { "aLo": 1859, "aHi": 1859, "bLo": 1859, "bHi": 1858 },
+          { "aLo": 1931, "aHi": 1931, "bLo": 1930, "bHi": 1929 },
+          { "aLo": 2151, "aHi": 2151, "bLo": 2149, "bHi": 2148 },
+          { "aLo": 2363, "aHi": 2363, "bLo": 2360, "bHi": 2359 },
+          { "aLo": 2392, "aHi": 2392, "bLo": 2388, "bHi": 2387 },
+          { "aLo": 2418, "aHi": 2418, "bLo": 2413, "bHi": 2412 },
+          { "aLo": 2458, "aHi": 2458, "bLo": 2452, "bHi": 2451 },
+          { "aLo": 2461, "aHi": 2461, "bLo": 2454, "bHi": 2453 },
+          { "aLo": 2530, "aHi": 2530, "bLo": 2522, "bHi": 2521 },
+          { "aLo": 2557, "aHi": 2557, "bLo": 2548, "bHi": 2547 },
+          { "aLo": 2619, "aHi": 2619, "bLo": 2609, "bHi": 2608 },
+          { "aLo": 2697, "aHi": 2697, "bLo": 2686, "bHi": 2685 },
+          { "aLo": 2714, "aHi": 2714, "bLo": 2702, "bHi": 2701 },
+          { "aLo": 2751, "aHi": 2751, "bLo": 2738, "bHi": 2737 },
+          { "aLo": 2765, "aHi": 2765, "bLo": 2751, "bHi": 2750 }
+        ],
+        "direct": {
+          "count": 18,
+          "sha256": "3d4ae4943f4c7f2ad296d7ebc66c1aa813ec78cd3afd57a503cf0dd61d41d661"
+        },
+        "image": [
+          [1418, 1422]
+        ]
+      },
+      {
+        "step": 2,
+        "hunks": [
+          { "aLo": 1040, "aHi": 1039, "bLo": 1040, "bHi": 1044 },
+          { "aLo": 1314, "aHi": 1313, "bLo": 1319, "bHi": 1320 }
+        ],
+        "direct": {
+          "count": 20,
+          "sha256": "18b25a3ad54f0fb64781dccf79ade0bc0aa0559e56fddec2e08b66bf8128d659"
+        },
+        "image": [
+          [1425, 1429]
+        ]
+      },
+      {
+        "step": 3,
+        "hunks": [
+          { "aLo": 318, "aHi": 317, "bLo": 318, "bHi": 326 },
+          { "aLo": 1488, "aHi": 1488, "bLo": 1497, "bHi": 1496 },
+          { "aLo": 1541, "aHi": 1541, "bLo": 1549, "bHi": 1548 },
+          { "aLo": 2102, "aHi": 2102, "bLo": 2109, "bHi": 2108 },
+          { "aLo": 2241, "aHi": 2241, "bLo": 2247, "bHi": 2246 },
+          { "aLo": 2281, "aHi": 2281, "bLo": 2286, "bHi": 2285 },
+          { "aLo": 2359, "aHi": 2359, "bLo": 2363, "bHi": 2362 },
+          { "aLo": 2425, "aHi": 2425, "bLo": 2428, "bHi": 2427 },
+          { "aLo": 2517, "aHi": 2517, "bLo": 2519, "bHi": 2518 },
+          { "aLo": 2524, "aHi": 2524, "bLo": 2525, "bHi": 2524 },
+          { "aLo": 2763, "aHi": 2763, "bLo": 2763, "bHi": 2762 }
+        ],
+        "direct": {
+          "count": 31,
+          "sha256": "b4b2108cccf5bc01abed1fdfcc9f5354a1920ea8ad27ac7269666829fcbfce5c"
+        },
+        "image": [
+          [1434, 1438]
+        ]
+      },
+      {
+        "step": 4,
+        "hunks": [
+          { "aLo": 127, "aHi": 127, "bLo": 127, "bHi": 126 },
+          { "aLo": 480, "aHi": 480, "bLo": 479, "bHi": 478 },
+          { "aLo": 527, "aHi": 527, "bLo": 525, "bHi": 524 },
+          { "aLo": 681, "aHi": 681, "bLo": 678, "bHi": 677 },
+          { "aLo": 692, "aHi": 692, "bLo": 688, "bHi": 687 },
+          { "aLo": 714, "aHi": 714, "bLo": 709, "bHi": 708 },
+          { "aLo": 1101, "aHi": 1101, "bLo": 1095, "bHi": 1094 },
+          { "aLo": 1266, "aHi": 1266, "bLo": 1259, "bHi": 1258 },
+          { "aLo": 1671, "aHi": 1671, "bLo": 1663, "bHi": 1662 },
+          { "aLo": 1846, "aHi": 1846, "bLo": 1837, "bHi": 1836 },
+          { "aLo": 2223, "aHi": 2223, "bLo": 2213, "bHi": 2212 },
+          { "aLo": 2327, "aHi": 2327, "bLo": 2316, "bHi": 2315 }
+        ],
+        "direct": {
+          "count": 43,
+          "sha256": "dd20e1ce54cbf57129ac8ac3fb6a29ea6474a7fe2f33913ff72b05d5cbb25eea"
+        },
+        "image": [
+          [1426, 1430]
+        ]
+      },
+      {
+        "step": 5,
+        "hunks": [
+          { "aLo": 26, "aHi": 26, "bLo": 26, "bHi": 25 },
+          { "aLo": 347, "aHi": 346, "bLo": 346, "bHi": 356 },
+          { "aLo": 641, "aHi": 641, "bLo": 651, "bHi": 650 }
+        ],
+        "direct": {
+          "count": 46,
+          "sha256": "98de08f3af05c1a35adf18b01a8e14be80f5f5339c9d5f2bd4ae1cd70f9540ba"
+        },
+        "image": [
+          [1435, 1439]
+        ]
+      },
+      {
+        "step": 6,
+        "hunks": [
+          { "aLo": 127, "aHi": 126, "bLo": 127, "bHi": 136 },
+          { "aLo": 1438, "aHi": 1437, "bLo": 1448, "bHi": 1463 }
+        ],
+        "direct": {
+          "count": 47,
+          "sha256": "988bad8c39afa47f6a693b26cb0172d1509245045f127472860401b4a99222a9"
+        },
+        "image": [
+          [1445, 1465]
+        ]
+      },
+      {
+        "step": 7,
+        "hunks": [
+          { "aLo": 739, "aHi": 738, "bLo": 739, "bHi": 740 },
+          { "aLo": 1450, "aHi": 1449, "bLo": 1452, "bHi": 1453 },
+          { "aLo": 1451, "aHi": 1450, "bLo": 1455, "bHi": 1461 }
+        ],
+        "direct": {
+          "count": 48,
+          "sha256": "0a0cf80ace9af5c3bb06f73f8cedc3cb44ea3d806306b6dcc944d85372116c6b"
+        },
+        "image": [
+          [1447, 1476]
+        ]
+      },
+      {
+        "step": 8,
+        "hunks": [
+          { "aLo": 1811, "aHi": 1810, "bLo": 1811, "bHi": 1825 }
+        ],
+        "direct": {
+          "count": 49,
+          "sha256": "e5b19b84b67b484c652b873092dbf9e6c5d3ed471e956cbe976bfd63ecd54866"
+        },
+        "image": [
+          [1447, 1476]
+        ]
+      },
+      {
+        "step": 9,
+        "hunks": [
+          { "aLo": 94, "aHi": 93, "bLo": 94, "bHi": 95 },
+          { "aLo": 725, "aHi": 724, "bLo": 727, "bHi": 728 },
+          { "aLo": 1659, "aHi": 1659, "bLo": 1663, "bHi": 1662 },
+          { "aLo": 1801, "aHi": 1801, "bLo": 1804, "bHi": 1803 },
+          { "aLo": 1951, "aHi": 1951, "bLo": 1953, "bHi": 1952 },
+          { "aLo": 2208, "aHi": 2208, "bLo": 2209, "bHi": 2208 },
+          { "aLo": 2585, "aHi": 2585, "bLo": 2585, "bHi": 2584 },
+          { "aLo": 2594, "aHi": 2594, "bLo": 2593, "bHi": 2592 },
+          { "aLo": 2735, "aHi": 2735, "bLo": 2733, "bHi": 2732 }
+        ],
+        "direct": {
+          "count": 58,
+          "sha256": "a2bf69aeb5ad4829f7c488d4c9ea02e98082b2819fee544d6d88cdff2058956e"
+        },
+        "image": [
+          [1451, 1480]
+        ]
+      },
+      {
+        "step": 10,
+        "hunks": [
+          { "aLo": 1458, "aHi": 1459, "bLo": 1458, "bHi": 1457 },
+          { "aLo": 1467, "aHi": 1467, "bLo": 1465, "bHi": 1464 },
+          { "aLo": 1470, "aHi": 1470, "bLo": 1467, "bHi": 1466 },
+          { "aLo": 1474, "aHi": 1475, "bLo": 1470, "bHi": 1469 },
+          { "aLo": 1477, "aHi": 1477, "bLo": 1471, "bHi": 1470 }
+        ],
+        "direct": {
+          "count": 58,
+          "sha256": "3955636fc1892f523bb235043d95253f0e00691fad748c924616a00655b82fce"
+        },
+        "image": [
+          [1451, 1473]
+        ]
+      },
+      {
+        "step": 11,
+        "hunks": [
+          { "aLo": 111, "aHi": 111, "bLo": 111, "bHi": 110 },
+          { "aLo": 132, "aHi": 132, "bLo": 131, "bHi": 130 },
+          { "aLo": 229, "aHi": 229, "bLo": 227, "bHi": 226 },
+          { "aLo": 299, "aHi": 299, "bLo": 296, "bHi": 295 },
+          { "aLo": 392, "aHi": 392, "bLo": 388, "bHi": 387 },
+          { "aLo": 465, "aHi": 465, "bLo": 460, "bHi": 459 },
+          { "aLo": 524, "aHi": 524, "bLo": 518, "bHi": 517 },
+          { "aLo": 571, "aHi": 571, "bLo": 564, "bHi": 563 },
+          { "aLo": 620, "aHi": 620, "bLo": 612, "bHi": 611 },
+          { "aLo": 660, "aHi": 660, "bLo": 651, "bHi": 650 },
+          { "aLo": 796, "aHi": 796, "bLo": 786, "bHi": 785 },
+          { "aLo": 849, "aHi": 849, "bLo": 838, "bHi": 837 },
+          { "aLo": 1006, "aHi": 1006, "bLo": 994, "bHi": 993 },
+          { "aLo": 1169, "aHi": 1169, "bLo": 1156, "bHi": 1155 },
+          { "aLo": 1345, "aHi": 1345, "bLo": 1331, "bHi": 1330 },
+          { "aLo": 1396, "aHi": 1396, "bLo": 1381, "bHi": 1380 },
+          { "aLo": 1453, "aHi": 1452, "bLo": 1437, "bHi": 1437 }
+        ],
+        "direct": {
+          "count": 72,
+          "sha256": "4d8be54860e0f8126373f86b0af9367091a9a839fe8d1f4dfbd917883dcb628b"
+        },
+        "image": [
+          [1435, 1458]
+        ]
+      },
+      {
+        "step": 12,
+        "hunks": [
+          { "aLo": 1212, "aHi": 1211, "bLo": 1212, "bHi": 1215 },
+          { "aLo": 1453, "aHi": 1452, "bLo": 1457, "bHi": 1457 },
+          { "aLo": 1691, "aHi": 1691, "bLo": 1696, "bHi": 1695 },
+          { "aLo": 1694, "aHi": 1694, "bLo": 1698, "bHi": 1697 },
+          { "aLo": 1913, "aHi": 1913, "bLo": 1916, "bHi": 1915 },
+          { "aLo": 2145, "aHi": 2145, "bLo": 2147, "bHi": 2146 },
+          { "aLo": 2177, "aHi": 2177, "bLo": 2178, "bHi": 2177 },
+          { "aLo": 2583, "aHi": 2583, "bLo": 2583, "bHi": 2582 },
+          { "aLo": 2824, "aHi": 2824, "bLo": 2823, "bHi": 2822 }
+        ],
+        "direct": {
+          "count": 80,
+          "sha256": "5929ff020f13320195a347105df2e15fde409c7522f85ed2bc43f90a916dee4c"
+        },
+        "image": [
+          [1439, 1463]
+        ]
+      },
+      {
+        "step": 13,
+        "hunks": [
+          { "aLo": 1227, "aHi": 1227, "bLo": 1227, "bHi": 1226 },
+          { "aLo": 1442, "aHi": 1456, "bLo": 1441, "bHi": 1441 },
+          { "aLo": 1458, "aHi": 1461, "bLo": 1443, "bHi": 1442 }
+        ],
+        "direct": {
+          "count": 81,
+          "sha256": "0276667bc3a2e045ad3c441d0a97b5d3003c007fbca9a8faf26bcbd656a5ea82"
+        },
+        "image": [
+          [1438, 1444]
+        ]
+      },
+      {
+        "step": 14,
+        "hunks": [
+          { "aLo": 1441, "aHi": 1440, "bLo": 1441, "bHi": 1451 },
+          { "aLo": 1461, "aHi": 1461, "bLo": 1472, "bHi": 1471 },
+          { "aLo": 1501, "aHi": 1501, "bLo": 1511, "bHi": 1510 },
+          { "aLo": 1578, "aHi": 1578, "bLo": 1587, "bHi": 1586 },
+          { "aLo": 1636, "aHi": 1636, "bLo": 1644, "bHi": 1643 },
+          { "aLo": 1656, "aHi": 1656, "bLo": 1663, "bHi": 1662 },
+          { "aLo": 1689, "aHi": 1689, "bLo": 1695, "bHi": 1694 },
+          { "aLo": 1762, "aHi": 1762, "bLo": 1767, "bHi": 1766 },
+          { "aLo": 1790, "aHi": 1790, "bLo": 1794, "bHi": 1793 },
+          { "aLo": 1857, "aHi": 1857, "bLo": 1860, "bHi": 1859 },
+          { "aLo": 1900, "aHi": 1900, "bLo": 1902, "bHi": 1901 },
+          { "aLo": 1907, "aHi": 1907, "bLo": 1908, "bHi": 1907 },
+          { "aLo": 1922, "aHi": 1922, "bLo": 1922, "bHi": 1921 },
+          { "aLo": 1936, "aHi": 1936, "bLo": 1935, "bHi": 1934 },
+          { "aLo": 1964, "aHi": 1964, "bLo": 1962, "bHi": 1961 },
+          { "aLo": 2010, "aHi": 2010, "bLo": 2007, "bHi": 2006 },
+          { "aLo": 2132, "aHi": 2132, "bLo": 2128, "bHi": 2127 },
+          { "aLo": 2192, "aHi": 2192, "bLo": 2187, "bHi": 2186 },
+          { "aLo": 2239, "aHi": 2239, "bLo": 2233, "bHi": 2232 },
+          { "aLo": 2246, "aHi": 2246, "bLo": 2239, "bHi": 2238 },
+          { "aLo": 2340, "aHi": 2340, "bLo": 2332, "bHi": 2331 },
+          { "aLo": 2363, "aHi": 2363, "bLo": 2354, "bHi": 2353 },
+          { "aLo": 2404, "aHi": 2404, "bLo": 2394, "bHi": 2393 },
+          { "aLo": 2426, "aHi": 2426, "bLo": 2415, "bHi": 2414 },
+          { "aLo": 2489, "aHi": 2489, "bLo": 2477, "bHi": 2476 },
+          { "aLo": 2580, "aHi": 2580, "bLo": 2567, "bHi": 2566 },
+          { "aLo": 2585, "aHi": 2585, "bLo": 2571, "bHi": 2570 },
+          { "aLo": 2615, "aHi": 2615, "bLo": 2600, "bHi": 2599 },
+          { "aLo": 2783, "aHi": 2783, "bLo": 2767, "bHi": 2766 },
+          { "aLo": 2793, "aHi": 2793, "bLo": 2776, "bHi": 2775 }
+        ],
+        "direct": {
+          "count": 109,
+          "sha256": "51d2db2cd6be0a112beb3388b6a423e92ca5c3b8ef3489c2b13709cb4bd641e5"
+        },
+        "image": [
+          [1438, 1455]
+        ]
+      },
+      {
+        "step": 15,
+        "hunks": [
+          { "aLo": 277, "aHi": 277, "bLo": 277, "bHi": 276 },
+          { "aLo": 331, "aHi": 331, "bLo": 330, "bHi": 329 },
+          { "aLo": 490, "aHi": 490, "bLo": 488, "bHi": 487 },
+          { "aLo": 706, "aHi": 706, "bLo": 703, "bHi": 702 },
+          { "aLo": 1103, "aHi": 1103, "bLo": 1099, "bHi": 1098 },
+          { "aLo": 1209, "aHi": 1209, "bLo": 1204, "bHi": 1203 },
+          { "aLo": 1281, "aHi": 1281, "bLo": 1275, "bHi": 1274 },
+          { "aLo": 2352, "aHi": 2351, "bLo": 2345, "bHi": 2353 },
+          { "aLo": 2738, "aHi": 2737, "bLo": 2740, "bHi": 2753 }
+        ],
+        "direct": {
+          "count": 117,
+          "sha256": "6dcd130bf411427d6b926cb0a48508fcb26363ca3fc37badfcd5c639e493e537"
+        },
+        "image": [
+          [1431, 1448]
+        ]
+      },
+      {
+        "step": 16,
+        "hunks": [
+          { "aLo": 1441, "aHi": 1441, "bLo": 1441, "bHi": 1450 }
+        ],
+        "direct": {
+          "count": 117,
+          "sha256": "58657209ed11b12ff2c7952673f90c6bdd7bbc7fabd87b4be19d8c094616caf2"
+        },
+        "image": [
+          [1431, 1457]
+        ]
+      },
+      {
+        "step": 17,
+        "hunks": [
+          { "aLo": 1443, "aHi": 1442, "bLo": 1443, "bHi": 1443 },
+          { "aLo": 1600, "aHi": 1599, "bLo": 1601, "bHi": 1609 },
+          { "aLo": 2024, "aHi": 2023, "bLo": 2034, "bHi": 2044 },
+          { "aLo": 2110, "aHi": 2109, "bLo": 2131, "bHi": 2145 }
+        ],
+        "direct": {
+          "count": 120,
+          "sha256": "4ae3d49dd0cd3205b647411d897153674826586f368288ee94e1a881595e9c7c"
+        },
+        "image": [
+          [1431, 1458]
+        ]
+      },
+      {
+        "step": 18,
+        "hunks": [
+          { "aLo": 119, "aHi": 118, "bLo": 119, "bHi": 128 },
+          { "aLo": 1464, "aHi": 1464, "bLo": 1474, "bHi": 1473 },
+          { "aLo": 1704, "aHi": 1704, "bLo": 1713, "bHi": 1712 },
+          { "aLo": 1805, "aHi": 1805, "bLo": 1813, "bHi": 1812 },
+          { "aLo": 2028, "aHi": 2028, "bLo": 2035, "bHi": 2034 },
+          { "aLo": 2133, "aHi": 2133, "bLo": 2139, "bHi": 2138 },
+          { "aLo": 2388, "aHi": 2388, "bLo": 2393, "bHi": 2392 },
+          { "aLo": 2513, "aHi": 2512, "bLo": 2517, "bHi": 2522 },
+          { "aLo": 2517, "aHi": 2517, "bLo": 2527, "bHi": 2526 }
+        ],
+        "direct": {
+          "count": 127,
+          "sha256": "30eb7dd58c17953a1e948a538d19661ff77c62e3816a80bf67d2176b4951b992"
+        },
+        "image": [
+          [1441, 1468]
+        ]
+      },
+      {
+        "step": 19,
+        "hunks": [
+          { "aLo": 141, "aHi": 141, "bLo": 141, "bHi": 140 },
+          { "aLo": 318, "aHi": 318, "bLo": 317, "bHi": 316 },
+          { "aLo": 339, "aHi": 339, "bLo": 337, "bHi": 336 },
+          { "aLo": 632, "aHi": 632, "bLo": 629, "bHi": 628 },
+          { "aLo": 920, "aHi": 920, "bLo": 916, "bHi": 915 },
+          { "aLo": 1104, "aHi": 1104, "bLo": 1099, "bHi": 1098 },
+          { "aLo": 1445, "aHi": 1445, "bLo": 1439, "bHi": 1439 },
+          { "aLo": 1785, "aHi": 1785, "bLo": 1779, "bHi": 1778 },
+          { "aLo": 2168, "aHi": 2168, "bLo": 2161, "bHi": 2160 }
+        ],
+        "direct": {
+          "count": 133,
+          "sha256": "c97fd362019c0cb75132111f2d32c998c7310c3f8816f5074b3d622998b70d1a"
+        },
+        "image": [
+          [1435, 1462]
+        ]
+      },
+      {
+        "step": 20,
+        "hunks": [
+          { "aLo": 417, "aHi": 416, "bLo": 417, "bHi": 417 }
+        ],
+        "direct": {
+          "count": 134,
+          "sha256": "673d3ad8cdd62f576afd62496712d4a4c860debf864520979c8dc4b716eae1f8"
+        },
+        "image": [
+          [1436, 1463]
+        ]
+      },
+      {
+        "step": 21,
+        "hunks": [
+          { "aLo": 1446, "aHi": 1445, "bLo": 1446, "bHi": 1454 },
+          { "aLo": 2277, "aHi": 2276, "bLo": 2286, "bHi": 2298 }
+        ],
+        "direct": {
+          "count": 135,
+          "sha256": "cf895c74cb0c4a3af49ee88aaec4fca081c93ed9eaf7c7c204ff88d033138755"
+        },
+        "image": [
+          [1436, 1472]
+        ]
+      },
+      {
+        "step": 22,
+        "hunks": [
+          { "aLo": 1439, "aHi": 1439, "bLo": 1439, "bHi": 1438 },
+          { "aLo": 1444, "aHi": 1445, "bLo": 1443, "bHi": 1442 },
+          { "aLo": 1447, "aHi": 1448, "bLo": 1444, "bHi": 1443 },
+          { "aLo": 1450, "aHi": 1450, "bLo": 1445, "bHi": 1444 },
+          { "aLo": 1452, "aHi": 1452, "bLo": 1446, "bHi": 1445 },
+          { "aLo": 1454, "aHi": 1454, "bLo": 1447, "bHi": 1446 },
+          { "aLo": 1460, "aHi": 1463, "bLo": 1452, "bHi": 1451 },
+          { "aLo": 1467, "aHi": 1467, "bLo": 1455, "bHi": 1454 }
+        ],
+        "direct": {
+          "count": 135,
+          "sha256": "65bf9333ce52849f56293a61c84bc7b4bdf06d52c39c0ad38dd69efee7fc1432"
+        },
+        "image": [
+          [1436, 1459]
+        ]
+      },
+      {
+        "step": 23,
+        "hunks": [
+          { "aLo": 324, "aHi": 324, "bLo": 324, "bHi": 323 },
+          { "aLo": 478, "aHi": 478, "bLo": 477, "bHi": 476 },
+          { "aLo": 489, "aHi": 489, "bLo": 487, "bHi": 486 },
+          { "aLo": 816, "aHi": 816, "bLo": 813, "bHi": 812 },
+          { "aLo": 948, "aHi": 948, "bLo": 944, "bHi": 943 },
+          { "aLo": 952, "aHi": 952, "bLo": 947, "bHi": 946 },
+          { "aLo": 1222, "aHi": 1222, "bLo": 1216, "bHi": 1215 },
+          { "aLo": 1346, "aHi": 1346, "bLo": 1339, "bHi": 1338 },
+          { "aLo": 1449, "aHi": 1449, "bLo": 1441, "bHi": 1441 },
+          { "aLo": 1785, "aHi": 1784, "bLo": 1777, "bHi": 1780 },
+          { "aLo": 2618, "aHi": 2617, "bLo": 2614, "bHi": 2619 }
+        ],
+        "direct": {
+          "count": 145,
+          "sha256": "a7bb0f334b80d7098baae9a7e2be318cbc98d290985a4e60d724ee5c9f3b6488"
+        },
+        "image": [
+          [1428, 1451]
+        ]
+      },
+      {
+        "step": 24,
+        "hunks": [
+          { "aLo": 1243, "aHi": 1242, "bLo": 1243, "bHi": 1257 },
+          { "aLo": 1438, "aHi": 1438, "bLo": 1453, "bHi": 1453 }
+        ],
+        "direct": {
+          "count": 146,
+          "sha256": "ff2a47b8bd8f44fd6cfe8201f0ce879016d5e6eb82837e56a8e309671cd03b8d"
+        },
+        "image": [
+          [1443, 1466]
+        ]
+      },
+      {
+        "step": 25,
+        "hunks": [
+          { "aLo": 1200, "aHi": 1199, "bLo": 1200, "bHi": 1206 },
+          { "aLo": 1454, "aHi": 1453, "bLo": 1461, "bHi": 1461 },
+          { "aLo": 1463, "aHi": 1462, "bLo": 1471, "bHi": 1476 },
+          { "aLo": 1779, "aHi": 1778, "bLo": 1793, "bHi": 1794 }
+        ],
+        "direct": {
+          "count": 148,
+          "sha256": "58b9191868ed94da0770402becae9eb2ed4eec072c743be501c51a90afcfb1e7"
+        },
+        "image": [
+          [1450, 1480]
+        ]
+      },
+      {
+        "step": 26,
+        "hunks": [
+          { "aLo": 74, "aHi": 74, "bLo": 74, "bHi": 73 },
+          { "aLo": 342, "aHi": 342, "bLo": 341, "bHi": 340 },
+          { "aLo": 427, "aHi": 427, "bLo": 425, "bHi": 424 },
+          { "aLo": 905, "aHi": 905, "bLo": 902, "bHi": 901 },
+          { "aLo": 1175, "aHi": 1175, "bLo": 1171, "bHi": 1170 }
+        ],
+        "direct": {
+          "count": 153,
+          "sha256": "84ee08a38580ff5e5c2da0e4ef4cc91cbc3069bc3465f522c044404119fd7e21"
+        },
+        "image": [
+          [1445, 1475]
+        ]
+      },
+      {
+        "step": 27,
+        "hunks": [
+          { "aLo": 1371, "aHi": 1370, "bLo": 1371, "bHi": 1380 },
+          { "aLo": 1544, "aHi": 1544, "bLo": 1554, "bHi": 1553 },
+          { "aLo": 1617, "aHi": 1617, "bLo": 1626, "bHi": 1625 },
+          { "aLo": 1652, "aHi": 1652, "bLo": 1660, "bHi": 1659 },
+          { "aLo": 1919, "aHi": 1919, "bLo": 1926, "bHi": 1925 },
+          { "aLo": 1957, "aHi": 1957, "bLo": 1963, "bHi": 1962 },
+          { "aLo": 2025, "aHi": 2025, "bLo": 2030, "bHi": 2029 },
+          { "aLo": 2036, "aHi": 2036, "bLo": 2040, "bHi": 2039 },
+          { "aLo": 2058, "aHi": 2058, "bLo": 2061, "bHi": 2060 },
+          { "aLo": 2307, "aHi": 2307, "bLo": 2309, "bHi": 2308 },
+          { "aLo": 2326, "aHi": 2326, "bLo": 2327, "bHi": 2326 },
+          { "aLo": 2430, "aHi": 2430, "bLo": 2430, "bHi": 2429 },
+          { "aLo": 2495, "aHi": 2495, "bLo": 2494, "bHi": 2493 },
+          { "aLo": 2645, "aHi": 2645, "bLo": 2643, "bHi": 2642 },
+          { "aLo": 2675, "aHi": 2675, "bLo": 2672, "bHi": 2671 },
+          { "aLo": 2811, "aHi": 2811, "bLo": 2807, "bHi": 2806 }
+        ],
+        "direct": {
+          "count": 165,
+          "sha256": "a736dd7a3042c207bf175b2e62d257d9e680745635f5aab2e423d06fb35e9bbd"
+        },
+        "image": [
+          [1455, 1485]
+        ]
+      },
+      {
+        "step": 28,
+        "hunks": [
+          { "aLo": 1470, "aHi": 1469, "bLo": 1470, "bHi": 1470 },
+          { "aLo": 1580, "aHi": 1580, "bLo": 1581, "bHi": 1580 },
+          { "aLo": 1597, "aHi": 1597, "bLo": 1597, "bHi": 1596 },
+          { "aLo": 1631, "aHi": 1631, "bLo": 1630, "bHi": 1629 },
+          { "aLo": 1796, "aHi": 1796, "bLo": 1794, "bHi": 1793 },
+          { "aLo": 1894, "aHi": 1894, "bLo": 1891, "bHi": 1890 },
+          { "aLo": 1966, "aHi": 1966, "bLo": 1962, "bHi": 1961 },
+          { "aLo": 2127, "aHi": 2127, "bLo": 2122, "bHi": 2121 },
+          { "aLo": 2285, "aHi": 2285, "bLo": 2279, "bHi": 2278 },
+          { "aLo": 2415, "aHi": 2415, "bLo": 2408, "bHi": 2407 },
+          { "aLo": 2433, "aHi": 2433, "bLo": 2425, "bHi": 2424 },
+          { "aLo": 2576, "aHi": 2576, "bLo": 2567, "bHi": 2566 },
+          { "aLo": 2663, "aHi": 2663, "bLo": 2653, "bHi": 2652 },
+          { "aLo": 2781, "aHi": 2781, "bLo": 2770, "bHi": 2769 }
+        ],
+        "direct": {
+          "count": 176,
+          "sha256": "9473066e6fbaa6f460a2c56c79e8d6e213b7bfae0391b8ced01d53f7a2e9456e"
+        },
+        "image": [
+          [1455, 1486]
+        ]
+      },
+      {
+        "step": 29,
+        "hunks": [
+          { "aLo": 1536, "aHi": 1536, "bLo": 1536, "bHi": 1535 },
+          { "aLo": 1569, "aHi": 1569, "bLo": 1568, "bHi": 1567 },
+          { "aLo": 1635, "aHi": 1635, "bLo": 1633, "bHi": 1632 },
+          { "aLo": 1681, "aHi": 1681, "bLo": 1678, "bHi": 1677 },
+          { "aLo": 1779, "aHi": 1779, "bLo": 1775, "bHi": 1774 },
+          { "aLo": 1784, "aHi": 1784, "bLo": 1779, "bHi": 1778 },
+          { "aLo": 1807, "aHi": 1807, "bLo": 1801, "bHi": 1800 },
+          { "aLo": 1826, "aHi": 1826, "bLo": 1819, "bHi": 1818 },
+          { "aLo": 1834, "aHi": 1834, "bLo": 1826, "bHi": 1825 },
+          { "aLo": 1874, "aHi": 1874, "bLo": 1865, "bHi": 1864 },
+          { "aLo": 1994, "aHi": 1994, "bLo": 1984, "bHi": 1983 },
+          { "aLo": 2042, "aHi": 2042, "bLo": 2031, "bHi": 2030 },
+          { "aLo": 2149, "aHi": 2149, "bLo": 2137, "bHi": 2136 },
+          { "aLo": 2187, "aHi": 2187, "bLo": 2174, "bHi": 2173 },
+          { "aLo": 2207, "aHi": 2207, "bLo": 2193, "bHi": 2192 },
+          { "aLo": 2367, "aHi": 2367, "bLo": 2352, "bHi": 2351 },
+          { "aLo": 2395, "aHi": 2395, "bLo": 2379, "bHi": 2378 },
+          { "aLo": 2401, "aHi": 2401, "bLo": 2384, "bHi": 2383 },
+          { "aLo": 2443, "aHi": 2443, "bLo": 2425, "bHi": 2424 },
+          { "aLo": 2840, "aHi": 2840, "bLo": 2821, "bHi": 2820 }
+        ],
+        "direct": {
+          "count": 193,
+          "sha256": "cd2dc57e8d8ae3a8e8b5c3a9c7bffe1ddf23be24411d67f24f4de0f9c4311b6d"
+        },
+        "image": [
+          [1455, 1486]
+        ]
+      },
+      {
+        "step": 30,
+        "hunks": [
+          { "aLo": 118, "aHi": 118, "bLo": 118, "bHi": 117 },
+          { "aLo": 382, "aHi": 382, "bLo": 381, "bHi": 380 },
+          { "aLo": 676, "aHi": 676, "bLo": 674, "bHi": 673 },
+          { "aLo": 841, "aHi": 841, "bLo": 838, "bHi": 837 },
+          { "aLo": 957, "aHi": 957, "bLo": 953, "bHi": 952 },
+          { "aLo": 1027, "aHi": 1027, "bLo": 1022, "bHi": 1021 },
+          { "aLo": 1371, "aHi": 1371, "bLo": 1365, "bHi": 1364 },
+          { "aLo": 1537, "aHi": 1537, "bLo": 1530, "bHi": 1529 },
+          { "aLo": 1672, "aHi": 1672, "bLo": 1664, "bHi": 1663 },
+          { "aLo": 1764, "aHi": 1764, "bLo": 1755, "bHi": 1754 },
+          { "aLo": 1935, "aHi": 1935, "bLo": 1925, "bHi": 1924 },
+          { "aLo": 1979, "aHi": 1979, "bLo": 1968, "bHi": 1967 },
+          { "aLo": 2169, "aHi": 2169, "bLo": 2157, "bHi": 2156 },
+          { "aLo": 2185, "aHi": 2185, "bLo": 2172, "bHi": 2171 },
+          { "aLo": 2246, "aHi": 2246, "bLo": 2232, "bHi": 2231 },
+          { "aLo": 2265, "aHi": 2265, "bLo": 2250, "bHi": 2249 },
+          { "aLo": 2324, "aHi": 2324, "bLo": 2308, "bHi": 2307 },
+          { "aLo": 2392, "aHi": 2392, "bLo": 2375, "bHi": 2374 },
+          { "aLo": 2445, "aHi": 2445, "bLo": 2427, "bHi": 2426 },
+          { "aLo": 2589, "aHi": 2589, "bLo": 2570, "bHi": 2569 },
+          { "aLo": 2665, "aHi": 2665, "bLo": 2645, "bHi": 2644 }
+        ],
+        "direct": {
+          "count": 211,
+          "sha256": "8db83cf47cc580e543063f1d782c57c546f882e60d3f111cd2372b47e488731c"
+        },
+        "image": [
+          [1448, 1479]
+        ]
+      },
+      {
+        "step": 31,
+        "hunks": [
+          { "aLo": 961, "aHi": 960, "bLo": 961, "bHi": 962 },
+          { "aLo": 1639, "aHi": 1638, "bLo": 1641, "bHi": 1653 },
+          { "aLo": 1775, "aHi": 1774, "bLo": 1790, "bHi": 1793 }
+        ],
+        "direct": {
+          "count": 214,
+          "sha256": "7c413753f27f6c50d7e52603087df9e86b76f43a9c32c12f70e5074a37187a4e"
+        },
+        "image": [
+          [1450, 1481]
+        ]
+      },
+      {
+        "step": 32,
+        "hunks": [
+          { "aLo": 1044, "aHi": 1044, "bLo": 1044, "bHi": 1043 },
+          { "aLo": 1239, "aHi": 1239, "bLo": 1238, "bHi": 1237 },
+          { "aLo": 1456, "aHi": 1455, "bLo": 1454, "bHi": 1454 },
+          { "aLo": 2394, "aHi": 2394, "bLo": 2393, "bHi": 2392 }
+        ],
+        "direct": {
+          "count": 215,
+          "sha256": "00dbedd75e9b371567bbbe872bfc7de8ce42887023af789d9480d670750bb47a"
+        },
+        "image": [
+          [1448, 1480]
+        ]
+      },
+      {
+        "step": 33,
+        "hunks": [
+          { "aLo": 1451, "aHi": 1451, "bLo": 1451, "bHi": 1450 },
+          { "aLo": 1455, "aHi": 1459, "bLo": 1454, "bHi": 1453 },
+          { "aLo": 1461, "aHi": 1461, "bLo": 1455, "bHi": 1454 },
+          { "aLo": 1467, "aHi": 1467, "bLo": 1460, "bHi": 1459 },
+          { "aLo": 1470, "aHi": 1471, "bLo": 1462, "bHi": 1461 },
+          { "aLo": 1473, "aHi": 1474, "bLo": 1463, "bHi": 1462 },
+          { "aLo": 1476, "aHi": 1476, "bLo": 1464, "bHi": 1463 }
+        ],
+        "direct": {
+          "count": 215,
+          "sha256": "d6a8736c79e2c352e6ef00ef22e515841aea8ed931df08fd31211fdaa43eafa6"
+        },
+        "image": [
+          [1448, 1467]
+        ]
+      },
+      {
+        "step": 34,
+        "hunks": [
+          { "aLo": 118, "aHi": 118, "bLo": 118, "bHi": 117 },
+          { "aLo": 157, "aHi": 157, "bLo": 156, "bHi": 155 },
+          { "aLo": 572, "aHi": 572, "bLo": 570, "bHi": 569 },
+          { "aLo": 630, "aHi": 630, "bLo": 627, "bHi": 626 },
+          { "aLo": 1044, "aHi": 1044, "bLo": 1040, "bHi": 1039 },
+          { "aLo": 1100, "aHi": 1100, "bLo": 1095, "bHi": 1094 },
+          { "aLo": 1241, "aHi": 1241, "bLo": 1235, "bHi": 1234 },
+          { "aLo": 1451, "aHi": 1451, "bLo": 1444, "bHi": 1443 },
+          { "aLo": 1464, "aHi": 1463, "bLo": 1456, "bHi": 1463 },
+          { "aLo": 1465, "aHi": 1465, "bLo": 1465, "bHi": 1465 }
+        ],
+        "direct": {
+          "count": 219,
+          "sha256": "b77a324ce6034f01763a1770b0d5b09512651242d20ee1094bd2130a53ef36e0"
+        },
+        "image": [
+          [1441, 1467]
+        ]
+      },
+      {
+        "step": 35,
+        "hunks": [
+          { "aLo": 1444, "aHi": 1444, "bLo": 1444, "bHi": 1443 },
+          { "aLo": 1447, "aHi": 1447, "bLo": 1446, "bHi": 1445 },
+          { "aLo": 1451, "aHi": 1463, "bLo": 1449, "bHi": 1449 },
+          { "aLo": 1541, "aHi": 1541, "bLo": 1527, "bHi": 1526 },
+          { "aLo": 1566, "aHi": 1565, "bLo": 1551, "bHi": 1555 },
+          { "aLo": 1582, "aHi": 1582, "bLo": 1572, "bHi": 1571 },
+          { "aLo": 1651, "aHi": 1651, "bLo": 1640, "bHi": 1639 },
+          { "aLo": 1760, "aHi": 1760, "bLo": 1748, "bHi": 1747 },
+          { "aLo": 1903, "aHi": 1903, "bLo": 1890, "bHi": 1889 },
+          { "aLo": 1912, "aHi": 1912, "bLo": 1898, "bHi": 1897 },
+          { "aLo": 1935, "aHi": 1935, "bLo": 1920, "bHi": 1919 },
+          { "aLo": 2004, "aHi": 2004, "bLo": 1988, "bHi": 1987 },
+          { "aLo": 2144, "aHi": 2144, "bLo": 2127, "bHi": 2126 },
+          { "aLo": 2199, "aHi": 2199, "bLo": 2181, "bHi": 2180 },
+          { "aLo": 2273, "aHi": 2273, "bLo": 2254, "bHi": 2253 },
+          { "aLo": 2386, "aHi": 2386, "bLo": 2366, "bHi": 2365 },
+          { "aLo": 2474, "aHi": 2474, "bLo": 2453, "bHi": 2452 },
+          { "aLo": 2513, "aHi": 2513, "bLo": 2491, "bHi": 2490 },
+          { "aLo": 2742, "aHi": 2742, "bLo": 2719, "bHi": 2718 }
+        ],
+        "direct": {
+          "count": 233,
+          "sha256": "7077ad9859c38e5b6117fb10bd227deb0e5ad50d42361ae067b56e145cd3200b"
+        },
+        "image": [
+          [1441, 1453]
+        ]
+      },
+      {
+        "step": 36,
+        "hunks": [
+          { "aLo": 653, "aHi": 653, "bLo": 653, "bHi": 652 },
+          { "aLo": 757, "aHi": 756, "bLo": 756, "bHi": 770 },
+          { "aLo": 957, "aHi": 957, "bLo": 971, "bHi": 970 }
+        ],
+        "direct": {
+          "count": 235,
+          "sha256": "c5c53b502a283af5f6d6fe0a0493c85e7ba72bb7d3552f3cbc320dfcf41bac0d"
+        },
+        "image": [
+          [1454, 1466]
+        ]
+      },
+      {
+        "step": 37,
+        "hunks": [
+          { "aLo": 1985, "aHi": 1984, "bLo": 1985, "bHi": 1987 },
+          { "aLo": 2313, "aHi": 2312, "bLo": 2316, "bHi": 2322 },
+          { "aLo": 2349, "aHi": 2348, "bLo": 2359, "bHi": 2359 }
+        ],
+        "direct": {
+          "count": 237,
+          "sha256": "36d223f045a7c3710c5298a64ae9ea6bf538f73f13d6795b542f99566334fff0"
+        },
+        "image": [
+          [1454, 1466]
+        ]
+      },
+      {
+        "step": 38,
+        "hunks": [
+          { "aLo": 1420, "aHi": 1419, "bLo": 1420, "bHi": 1424 },
+          { "aLo": 1458, "aHi": 1458, "bLo": 1463, "bHi": 1463 }
+        ],
+        "direct": {
+          "count": 238,
+          "sha256": "88c0c5bf301cac30cc5de4221ae47fdeace82b5b89ce034fcd6917ef4a25e03f"
+        },
+        "image": [
+          [1459, 1471]
+        ]
+      },
+      {
+        "step": 39,
+        "hunks": [
+          { "aLo": 9, "aHi": 9, "bLo": 9, "bHi": 8 },
+          { "aLo": 1314, "aHi": 1314, "bLo": 1313, "bHi": 1312 },
+          { "aLo": 1456, "aHi": 1455, "bLo": 1454, "bHi": 1454 },
+          { "aLo": 1462, "aHi": 1461, "bLo": 1461, "bHi": 1469 }
+        ],
+        "direct": {
+          "count": 241,
+          "sha256": "d3ed93ac8724ee6207abd0033c36d6897c4e4cac888ca80dafdf3b7831dce6b2"
+        },
+        "image": [
+          [1458, 1479]
+        ]
+      },
+      {
+        "step": 40,
+        "hunks": [
+          { "aLo": 1465, "aHi": 1465, "bLo": 1465, "bHi": 1465 },
+          { "aLo": 1521, "aHi": 1520, "bLo": 1521, "bHi": 1535 },
+          { "aLo": 2550, "aHi": 2549, "bLo": 2565, "bHi": 2575 }
+        ],
+        "direct": {
+          "count": 243,
+          "sha256": "79b8ea2952404cb33b4a72506735e7828cb7e0b3ba238a5f6ab56007608c7a88"
+        },
+        "image": [
+          [1458, 1479]
+        ]
+      },
+      {
+        "step": 41,
+        "hunks": [
+          { "aLo": 1468, "aHi": 1467, "bLo": 1468, "bHi": 1481 },
+          { "aLo": 1522, "aHi": 1522, "bLo": 1536, "bHi": 1535 },
+          { "aLo": 1536, "aHi": 1536, "bLo": 1549, "bHi": 1548 },
+          { "aLo": 1837, "aHi": 1837, "bLo": 1849, "bHi": 1848 },
+          { "aLo": 1839, "aHi": 1839, "bLo": 1850, "bHi": 1849 },
+          { "aLo": 1926, "aHi": 1926, "bLo": 1936, "bHi": 1935 },
+          { "aLo": 2006, "aHi": 2006, "bLo": 2015, "bHi": 2014 },
+          { "aLo": 2015, "aHi": 2015, "bLo": 2023, "bHi": 2022 },
+          { "aLo": 2027, "aHi": 2027, "bLo": 2034, "bHi": 2033 },
+          { "aLo": 2110, "aHi": 2110, "bLo": 2116, "bHi": 2115 },
+          { "aLo": 2154, "aHi": 2154, "bLo": 2159, "bHi": 2158 },
+          { "aLo": 2165, "aHi": 2165, "bLo": 2169, "bHi": 2168 },
+          { "aLo": 2550, "aHi": 2550, "bLo": 2553, "bHi": 2552 },
+          { "aLo": 2558, "aHi": 2558, "bLo": 2560, "bHi": 2559 },
+          { "aLo": 2568, "aHi": 2568, "bLo": 2569, "bHi": 2568 },
+          { "aLo": 2859, "aHi": 2859, "bLo": 2859, "bHi": 2858 }
+        ],
+        "direct": {
+          "count": 250,
+          "sha256": "62c80d27cbd615f6d31239d0ef14d40a20e672a658f3f569c7076c49d01dc54b"
+        },
+        "image": [
+          [1458, 1493]
+        ]
+      },
+      {
+        "step": 42,
+        "hunks": [
+          { "aLo": 1462, "aHi": 1462, "bLo": 1462, "bHi": 1461 },
+          { "aLo": 1464, "aHi": 1464, "bLo": 1463, "bHi": 1462 },
+          { "aLo": 1466, "aHi": 1466, "bLo": 1464, "bHi": 1463 },
+          { "aLo": 1469, "aHi": 1472, "bLo": 1466, "bHi": 1465 },
+          { "aLo": 1474, "aHi": 1477, "bLo": 1467, "bHi": 1466 },
+          { "aLo": 1481, "aHi": 1483, "bLo": 1470, "bHi": 1469 },
+          { "aLo": 1485, "aHi": 1484, "bLo": 1471, "bHi": 1471 },
+          { "aLo": 1488, "aHi": 1488, "bLo": 1475, "bHi": 1474 },
+          { "aLo": 2745, "aHi": 2744, "bLo": 2731, "bHi": 2744 },
+          { "aLo": 2766, "aHi": 2765, "bLo": 2766, "bHi": 2773 }
+        ],
+        "direct": {
+          "count": 252,
+          "sha256": "73e1212d0705e65d9c3a697d31a5d18d8a856c7ce70a6ef53e7a9f8f961b7658"
+        },
+        "image": [
+          [1458, 1479]
+        ]
+      },
+      {
+        "step": 43,
+        "hunks": [
+          { "aLo": 429, "aHi": 428, "bLo": 429, "bHi": 438 },
+          { "aLo": 1461, "aHi": 1468, "bLo": 1471, "bHi": 1470 },
+          { "aLo": 1534, "aHi": 1533, "bLo": 1536, "bHi": 1538 }
+        ],
+        "direct": {
+          "count": 253,
+          "sha256": "7684f6de70c8465ab1843b2b53538b287f3cfed233bfd63d60a220c2cd0b6ba5"
+        },
+        "image": [
+          [1468, 1481]
+        ]
+      },
+      {
+        "step": 44,
+        "hunks": [
+          { "aLo": 785, "aHi": 784, "bLo": 785, "bHi": 800 },
+          { "aLo": 1469, "aHi": 1468, "bLo": 1485, "bHi": 1489 }
+        ],
+        "direct": {
+          "count": 255,
+          "sha256": "e5bdb96dca08831e33a8122572e41471476853bb8d4ba3aa789852a4f2d24b17"
+        },
+        "image": [
+          [1484, 1502]
+        ]
+      },
+      {
+        "step": 45,
+        "hunks": [
+          { "aLo": 1013, "aHi": 1012, "bLo": 1013, "bHi": 1022 },
+          { "aLo": 1222, "aHi": 1221, "bLo": 1232, "bHi": 1232 },
+          { "aLo": 1485, "aHi": 1489, "bLo": 1496, "bHi": 1495 },
+          { "aLo": 1492, "aHi": 1492, "bLo": 1498, "bHi": 1497 }
+        ],
+        "direct": {
+          "count": 255,
+          "sha256": "0c7d85921e79bf9e49c8155f6d96bc236a4e1bddfdc3192be21804c40e04aace"
+        },
+        "image": [
+          [1495, 1507]
+        ]
+      },
+      {
+        "step": 46,
+        "hunks": [
+          { "aLo": 1496, "aHi": 1496, "bLo": 1496, "bHi": 1496 },
+          { "aLo": 1501, "aHi": 1500, "bLo": 1501, "bHi": 1504 },
+          { "aLo": 1503, "aHi": 1502, "bLo": 1507, "bHi": 1510 }
+        ],
+        "direct": {
+          "count": 255,
+          "sha256": "9fd5f4458df2567bc9b64f9756ea9cba463f3dfa6763ff857a6757f0f026ca0e"
+        },
+        "image": [
+          [1495, 1515]
+        ]
+      },
+      {
+        "step": 47,
+        "hunks": [
+          { "aLo": 13, "aHi": 13, "bLo": 13, "bHi": 12 },
+          { "aLo": 52, "aHi": 52, "bLo": 51, "bHi": 50 },
+          { "aLo": 93, "aHi": 93, "bLo": 91, "bHi": 90 },
+          { "aLo": 197, "aHi": 197, "bLo": 194, "bHi": 193 },
+          { "aLo": 314, "aHi": 314, "bLo": 310, "bHi": 309 },
+          { "aLo": 753, "aHi": 753, "bLo": 748, "bHi": 747 },
+          { "aLo": 1286, "aHi": 1286, "bLo": 1280, "bHi": 1279 },
+          { "aLo": 1360, "aHi": 1360, "bLo": 1353, "bHi": 1352 }
+        ],
+        "direct": {
+          "count": 261,
+          "sha256": "638e115b976178ef0c486f1ab1dbdbad024b3593828c8050f58f2f8b28807438"
+        },
+        "image": [
+          [1487, 1507]
+        ]
+      },
+      {
+        "step": 48,
+        "hunks": [
+          { "aLo": 76, "aHi": 76, "bLo": 76, "bHi": 75 },
+          { "aLo": 117, "aHi": 117, "bLo": 116, "bHi": 115 },
+          { "aLo": 119, "aHi": 119, "bLo": 117, "bHi": 116 },
+          { "aLo": 158, "aHi": 158, "bLo": 155, "bHi": 154 },
+          { "aLo": 198, "aHi": 198, "bLo": 194, "bHi": 193 },
+          { "aLo": 290, "aHi": 290, "bLo": 285, "bHi": 284 },
+          { "aLo": 424, "aHi": 424, "bLo": 418, "bHi": 417 },
+          { "aLo": 520, "aHi": 520, "bLo": 513, "bHi": 512 },
+          { "aLo": 719, "aHi": 719, "bLo": 711, "bHi": 710 },
+          { "aLo": 783, "aHi": 783, "bLo": 774, "bHi": 773 },
+          { "aLo": 786, "aHi": 786, "bLo": 776, "bHi": 775 },
+          { "aLo": 808, "aHi": 807, "bLo": 797, "bHi": 805 },
+          { "aLo": 1066, "aHi": 1066, "bLo": 1064, "bHi": 1063 },
+          { "aLo": 1146, "aHi": 1146, "bLo": 1143, "bHi": 1142 },
+          { "aLo": 1282, "aHi": 1282, "bLo": 1278, "bHi": 1277 },
+          { "aLo": 1418, "aHi": 1418, "bLo": 1413, "bHi": 1412 },
+          { "aLo": 2537, "aHi": 2536, "bLo": 2531, "bHi": 2542 }
+        ],
+        "direct": {
+          "count": 271,
+          "sha256": "408f1cda0f0a0eb636b9c9d724fd94d33109b68d1cdae8a2a33121724f973035"
+        },
+        "image": [
+          [1481, 1501]
+        ]
+      },
+      {
+        "step": 49,
+        "hunks": [
+          { "aLo": 1518, "aHi": 1518, "bLo": 1518, "bHi": 1517 },
+          { "aLo": 1526, "aHi": 1526, "bLo": 1525, "bHi": 1524 },
+          { "aLo": 1533, "aHi": 1533, "bLo": 1531, "bHi": 1530 },
+          { "aLo": 1600, "aHi": 1600, "bLo": 1597, "bHi": 1596 },
+          { "aLo": 1618, "aHi": 1618, "bLo": 1614, "bHi": 1613 },
+          { "aLo": 1653, "aHi": 1653, "bLo": 1648, "bHi": 1647 },
+          { "aLo": 1661, "aHi": 1661, "bLo": 1655, "bHi": 1654 },
+          { "aLo": 1663, "aHi": 1663, "bLo": 1656, "bHi": 1655 },
+          { "aLo": 1685, "aHi": 1685, "bLo": 1677, "bHi": 1676 },
+          { "aLo": 1828, "aHi": 1828, "bLo": 1819, "bHi": 1818 },
+          { "aLo": 1944, "aHi": 1944, "bLo": 1934, "bHi": 1933 },
+          { "aLo": 1952, "aHi": 1952, "bLo": 1941, "bHi": 1940 },
+          { "aLo": 1967, "aHi": 1967, "bLo": 1955, "bHi": 1954 },
+          { "aLo": 1974, "aHi": 1974, "bLo": 1961, "bHi": 1960 },
+          { "aLo": 2077, "aHi": 2077, "bLo": 2063, "bHi": 2062 },
+          { "aLo": 2083, "aHi": 2083, "bLo": 2068, "bHi": 2067 },
+          { "aLo": 2305, "aHi": 2305, "bLo": 2289, "bHi": 2288 },
+          { "aLo": 2308, "aHi": 2308, "bLo": 2291, "bHi": 2290 },
+          { "aLo": 2563, "aHi": 2563, "bLo": 2545, "bHi": 2544 },
+          { "aLo": 2728, "aHi": 2728, "bLo": 2709, "bHi": 2708 },
+          { "aLo": 2798, "aHi": 2798, "bLo": 2778, "bHi": 2777 },
+          { "aLo": 2809, "aHi": 2808, "bLo": 2788, "bHi": 2788 },
+          { "aLo": 2810, "aHi": 2810, "bLo": 2790, "bHi": 2789 },
+          { "aLo": 2912, "aHi": 2912, "bLo": 2891, "bHi": 2890 }
+        ],
+        "direct": {
+          "count": 284,
+          "sha256": "d735f238668220352bcb4dd1339fe59a7d08b896b3beeb555408b1dc8a1fb019"
+        },
+        "image": [
+          [1481, 1501]
+        ]
+      }
+    ]
+  }
+}

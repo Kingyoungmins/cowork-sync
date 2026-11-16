@@ -2,8 +2,9 @@
 // (normally realFs) and fails selected calls with errors built exactly like
 // Node's own fs errors, so production code cannot tell them apart.
 // hits: key `${op}:${code}:${pathIncludes}`, one counter per rule (header Interfaces).
-// Also emulates Windows lock holders (holdLock), a volume without hard links (setNoHardLinks),
-// race hooks (interpose) and records every call (calls). 11-testing §3.2 Fs row.
+// Also emulates Windows lock holders (holdLock; lockRefuses answers an oracle without a call), a volume without hard
+// links (setNoHardLinks), race hooks (interpose) and records every call (calls). 11-testing §3.2 Fs row.
+import { join, sep } from 'node:path';
 import { getSystemErrorMap } from 'node:util';
 import type { Fs, FsLstat, FsStat } from '../../src/ports/fs.js';
 
@@ -108,6 +109,7 @@ export class FaultFs implements Fs {
   private readonly locks = new Set<Lock>();
   private readonly interposers: Interposer[] = [];
   private noHardLinks = false;
+  private caseRoot: string | null = null;
 
   constructor(inner: Fs) {
     this.inner = inner;
@@ -132,10 +134,58 @@ export class FaultFs implements Fs {
     this.noHardLinks = on;
   }
 
+  /**
+   * Emulates a case-folding volume (NTFS, APFS by default) on a case-sensitive one, for reads under `root` only (null: off):
+   * lstat, stat and readFile of a path whose exact spelling is missing act on the entry another spelling of it names (each
+   * component matched case-insensitively against the inner readdir), as the case-folding volume would; readdir keeps the stored
+   * spellings. Writes are not emulated. Plan 3 Task 6 (the R3-33 case-variant guard's POSIX twin).
+   */
+  foldCase(root: string | null): void {
+    this.caseRoot = root;
+  }
+
+  /** The path a case-folding volume would open for p: p itself, or the stored spelling of its case variant (foldCase on). */
+  private async folded(p: string): Promise<string> {
+    const root = this.caseRoot;
+    if (root === null || !p.startsWith(root + sep)) return p;
+    if ((await this.inner.lstat(p)) !== null) return p;
+    let dir = root;
+    for (const c of p.slice(root.length + 1).split(sep)) {
+      let names: string[];
+      try {
+        names = await this.inner.readdir(dir);
+      } catch {
+        return p;
+      }
+      const hit = names.includes(c) ? c : names.find((n) => n.toLowerCase() === c.toLowerCase());
+      if (hit === undefined) return p;
+      dir = join(dir, hit);
+    }
+    return dir;
+  }
+
   /** Runs fn(path) before the inner op on a matching path, at most `times` times (default 1). */
   interpose(op: FaultOp, pathIncludes: string, fn: (p: string) => Promise<void>, times = 1): void {
     if (!(times > 0)) throw new RangeError(`FaultFs: times must be > 0 (got ${times})`);
     this.interposers.push({ op, pathIncludes, fn, left: times });
+  }
+
+  /**
+   * Whether a lock held now refuses `op` on `p` (pre()'s lock rule, read-only, no call recorded): the harness's own fault state, so an
+   * oracle may ask it without trusting the engine under test (INV-NOLOSS's share-none window, ruling R3-EF4-9, asks it for 'readFile').
+   */
+  lockRefuses(op: FaultOp, p: string): boolean {
+    return this.lockCode(op, p) !== null;
+  }
+
+  /** The error a held lock gives `op` on `p` (share-none: reads, renames, unlinks and links; share-read: renames and unlinks), or null. */
+  private lockCode(op: FaultOp, p: string, dest?: string): 'EBUSY' | 'EPERM' | null {
+    for (const lock of this.locks) {
+      if (!this.matches(lock.pathIncludes, p, dest)) continue;
+      if (lock.mode === 'share-none' && (op === 'readFile' || op === 'rename' || op === 'unlink' || op === 'link')) return 'EBUSY';
+      if (lock.mode === 'share-read' && (op === 'rename' || op === 'unlink')) return 'EPERM';
+    }
+    return null;
   }
 
   private matches(needle: string, p: string, dest?: string): boolean {
@@ -159,15 +209,8 @@ export class FaultFs implements Fs {
 
     if (op === 'link' && this.noHardLinks) this.fail('EPERM', op, p, dest);
 
-    for (const lock of this.locks) {
-      if (!this.matches(lock.pathIncludes, p, dest)) continue;
-      if (lock.mode === 'share-none' && (op === 'readFile' || op === 'rename' || op === 'unlink' || op === 'link')) {
-        this.fail('EBUSY', op, p, dest);
-      }
-      if (lock.mode === 'share-read' && (op === 'rename' || op === 'unlink')) {
-        this.fail('EPERM', op, p, dest);
-      }
-    }
+    const locked = this.lockCode(op, p, dest);
+    if (locked !== null) this.fail(locked, op, p, dest);
 
     const i = this.rules.findIndex((a) => a.rule.op === op && this.matches(a.rule.pathIncludes, p, dest));
     if (i < 0) return;
@@ -181,7 +224,7 @@ export class FaultFs implements Fs {
 
   async readFile(p: string): Promise<Buffer> {
     await this.pre('readFile', p);
-    return this.inner.readFile(p);
+    return this.inner.readFile(await this.folded(p));
   }
 
   async writeFile(p: string, data: Buffer): Promise<void> {
@@ -206,12 +249,12 @@ export class FaultFs implements Fs {
 
   async lstat(p: string): Promise<FsLstat | null> {
     await this.pre('lstat', p);
-    return this.inner.lstat(p);
+    return this.inner.lstat(await this.folded(p));
   }
 
-  async writeFileExclusive(p: string, data: Buffer): Promise<void> {
+  async writeFileExclusive(p: string, data: Buffer, mode?: number): Promise<void> {
     await this.pre('writeFileExclusive', p);
-    return this.inner.writeFileExclusive(p, data);
+    return this.inner.writeFileExclusive(p, data, mode);
   }
 
   async rmdir(p: string): Promise<void> {
@@ -231,7 +274,7 @@ export class FaultFs implements Fs {
 
   async stat(p: string): Promise<FsStat | null> {
     this.calls.push(`stat ${p}`);
-    return this.inner.stat(p);
+    return this.inner.stat(await this.folded(p));
   }
 
   async mkdirp(p: string, mode?: number): Promise<void> {

@@ -7,10 +7,13 @@
 import assert from 'node:assert/strict';
 import type { MutantId } from '../../src/engine/deps.js';
 import { DaemonLock, Engine } from '../../src/engine/loop.js';
+import type { ResolveResult, ResolveVerb } from '../../src/engine/resolve.js';
+import type { CsSignal } from '../../src/holds/signals.js';
 import type { StartOptions } from '../../src/engine/start.js';
 import type { Oid } from '../../src/git/oid.js';
+import { plan3Ports } from '../../src/holds/ports.js';
 import { PLUGIN_VERSION } from '../../src/version.js';
-import { makeCores, readWork, type CoreFixture, type CoreOptions, type PeerFixture } from './coreFixture.js';
+import { makeCores, portsFor, readWork, type CoreFixture, type CoreOptions, type PeerFixture } from './coreFixture.js';
 import { LogRecorder } from './publishHelpers.js';
 import { gitIn } from './startFixture.js';
 
@@ -18,6 +21,10 @@ export interface EngineFixture extends Omit<CoreFixture, 'peers'> {
   peers: Array<PeerFixture & { engine: Engine }>;
   startAll(opts?: StartOptions): Promise<void>;          // peer 0 genesis, the others join
   rounds(n: number, loopMs?: number): Promise<void>;    // advance every clock loopMs (default 2,500), iterate every engine in name order
+  /** Plan 3 Task 11: the human's `/cowork resolve <id> --<verb>` on peer `peer` (its index) through Engine.resolve (humanEvidence true). */
+  resolve(peer: number, id: string, verb: ResolveVerb): Promise<ResolveResult>;
+  /** Plan 3 Task 12a (R3-05): a scripted change-set signal on peer `peer` (its index) through Engine.signal (Plan 5 feeds the same shape from hooks). */
+  signal(peer: number, s: CsSignal): Promise<void>;
 }
 
 const locksOf = new WeakMap<PeerFixture, DaemonLock>();
@@ -36,15 +43,21 @@ export function logOf(p: PeerFixture): LogRecorder {
   return l;
 }
 
-/** url: the URL each peer's EngineDeps names instead of the bare remote's file:// URL (a test makes git reach the remote through it). */
-export async function makeEngines(label: string, opts: { n: number; files?: Record<string, Buffer>; autocrlf?: readonly boolean[]; seed?: string; mutants?: ReadonlySet<MutantId>; url?: (p: PeerFixture) => string } & Pick<CoreOptions, 'platform'>): Promise<EngineFixture> {
-  const fx = await makeCores(label, opts);
+/**
+ * url: the URL each peer's EngineDeps names instead of the bare remote's file:// URL (a test makes git reach the remote through it).
+ * ports (Plan 3 Task 10, X-15): as CoreOptions.ports — each Engine's deps bind plan3Ports() and then the override, the function form
+ * called once per peer with the deps that Engine is built from.
+ */
+export async function makeEngines(label: string, opts: { n: number; files?: Record<string, Buffer>; autocrlf?: readonly boolean[]; seed?: string; mutants?: ReadonlySet<MutantId>; url?: (p: PeerFixture) => string } & Pick<CoreOptions, 'platform' | 'ports' | 'engineDeps'>): Promise<EngineFixture> {
+  const { ports, ...coreOpts } = opts;
+  const fx = await makeCores(label, coreOpts);
   const locks: DaemonLock[] = [];
   try {
     const peers: Array<PeerFixture & { engine: Engine }> = [];
-    for (const p of fx.peers) {
+    for (const [i, p] of fx.peers.entries()) {
       p.deps.log = new LogRecorder();
       if (opts.url !== undefined) p.deps.url = opts.url(p);
+      Object.assign(p.deps, plan3Ports(), portsFor(ports, p.deps, i));
       const lock = await DaemonLock.acquire(p.deps.ports.fs, p.deps.paths.coworkDir, { pluginVersion: PLUGIN_VERSION, instance: `fixture-${p.name}` });
       assert.ok(lock instanceof DaemonLock, `${p.name}: daemon.lock is held`);
       locks.push(lock);
@@ -68,6 +81,16 @@ export async function makeEngines(label: string, opts: { n: number; files?: Reco
           fx.advance(loopMs);
           for (const p of peers) await p.engine.iterate();
         }
+      },
+      resolve(peer: number, id: string, verb: ResolveVerb): Promise<ResolveResult> {
+        const p = peers[peer];
+        assert.ok(p !== undefined, `resolve: no peer ${peer}`);
+        return p.engine.resolve(id, verb, { humanEvidence: true, actor: 'human' });
+      },
+      signal(peer: number, s: CsSignal): Promise<void> {
+        const p = peers[peer];
+        assert.ok(p !== undefined, `signal: no peer ${peer}`);
+        return p.engine.signal(s);
       },
       async cleanup(): Promise<void> {
         for (const l of locks) await l.release().catch(() => undefined);

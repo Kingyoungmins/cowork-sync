@@ -254,3 +254,28 @@ test('chmod sets and clears the owner-exec bit (POSIX) and keeps a file writable
   const err = await caught(realFs.chmod(path.join(dir, 'chmod-missing'), 0o644));
   assert.equal(err.code, 'ENOENT');
 });
+
+// Plan 5 Task 3 (A3-1, A3-2; X5-46, X-73): the key file's owner and status-change time, and the exclusive create's mode.
+test('lstat carries the owner uid and ctimeNs; writeFileExclusive passes its optional mode to the exclusive open', async () => {
+  const p = path.join(dir, 'a31.key');
+  await realFs.writeFileExclusive(p, BYTES, 0o600);
+  const s = await realFs.lstat(p);
+  assert.ok(s !== null);
+  const real = await fsp.lstat(p, { bigint: true });
+  assert.equal(s.uid, Number(real.uid));
+  assert.equal(s.ctimeNs, real.ctimeNs);
+  assert.equal(typeof s.ctimeNs, 'bigint');
+  if (process.platform !== 'win32') {
+    assert.equal(s.uid, process.getuid?.());
+    assert.equal(s.mode & 0o777, 0o600 & ~process.umask());
+  }
+  assert.deepEqual(await realFs.readFile(p), BYTES);
+  // Without a mode the default is unchanged (0o666 before the umask).
+  const q = path.join(dir, 'a32.key');
+  await realFs.writeFileExclusive(q, BYTES);
+  const t = await realFs.lstat(q);
+  assert.ok(t !== null);
+  if (process.platform !== 'win32') assert.equal(t.mode & 0o777, 0o666 & ~process.umask());
+  // sameStat ignores both new fields.
+  assert.equal(sameStat(s, { ...s, uid: (s.uid ?? 0) + 1, ctimeNs: (s.ctimeNs ?? 0n) + 1n }), true);
+});

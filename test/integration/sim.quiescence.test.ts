@@ -162,3 +162,83 @@ test('QUIESCENCE\'s failure text for a board that keeps moving names the round o
     await dropKept(r);
   }
 });
+
+test('EF2 D2: SimOptions.beforeQuiescenceRound runs once at the start of every quiescence round — after that round\'s op-log row, before any engine steps in it — never in an op step or an extra round, and the op-log rows it adds stay where it put them', async () => {
+  const { factory } = stubs({ backoff: new Map() });
+  const seq: string[] = [];
+  const counting: EngineFactory = (ctx, peer) => {
+    const e = factory(ctx, peer);
+    return {
+      peer: e.peer,
+      pushAttempts: e.pushAttempts!,
+      async step(c: SimContext): Promise<void> {
+        seq.push(`${c.phase}:${peer.name}`);
+        await e.step(c);
+      },
+    };
+  };
+  const r = await runSim({ seed: 'quiescence-hook', peers: 2, ops: 2 }, counting, [], {
+    quiescence: Q,
+    beforeQuiescenceRound: async (ctx, step) => {
+      const last = ctx.opLog[ctx.opLog.length - 1];
+      assert.equal(last?.kind, 'round', 'the round row comes first');
+      assert.equal(last?.step, step, 'with this round\'s step');
+      seq.push(`hook:${ctx.phase}`);
+      ctx.opLog.push({ step, peer: '*', kind: 'resume', detail: 'hook' });
+    },
+  });
+  try {
+    assert.equal(r.ok, true, JSON.stringify(r.failure));
+    const q = r.quiescence ?? assert.fail('the run had a quiescence phase');
+    assert.equal(q.reached, true);
+    assert.equal(seq.filter((x) => x.startsWith('hook:')).length, q.rounds, 'one call per quiescence round');
+    assert.ok(seq.every((x) => x !== 'hook:extra' && x !== 'hook:ops'), 'never in an extra round or an op step');
+    const firstQ = seq.indexOf('hook:quiescence');
+    assert.ok(seq.slice(0, firstQ).every((x) => x.startsWith('ops:')), 'the op steps come before the first call');
+    const quiescent = seq.slice(firstQ, seq.indexOf('extra:p0'));
+    assert.deepEqual(quiescent, Array.from({ length: q.rounds }, () => ['hook:quiescence', 'quiescence:p0', 'quiescence:p1']).flat(), 'each round: the hook, then every engine');
+    const rows = r.opLog.filter((e) => e.kind === 'round' || e.kind === 'resume');
+    rows.forEach((e, i) => {
+      if (e.kind === 'resume') assert.ok(rows[i - 1]?.kind === 'round' && rows[i - 1]!.step === e.step && rows[i - 1]!.detail.startsWith('quiescence'), `a hook row follows its quiescence round row: ${JSON.stringify(e)}`);
+    });
+  } finally {
+    await dropKept(r);
+  }
+});
+
+test('EF2 r1 F4: a string SimOptions.beforeQuiescenceRound returns fails the run at that quiescence round (oracle BEFORE_QUIESCENCE_ROUND, that round\'s step) before any engine steps in it; QuiescenceInfo.resumes counts the `resume` rows the hook added', async () => {
+  const { factory } = stubs({ backoff: new Map() });
+  const seq: string[] = [];
+  const counting: EngineFactory = (ctx, peer) => {
+    const e = factory(ctx, peer);
+    return {
+      peer: e.peer,
+      pushAttempts: e.pushAttempts!,
+      async step(c: SimContext): Promise<void> {
+        seq.push(`${c.phase}:${peer.name}`);
+        await e.step(c);
+      },
+    };
+  };
+  let calls = 0;
+  const r = await runSim({ seed: 'quiescence-hook-fails', peers: 2, ops: 2 }, counting, [], {
+    quiescence: Q,
+    beforeQuiescenceRound: async (ctx, step) => {
+      calls++;
+      if (calls === 1) {
+        ctx.opLog.push({ step, peer: 'p1', kind: 'resume', detail: 'quiescence hook' });
+        return null;
+      }
+      return `the hook refuses round ${step}`;
+    },
+  });
+  try {
+    assert.equal(r.ok, false, 'the run fails');
+    const rounds = r.opLog.filter((e) => e.kind === 'round');
+    assert.deepEqual(r.failure, { oracle: 'BEFORE_QUIESCENCE_ROUND', message: `the hook refuses round ${rounds[1]!.step}`, step: rounds[1]!.step });
+    assert.deepEqual(seq.filter((x) => x.startsWith('quiescence:')), ['quiescence:p0', 'quiescence:p1'], 'no engine steps in the failing round');
+    assert.equal(r.quiescence?.resumes, 1, 'the one resume row the hook added');
+  } finally {
+    await dropKept(r);
+  }
+});

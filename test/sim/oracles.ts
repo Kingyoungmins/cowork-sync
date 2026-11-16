@@ -19,7 +19,8 @@
 //   INV-PUSHED-IS-MERGE  every landed publish with a code commit C: P is recomputed from the journal (the push intent's
 //                     state: its ready pairs over A, the pairs C's Cowork-CS trailers name; a journaled pair C leaves
 //                     out must touch a held PIN, P2-PIN) and may differ from the composition only where MASK resets a
-//                     path to A[p] (a record the trace shows ON_DISK with a guard, or a non-LIVE path class); then
+//                     path to A[p] (a record the trace shows ON_DISK with a guard, or a non-LIVE path class) or, at MASK
+//                     step 5 (EF2 D1), where P[p] is the test-side step-5 chain over the compose event's registry; then
 //                     OUT is recomputed in the peer's repo — merge-tree --merge-base=A P TIP, the rename carry and the
 //                     conflict function's whole-path replacements and concat blobs — and must equal tree(C) in modes and
 //                     oids; C's one parent is TIP; paths(diff(TIP, C)) ⊆ paths(diff(A, P))
@@ -49,6 +50,8 @@ import { editable } from '../../src/engine/core.js';
 import { PLAN2_REGION_SPEC } from '../../src/engine/deps.js';
 import { parseMeta } from '../../src/engine/meta.js';
 import { RELEASE_NAMESPACE, type RefNamespace } from '../../src/engine/refs.js';
+import { parseCsTable, type CsTable } from '../../src/holds/changesets.js';
+import { TERMINAL_STATES } from '../../src/holds/record.js';
 import { mergeTree } from '../../src/git/merge.js';
 import { ABSENT, parseOid, type Oid } from '../../src/git/oid.js';
 import { GitRepo, type TreeEntry, type TreeMap } from '../../src/git/repo.js';
@@ -57,6 +60,10 @@ import type { TraceEvent } from '../../src/ports/trace.js';
 import { testRunner } from '../helpers/tmp.js';
 import { recordGitCalls } from './gitCalls.js';
 import { PARTITION_SUFFIX, type Oracle, type SimContext } from './harness.js';
+import { readRegistry } from './holdsView.js';
+import type { MarkerModel } from './markers.js';
+import { oracleHeldSecret, oracleNoloss } from './oracleNoloss.js';
+import { holdsOracles, oracleReleasedEnds, publishMaskOf } from './oraclesHolds.js';
 import type { PeerClone } from './peers.js';
 
 const ZERO_OID = /^0+$/;
@@ -320,7 +327,11 @@ const FAULT_SUBS: ReadonlySet<string> = new Set(['write-tree', 'commit-tree']);
  * `refs/heads/cowork/probe-`). Trace clauses: a push argv deleting a ref (`:<ref>`) is a 'probe' push and names the
  * pushing peer's own probe ref (`<allowed prefix><peer id>`); and after a write-tree or commit-tree of a peer exits 128
  * with empty stdout, that peer spawns no push in the same op (the run's git calls, recorded from the factory of
- * realEngine on, or from this oracle's first run).
+ * realEngine on, or from this oracle's first run). Plan 3 Task EF (01-engine §6, "Missing object after user gc --prune=now |
+ * write-tree / merge rc 128 | reseed private index from state:snap, retry"): a write-tree of a peer whose run already holds a
+ * `gc_prune` op of that peer (the harness's op-log, test-side) and that a later write-tree of the same peer in the same op answers
+ * with an oid (exit 0, stdout) is that retry, not the fault: the push that follows carries the retried tree. A write-tree with no
+ * earlier gc_prune of its peer, one never retried before the push, and every commit-tree failure stay faults.
  */
 export function oracleOID(allowedDeletePrefixes: string[]): Oracle {
   const allowed = [...allowedDeletePrefixes];
@@ -353,6 +364,8 @@ export function oracleOID(allowedDeletePrefixes: string[]): Oracle {
         if (peer === null) continue;
         if (FAULT_SUBS.has(c.sub) && c.code === 128 && c.stdoutEmpty) {
           faulted.set(peer, c.sub);
+        } else if (c.sub === 'write-tree' && c.code === 0 && !c.stdoutEmpty && faulted.get(peer) === 'write-tree' && ctx.opLog.some((o) => o.kind === 'gc_prune' && o.peer === peer)) {
+          faulted.delete(peer);   // the gc row's reseed-and-retry (Plan 3 Task EF): the retried write-tree answered
         } else if (c.sub === 'push' && faulted.has(peer)) {
           calls.set(ctx, i + 1);
           return `${peer}: a push after its ${faulted.get(peer)} exited 128 with empty stdout in the same op (the fault spawns no push)`;
@@ -528,22 +541,26 @@ async function chainVersions(repo: GitRepo, tip: string, path: string): Promise<
 
 // ---- INV-PUSHED-IS-MERGE ---------------------------------------------------------------------------------------------
 
-/** A publish waiting for its Bnew to land: the publisher's state and hold records as the trace stood at the event. */
-interface Waiting { e: PublishEvent; state: string | null; holds: ReadonlyMap<string, HoldEvent>; }
+/**
+ * A publish waiting for its Bnew to land: the publisher's state and hold records as the trace stood at the event, and (Plan 3 Task 10)
+ * the publisher's last `compose` event before it: its groups' readiness is the engine's (R3-63).
+ */
+interface Waiting { e: PublishEvent; state: string | null; holds: ReadonlyMap<string, HoldEvent>; compose: ComposeEvent | null; }
+type ComposeEvent = Extract<TraceEvent, { kind: 'compose' }>;
 
 /**
  * INV-PUSHED-IS-MERGE (see the file header): every 'publish' event whose Bnew landed (the remote log holds it) and that
  * carries a code commit C. A publish that has not landed is looked at again after later ops.
  */
 export function oraclePushedIsMerge(): Oracle {
-  interface Run { next: number; waiting: Waiting[]; lastState: Map<string, string>; holds: Map<string, Map<string, HoldEvent>>; }
+  interface Run { next: number; waiting: Waiting[]; lastState: Map<string, string>; holds: Map<string, Map<string, HoldEvent>>; compose: Map<string, ComposeEvent>; }
   const runs = new WeakMap<SimContext, Run>();
   return {
     name: 'INV-PUSHED-IS-MERGE',
     async afterEveryOp(ctx: SimContext): Promise<string | null> {
       let st = runs.get(ctx);
       if (st === undefined) {
-        st = { next: 0, waiting: [], lastState: new Map(), holds: new Map() };
+        st = { next: 0, waiting: [], lastState: new Map(), holds: new Map(), compose: new Map() };
         runs.set(ctx, st);
       }
       const events = ctx.trace.events;
@@ -555,8 +572,10 @@ export function oraclePushedIsMerge(): Oracle {
           const h = st.holds.get(e.peer) ?? new Map<string, HoldEvent>();
           h.set(e.id, e);
           st.holds.set(e.peer, h);
+        } else if (e.kind === 'compose') {
+          st.compose.set(e.peer, e);
         } else if (e.kind === 'publish' && e.c !== null) {
-          st.waiting.push({ e, state: st.lastState.get(e.peer) ?? null, holds: new Map(st.holds.get(e.peer) ?? []) });
+          st.waiting.push({ e, state: st.lastState.get(e.peer) ?? null, holds: new Map(st.holds.get(e.peer) ?? []), compose: st.compose.get(e.peer) ?? null });
         }
       }
       if (st.waiting.length === 0) return null;
@@ -626,20 +645,110 @@ async function journalOf(repo: GitRepo, state: string): Promise<Journal> {
   return { base: need('base', root), tP: t.get('P')?.oid ?? null, epochBase: meta.EPOCH_BASE, ready, fold };
 }
 
-/** PIN guards that make P2-PIN skip a pair (core.ts PIN_GUARDS). */
-const PIN_GUARDS: ReadonlySet<string> = new Set(['join', 'phantom', 'host-reject']);
 const PATH_CLASSES: ReadonlySet<ScopeClass> = new Set<ScopeClass>(['QUARANTINED', 'SAVE_ONLY', 'UNMANAGED']);
+const LIVE_STATES: ReadonlySet<string> = new Set(['ACTIVE', 'CONFLICTED']);
 
-/** The held PIN paths and the paths any ON_DISK record with a guard may mask, from the trace's hold events. */
-function holdPaths(holds: ReadonlyMap<string, HoldEvent>): { pinned: Set<string>; masking: Set<string> } {
-  const pinned = new Set<string>();
+/**
+ * The held PINs' path sets (Plan 3 Task 10, HLD-38: every non-terminal ON_DISK PIN with a guard holds its publication group; Plan 2's
+ * P2-PIN named only join, phantom and host-reject) and the paths any ON_DISK record with a guard may mask, from the trace's hold events.
+ */
+function holdPaths(holds: ReadonlyMap<string, HoldEvent>): { pins: string[][]; masking: Set<string> } {
+  const pins: string[][] = [];
   const masking = new Set<string>();
   for (const h of holds.values()) {
-    if (h.residence !== 'ON_DISK' || h.guard === '') continue;
+    if (h.residence !== 'ON_DISK' || h.guard === '' || !LIVE_STATES.has(h.state)) continue;
     for (const p of h.paths) masking.add(p);
-    if (h.holdKind === 'PIN' && h.guard.split(',').some((g) => PIN_GUARDS.has(g))) for (const p of h.paths) pinned.add(p);
+    if (h.holdKind === 'PIN') pins.push([...h.paths]);
   }
-  return { pinned, masking };
+  return { pins, masking };
+}
+
+/** HLD-38's closure over the journaled pairs and the held PINs sharing a path: the cs_ids of the groups a held PIN holds. */
+function heldGroups(ready: readonly JournalPair[], pins: readonly string[][]): Set<string> {
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    let r = x;
+    while (parent.has(r) && parent.get(r) !== r) r = parent.get(r)!;
+    return r;
+  };
+  const union = (a: string, b: string): void => {
+    if (!parent.has(a)) parent.set(a, a);
+    if (!parent.has(b)) parent.set(b, b);
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  };
+  for (const pair of ready) for (const p of pair.paths) union(`cs:${pair.csId}`, `p:${p}`);
+  pins.forEach((paths, i) => { for (const p of paths) union(`pin:${i}`, `p:${p}`); });
+  const heldRoots = new Set(pins.map((_, i) => find(`pin:${i}`)));
+  return new Set(ready.filter((pair) => heldRoots.has(find(`cs:${pair.csId}`))).map((pair) => pair.csId));
+}
+
+/** journal/keep/cs/table.json of a state commit (R3-40), or null while no table is journaled. */
+async function csTableOf(repo: GitRepo, state: string): Promise<CsTable | null> {
+  const r = await repo.run(['cat-file', '-e', `${state}:journal/keep/cs/table.json`], { okCodes: [0, 1, 128] });
+  if (r.code !== 0) return null;
+  const blob = (await repo.run(['rev-parse', '--verify', `${state}:journal/keep/cs/table.json`])).stdout.toString('utf8').trim();
+  return parseCsTable(await repo.readBlob(parseOid(blob)));
+}
+
+/** The not-stageable non-portable names (R3-53) a peer's `nonportable_name` ops wrote, each with the name its fix renamed it to (or null). */
+function blockedNames(ctx: SimContext, peer: string): Array<{ bad: string; fixed: string | null }> {
+  const out: Array<{ bad: string; fixed: string | null }> = [];
+  for (const e of ctx.opLog) {
+    // The op's own row, or a composite row of the generator's forced cleanup (`nonportable_name: <detail>; …`); the written name
+    // np/ok-p<i>-<k>.txt names the peer.
+    if (!e.detail.includes('np/') || (e.kind !== 'nonportable_name' && !e.detail.includes('nonportable_name: '))) continue;
+    for (const made of e.detail.matchAll(/("(?:[^"\\]|\\.)*") np\/ok-p(\d+)-\S+ stageable=false /g)) {
+      if (`p${made[2]}` === peer) out.push({ bad: JSON.parse(made[1]!) as string, fixed: null });
+    }
+    for (const fix of e.detail.matchAll(/("(?:[^"\\]|\\.)*") -> (np\/fixed-[^\s;]+)/g)) {
+      const bad = JSON.parse(fix[1]!) as string;
+      const entry = out.find((x) => x.bad === bad && x.fixed === null);
+      if (entry !== undefined) entry.fixed = fix[2]!;
+    }
+  }
+  return out;
+}
+
+/**
+ * Why a publication group the engine's compose event marks not ready is not ready, found test-side (Plan 3 Task 16, the Task 10 carry),
+ * or null. The group's membership is the event's (an open CS's paths are in no journal, R3-63); the reason must come from what the
+ * oracle reads itself (HLD-38, HLD-39, R3-53; changesets.ts readyOf's rules): (a) a held PIN — a non-terminal ON_DISK PIN with guards of
+ * the registry commit the compose event names — shares a path with the group or its journaled pairs; (b) a member's journaled pair is not
+ * from a passing capture (the state's CS table `passing`); (c) a member has no journaled ready pair — an open change-set, or a closed
+ * one not captured yet (R3-63: every csId of a composable group is among the pairs);
+ * (d) R3-53's gate: the peer wrote a not-stageable non-portable name (its `nonportable_name` op) that is still on its disk, or whose fix
+ * (the rename to np/fixed-<k>.txt) no landed live commit carries yet (the latch holds until the CS the fix opened closes, and that CS
+ * publishes with the held-back groups in one commit, DAT-32). (Task 17's revert gate needs Plan 7's revert verb; no SIM op reaches it.)
+ * Exported for its test (sim.exit.holds.test.ts).
+ */
+export async function notReadyReason(ctx: SimContext, peer: PeerClone, w: Waiting, j: Journal, g: ComposeEvent['groups'][number], cTree: TreeMap): Promise<string | null> {
+  const repo = repoOf(ctx, peer);
+  const groupPaths = new Set([...g.paths, ...j.ready.filter((p) => g.csIds.includes(p.csId)).flatMap((p) => p.paths)]);
+  const registry = w.compose?.registry ?? null;
+  if (registry !== null) {
+    const reg = await readRegistry(oracleRunner(), peer.dir, 'main', parseOid(registry));
+    for (const r of reg.records.values()) {
+      if ((TERMINAL_STATES as ReadonlySet<string>).has(r.state) || r.residence !== 'ON_DISK' || r.kind !== 'PIN' || r.guards.length === 0) continue;
+      if (r.paths.some((p) => groupPaths.has(p))) return `(a) held PIN ${r.id}`;
+    }
+  }
+  const table = w.state === null ? null : await csTableOf(repo, w.state);
+  if (table !== null) {
+    for (const id of g.csIds) {
+      if (table.passing[id] === false && j.ready.some((p) => p.csId === id)) return `(b) ${id}'s pair is not from a passing capture`;
+    }
+  }
+  for (const id of g.csIds) if (!j.ready.some((p) => p.csId === id)) return `(c) ${id} has no journaled ready pair`;
+  for (const n of blockedNames(ctx, peer.name)) {
+    if (n.fixed === null) {
+      if ((await lstat(join(peer.dir, ...n.bad.split('/'))).catch(() => null)) !== null) return `(d) ${JSON.stringify(n.bad)} is on disk`;
+      continue;
+    }
+    if (!cTree.has(n.fixed)) return `(d) the fix ${n.fixed} of ${JSON.stringify(n.bad)} is not in this publish's C`;
+  }
+  return null;
 }
 
 /** D9 (c) at the publish: every active peer of the journaled fold announced the publisher's regionSpec. */
@@ -665,14 +774,29 @@ async function checkPublish(ctx: SimContext, w: Waiting): Promise<string | null>
   if (cInfo.parents.length !== 1 || cInfo.parents[0] !== e.tip) return `${who}: C ${c} has parents ${JSON.stringify(cInfo.parents)}, not [TIP ${e.tip}]`;
   const A = await readTree(repo, j.base);
   const composed = new Set(cInfo.trailers.filter((t) => t.key === 'Cowork-CS').map((t) => t.value.split(' ')[0] ?? ''));
-  const { pinned, masking } = holdPaths(w.holds);
+  const { pins, masking } = holdPaths(w.holds);
+  const held = heldGroups(j.ready, pins);
+  const groupOf = (csId: string): ComposeEvent['groups'][number] | undefined => w.compose?.groups.find((g) => g.csIds.includes(csId));
+  let cTree: TreeMap | undefined;
   for (const id of composed) if (!j.ready.some((r) => r.csId === id)) return `${who}: C carries Cowork-CS ${id}, which the journal holds no ready pair for`;
   const X = new Map<string, TreeEntry>(A);
   for (const pair of j.ready) {
     if (!composed.has(pair.csId)) {
-      if (pair.paths.some((p) => pinned.has(p))) continue;   // P2-PIN
-      return `${who}: the journal's ready pair ${pair.csId} touches no held PIN, but C does not carry it`;
+      // HLD-38/HLD-39 (Plan 3 Task 10): a pair whose publication group a held PIN holds stays out of C. Plan 3 Task 16 (the Task 10
+      // carry; TST-07: an oracle never trusts the engine under test): a group the engine's compose event marks not ready (an open CS's
+      // paths, which the journal does not show, can join groups; R3-63) is excused only when the test side finds why (notReadyReason).
+      if (held.has(pair.csId)) continue;
+      const g = groupOf(pair.csId);
+      if (g?.ready === false) {
+        cTree ??= await readTree(repo, cInfo.tree);
+        const why = await notReadyReason(ctx, peer, w, j, g, cTree);
+        if (why !== null) continue;
+        return `${who}: the compose event marks the group ${g.key} of the journal's ready pair ${pair.csId} not ready, but the test side finds no reason (no held PIN of its registry ${String(w.compose?.registry ?? null)} in the group, no non-passing pair, no closed change-set without a pair, no R3-53 gate)`;
+      }
+      return `${who}: the journal's ready pair ${pair.csId} is in no held or not-ready group, but C does not carry it`;
     }
+    if (held.has(pair.csId)) return `${who}: C carries ${pair.csId}, whose publication group a held PIN holds (HLD-38)`;
+    if (groupOf(pair.csId)?.ready === false) return `${who}: C carries ${pair.csId}, whose group the compose event marks not ready`;
     for (const p of pair.paths) if (!same(pair.A.get(p), A.get(p))) return `${who}: the composed pair ${pair.csId} has A_cap[${p}] = ${show(pair.A.get(p))} != A[${p}] = ${show(A.get(p))} (ENG-39)`;
     for (const p of pair.paths) {
       const r = pair.R.get(p);
@@ -685,11 +809,25 @@ async function checkPublish(ctx: SimContext, w: Waiting): Promise<string | null>
   if (differ.length > 0) {
     const inp = scopeInputs(j.epochBase);
     const sizes = await blobSizes(repo, [X, P, A]);
+    // EF2 D1 (05 §3.4 item 2 step 5, HLD-42, HLD-28 "untainted edits on the same path publish normally"): a path an ON_DISK ACTIVE
+    // PATCH with guards holds at step 5 (a `revert` record) publishes R minus the held hunks, P[p] = the step-5 chain from X[p] —
+    // neither X[p] nor A[p]. It is recomputed test-side (testMask) over the registry the publish's own compose event names, read only
+    // when a path is not already explained (and only when that compose event is this publish's composition: same P, same A).
+    const compose = w.compose !== null && w.compose.pTree === e.pTree && w.compose.aTree === e.aTree ? w.compose : null;
+    let step5: Map<string, { step: number | null; entry: { mode: string; oid: string } | null }> | null | undefined;
     for (const p of differ) {
       const x = X.get(p) ?? A.get(p) ?? P.get(p);
       const size = Math.max(...[X.get(p), P.get(p), A.get(p)].map((y) => (y === undefined ? 0 : (sizes.get(y.oid) ?? 0))));
       const masked = masking.has(p) || (x !== undefined && PATH_CLASSES.has(scopeOfTracked(p, x.mode, size, inp).cls));
       if (masked && same(P.get(p), A.get(p))) continue;
+      // (A scope input simScope does not model — an EPOCH_BASE .gitattributes, a merge driver — leaves the path to the rule above.)
+      if (step5 === undefined) step5 = compose === null ? null : await publishMaskOf(ctx, peer, compose.registry, j.epochBase, X, A, differ).catch(() => null);
+      const m = step5?.get(p);
+      if (m !== undefined && m.step === 5) {
+        const o = P.get(p);
+        if (m.entry === null ? o === undefined : o !== undefined && o.oid === m.entry.oid && o.mode === m.entry.mode) continue;
+        return `${who}: P[${p}] = ${show(P.get(p))}, but the journal's composition gives ${show(X.get(p))} and MASK step 5 over registry ${String(compose!.registry)} gives ${m.entry === null ? 'absent' : `${m.entry.mode} ${m.entry.oid}`}`;
+      }
       return `${who}: P[${p}] = ${show(P.get(p))}, but the journal's composition gives ${show(X.get(p))}${masked ? ` and MASK A[${p}] = ${show(A.get(p))}` : ''}`;
     }
   }
@@ -768,11 +906,24 @@ async function checkPublish(ctx: SimContext, w: Waiting): Promise<string | null>
 // ---- INV-CONVERGE ---------------------------------------------------------------------------------------------------
 
 /** No .gitattributes in a Plan 2 SIM seed (R-31: no filter attributes): every path has git's default attributes. */
-const NO_ATTRS: PathAttrs = Object.freeze({ filter: null, merge: null, text: null, binary: false, eol: null, generated: false, coworkOff: false });
+const NO_ATTRS: PathAttrs = Object.freeze({ filter: null, merge: null, text: null, binary: false, eol: null, generated: false, coworkOff: false, workingTreeEncoding: null });
 
 function scopeInputs(epochBase: string): ScopeInputs {
   const attrs: AttrSnapshot = { epochBase: parseOid(epochBase), get: () => NO_ATTRS };
   return { attrs, config: DEFAULT_TEAM_CONFIG, mergeDrivers: new Set(), localOnlyPaths: new Set(), hooksPathDir: null };
+}
+
+/**
+ * Plan 2 Task 18 ruling (ENG-36) on R-32's LA_B == T*: a peer's LA_B is T*, or a board on T*'s first-parent chain whose live
+ * code tree equals live_code(T*)'s (a teammate's board-only last change — an event, a join, a hold mirror — leaves LA_B behind).
+ * null when it holds, else the reason.
+ */
+export async function laBAtTStar(ctx: SimContext, peer: PeerClone, laB: string, tStar: string): Promise<string | null> {
+  if (laB === tStar) return null;
+  const repo = repoOf(ctx, peer);
+  const onChain = (await firstParentChain(ctx, peer, tStar)).has(laB);
+  if (onChain && (await treeOf(repo, await liveCodeOf(repo, laB))) === (await treeOf(repo, await liveCodeOf(repo, tStar)))) return null;
+  return `${peer.name}: LA_B ${laB} != T* ${tStar}${onChain ? ' and its live code tree differs' : ' (not on its first-parent chain)'}`;
 }
 
 /** ruling R-32 (atQuiescence): see the file header. */
@@ -796,12 +947,8 @@ export function oracleConverge(): Oracle {
         const liveTree = await treeOf(repo, live);
         const liveMap = await readTree(repo, liveTree);
 
-        if (ins.laB !== tStar) {
-          const onChain = (await firstParentChain(ctx, peer, tStar)).has(ins.laB);
-          if (!onChain || (await treeOf(repo, await liveCodeOf(repo, ins.laB))) !== liveTree) {
-            return `${peer.name}: LA_B ${ins.laB} != T* ${tStar}${onChain ? ' and its live code tree differs' : ' (not on its first-parent chain)'}`;
-          }
-        }
+        const laB = await laBAtTStar(ctx, peer, ins.laB, tStar);
+        if (laB !== null) return laB;
         const skip = new Set(ins.notConverged);
         const inp = scopeInputs(ins.epochBase);
         const aMap = await readTree(repo, ins.aTree);
@@ -871,11 +1018,188 @@ async function workingTreeDiffers(
   }
 }
 
+// ---- O-STATE and O-REACH (Plan 3 Task 16; 11-testing §3.4, TST-06; INV-ENG-STATE, INV-ENG-REACH) ---------------------
+
+/** The SIM's branch: every peer's local cowork refs live under refs/cowork-local/main/ (enc('main') = 'main'). */
+const SIM_BRANCH_LOCAL = 'refs/cowork-local/main/';
+const STATE_REF = `${SIM_BRANCH_LOCAL}state`;
+const HOLDS_REF = `${SIM_BRANCH_LOCAL}holds`;
+const ZERO = /^0+$/;
+
+/** One reflog line: `<old> <new> <ident> <ts> <tz>\t<msg>`. */
+interface ReflogEntry { old: string; new: string; line: string; }
+
+/** The peer's reflog of `ref` (the file git writes under .git/logs; [] when it does not exist yet). */
+async function reflogOf(peer: PeerClone, ref: string): Promise<ReflogEntry[]> {
+  let text: string;
+  try {
+    text = await readFile(join(peer.dir, '.git', 'logs', ...ref.split('/')), 'utf8');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw e;
+  }
+  const out: ReflogEntry[] = [];
+  for (const line of text.split('\n')) {
+    if (line.length === 0) continue;
+    const m = /^([0-9a-f]{40}(?:[0-9a-f]{24})?) ([0-9a-f]{40}(?:[0-9a-f]{24})?) /.exec(line);
+    out.push({ old: m?.[1] ?? '', new: m?.[2] ?? '', line });
+  }
+  return out;
+}
+
+/** The value of a local ref of the peer (null: absent). */
+async function refValue(peer: PeerClone, ref: string): Promise<string | null> {
+  const r = await oracleRunner().run(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { class: 'local', cwd: peer.dir });
+  return r.code === 0 ? r.stdout.toString('utf8').trim() : null;
+}
+
+/**
+ * O-STATE (afterEveryOp; INV-ENG-STATE: "the state ref changes only by CAS update-ref; LA_C and LA_B are monotone on their first-parent
+ * chains", across kill -9 and restart). Per peer, from its reflog file of refs/cowork-local/main/state (written by every update-ref
+ * --create-reflog; a killed process leaves it as it was): (i) the chain — entry 0 creates the ref (old = 0…0) and entry k's old is entry
+ * k−1's new; (ii) the ref's value is the last entry's new (no update outside the logged CAS chain); (iii) every new entry's state commit
+ * has parents [LA_C, LA_B], and the previous entry's LA_C is on the new LA_C's first-parent chain (equal included), and so for LA_B —
+ * except an entry written while the peer ran a human-typed `recover` op (its re-anchor moves both to the recovered chain, 01-engine
+ * test 35; INV-FF's recover exemption). Entries already judged are not judged again.
+ */
+export function oracleState(): Oracle {
+  interface PeerSeen { entries: number; last: { commit: string; laC: string; laB: string } | null; }
+  const runs = new WeakMap<SimContext, { seen: Map<string, PeerSeen>; opLogAt: number }>();
+  return {
+    name: 'O-STATE',
+    async afterEveryOp(ctx: SimContext): Promise<string | null> {
+      let st = runs.get(ctx);
+      if (st === undefined) {
+        st = { seen: new Map(), opLogAt: 0 };
+        runs.set(ctx, st);
+      }
+      const recovering = new Set(ctx.opLog.slice(st.opLogAt).filter((e) => e.kind === 'recover').map((e) => e.peer));
+      st.opLogAt = ctx.opLog.length;
+      for (const peer of ctx.peers) {
+        const log = await reflogOf(peer, STATE_REF);
+        const seen = st.seen.get(peer.name) ?? { entries: 0, last: null };
+        st.seen.set(peer.name, seen);
+        const repo = repoOf(ctx, peer);
+        for (let k = seen.entries; k < log.length; k++) {
+          const e = log[k]!;
+          seen.entries = k + 1;
+          const prevNew = k === 0 ? null : log[k - 1]!.new;
+          if (prevNew === null ? !ZERO.test(e.old) : e.old !== prevNew) {
+            return `O-STATE (i) ${peer.name}: reflog entry ${k} of ${STATE_REF} moves ${e.old} -> ${e.new}, but ${prevNew === null ? 'the first entry must create the ref' : `the previous entry left it at ${prevNew}`} (not a CAS chain)`;
+          }
+          if (ZERO.test(e.new)) return `O-STATE (i) ${peer.name}: reflog entry ${k} deletes ${STATE_REF}`;
+          const info = await repo.readCommit(parseOid(e.new));
+          if (info.parents.length !== 2) return `O-STATE (iii) ${peer.name}: state commit ${e.new} has parents ${JSON.stringify(info.parents)}, not [LA_C, LA_B]`;
+          const [laC = '', laB = ''] = info.parents;
+          const prev = seen.last;
+          seen.last = { commit: e.new, laC, laB };
+          if (prev === null || recovering.has(peer.name)) continue;
+          for (const [which, before, now] of [['LA_C', prev.laC, laC], ['LA_B', prev.laB, laB]] as const) {
+            if (before === now) continue;
+            if (!(await firstParentChain(ctx, peer, now)).has(before)) {
+              return `O-STATE (iii) ${peer.name}: state ${prev.commit} -> ${e.new} moves ${which} ${before} -> ${now}, which does not have ${before} on its first-parent chain (not monotone)`;
+            }
+          }
+        }
+        const value = await refValue(peer, STATE_REF);
+        const tail = log[log.length - 1]?.new ?? null;
+        if (value !== tail) return `O-STATE (ii) ${peer.name}: ${STATE_REF} is at ${value ?? 'absent'}, but its reflog's last CAS left it at ${tail ?? 'absent'} (an update outside the logged CAS chain)`;
+      }
+      return null;
+    },
+  };
+}
+
+/** Every oid a tree names, recursively (trees and blobs; gitlinks are not objects of this repo). */
+async function treeOids(peer: PeerClone, treeish: string): Promise<string[]> {
+  const r = await oracleRunner().run(['ls-tree', '-r', '-t', '-z', treeish], { class: 'local', cwd: peer.dir });
+  const out: string[] = [];
+  for (const rec of r.stdout.toString('utf8').split('\0')) {
+    if (rec.length === 0) continue;
+    const [mode = '', , oid = ''] = rec.slice(0, rec.indexOf('\t')).split(' ');
+    if (mode !== '160000') out.push(oid);
+  }
+  return out;
+}
+
+/** The oids of `oids` the peer's object store lacks (cat-file --batch-check). */
+async function missingOids(peer: PeerClone, oids: readonly string[]): Promise<string[]> {
+  if (oids.length === 0) return [];
+  const r = await oracleRunner().run(['cat-file', '--batch-check=%(objectname) %(objecttype)'], { class: 'local', cwd: peer.dir, stdin: Buffer.from(`${oids.join('\n')}\n`, 'utf8') });
+  return r.stdout.toString('utf8').split('\n').filter((l) => / missing$/.test(l)).map((l) => l.split(' ')[0] ?? l);
+}
+
+/**
+ * O-REACH's verdict for one peer now (INV-ENG-REACH): every oid its state commit names — LA_C and LA_B, and every tree and blob of its
+ * tree: base (A), snap, meta, journal/intent.json, journal/t/*, journal/ready/<k>/{R,A}, journal/keep/* — and every oid of its hold
+ * registry — the registry commit's tree (records/, blobs/, local.json) and every h0/h1/s1/s2 oid each record's blob maps name — exists in
+ * the peer's object store. null when it holds.
+ */
+export async function reachVerdict(ctx: SimContext, peer: PeerClone): Promise<string | null> {
+  const want = new Map<string, string>();
+  const state = await refValue(peer, STATE_REF);
+  if (state !== null) {
+    const info = await repoOf(ctx, peer).readCommit(parseOid(state));
+    info.parents.forEach((p, i) => want.set(p, `state ${state} parent ${i === 0 ? 'LA_C' : 'LA_B'}`));
+    for (const o of await treeOids(peer, state)) if (!want.has(o)) want.set(o, `state ${state} tree`);
+  }
+  const holds = await refValue(peer, HOLDS_REF);
+  if (holds !== null) {
+    for (const o of await treeOids(peer, holds)) if (!want.has(o)) want.set(o, `registry ${holds} tree`);
+    const reg = await readRegistry(oracleRunner(), peer.dir, 'main', parseOid(holds));
+    for (const r of reg.records.values()) {
+      for (const [stage, map] of Object.entries(r.blobs) as Array<[string, Record<string, string>]>) {
+        for (const [p, o] of Object.entries(map)) if (o !== ABSENT && !want.has(o)) want.set(o, `record ${r.id} ${stage}[${p}]`);
+      }
+    }
+  }
+  const missing = await missingOids(peer, [...want.keys()]);
+  if (missing.length === 0) return null;
+  return `O-REACH ${peer.name}: ${missing.length} named object(s) missing: ${missing.slice(0, 6).map((o) => `${o} (${want.get(o)})`).join(', ')}`;
+}
+
+/**
+ * O-REACH (11-testing §3.4; INV-ENG-REACH, F-FS-4): after every op step that ran a `gc --prune=now` (an op-log row `gc_prune`: the
+ * holds generator's, or the crash matrix's gc of every clone) and at quiescence, reachVerdict holds for every peer.
+ */
+export function oracleReach(): Oracle {
+  const cursors = new WeakMap<SimContext, number>();
+  const all = async (ctx: SimContext): Promise<string | null> => {
+    for (const peer of ctx.peers) {
+      const why = await reachVerdict(ctx, peer);
+      if (why !== null) return why;
+    }
+    return null;
+  };
+  return {
+    name: 'O-REACH',
+    async afterEveryOp(ctx: SimContext): Promise<string | null> {
+      const from = cursors.get(ctx) ?? 0;
+      cursors.set(ctx, ctx.opLog.length);
+      if (!ctx.opLog.slice(from).some((e) => e.kind === 'gc_prune')) return null;
+      return all(ctx);
+    },
+    atQuiescence: all,
+  };
+}
+
 // ---- the exit set -----------------------------------------------------------------------------------------------------
 
-/** The exit criterion's six oracles (R-31): [FF, OID, FIRSTPARENT, BASE, PUSHED-IS-MERGE, CONVERGE] for one namespace. */
-export function exitOracles(ns: RefNamespace = RELEASE_NAMESPACE): Oracle[] {
-  return [
+/**
+ * X-112: the one options object of exitOracles, so the one-argument form stays valid and Plans 4–7 append their keys here
+ * (claims?: {model: ClaimsModel}, claude?, coord?, lifecycle?). `holds` (Plan 3 Task 16, R3-49): the run's MarkerModel, which
+ * INV-NOLOSS reads (the generator notes every marker it writes in it).
+ */
+export interface ExitOracleOptions { holds?: { markers: MarkerModel }; }
+
+/**
+ * The exit criterion's oracles for one namespace: Plan 2's six (R-31) — [FF, OID, FIRSTPARENT, BASE, PUSHED-IS-MERGE, CONVERGE] —
+ * and, with `o.holds` (Plan 3, R3-49: every SIM run asserts every oracle of §3.4), those six followed by INV-MASK, INV-GROUP,
+ * O-READY, O-AND, O-OFFDISK, O-LIVE-RECORD, O-ATOMIC-PUB, INV-NOSILENT, INV-NOLOSS (over o.holds.markers), INV-SECRET-HELD and
+ * (F1 audit fix #28) O-RELEASED-ENDS. Every call builds fresh oracles (each keeps per-run cursors).
+ */
+export function exitOracles(ns: RefNamespace = RELEASE_NAMESPACE, o?: ExitOracleOptions): Oracle[] {
+  const plan2: Oracle[] = [
     oracleFF(ns.remotePrefix),
     oracleOID([`${ns.remotePrefix}probe-`]),
     oracleFirstParent(),
@@ -883,4 +1207,6 @@ export function exitOracles(ns: RefNamespace = RELEASE_NAMESPACE): Oracle[] {
     oraclePushedIsMerge(),
     oracleConverge(),
   ];
+  if (o?.holds === undefined) return plan2;
+  return [...plan2, ...holdsOracles(), oracleNoloss(o.holds.markers, ns), oracleHeldSecret(ns), oracleReleasedEnds()];
 }

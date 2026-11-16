@@ -10,7 +10,7 @@ import { buildBoardCommit, CODE_SUBJECT, liveCommitTrailers, type WriterId } fro
 import { newEpoch, newPeerId, type PeerId } from '../../src/board/ids.js';
 import type { Op } from '../../src/board/ops.js';
 import { applyStep, type ApplyReport } from '../../src/engine/apply.js';
-import { prepareIteration, type IterationCtx } from '../../src/engine/core.js';
+import { prepareIteration, readmitApply, type IterationCtx } from '../../src/engine/core.js';
 import { PLAN2_REGION_SPEC } from '../../src/engine/deps.js';
 import { publishStep, resolvePushIntent, type PublishReport } from '../../src/engine/publish.js';
 import { clearIncidentIfHealed, enterIncident } from '../../src/engine/recover.js';
@@ -36,8 +36,8 @@ export interface Poll {
 
 /**
  * One loop iteration as Task 17's iterate composes it (steps 1–6): prepareIteration with a fresh fetch; the incident
- * branch enters (or keeps) the incident and stops; otherwise clearIncidentIfHealed, a kept push intent resolved first
- * (P2-PUSHINTENT-FIRST), applyStep, publishStep.
+ * branch enters (or keeps) the incident and stops; otherwise clearIncidentIfHealed (and, as the loop, the apply admission
+ * re-decided after a heal: readmitApply, R3-EF4-26), a kept push intent resolved first (P2-PUSHINTENT-FIRST), applyStep, publishStep.
  */
 export async function poll(p: PeerFixture): Promise<Poll> {
   const r = await prepareIteration(p.core, ++iteration, { materialize: 'auto', forceFetch: true });
@@ -49,6 +49,7 @@ export async function poll(p: PeerFixture): Promise<Poll> {
   }
   const it = r.it;
   const cleared = await clearIncidentIfHealed(p.core, it);
+  if (cleared) await readmitApply(p.core, it);
   if (p.core.view!.intent.kind === 'push') await resolvePushIntent(p.core, it);
   const apply = await applyStep(p.core, it);
   const publish = await publishStep(p.core, it);

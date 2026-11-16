@@ -103,7 +103,9 @@ export function abortingRunner(runner: GitRunner, signal: AbortSignal): GitRunne
 
 /**
  * Every call: class 'local', cwd dataDir, gitDir (absolute), config VIZ_GIT_CONFIG; vizGitArgvOk false throws VizGitRefused
- * before spawning; an exit code other than 0 throws GitCommandError (rev-parse's 1 is "no such ref").
+ * before spawning; a call the watchdog killed or an abort ended throws GitCommandError before its exit code is read (on Windows
+ * the tree kill makes git exit with 1, which would otherwise read as rev-parse's "no such ref"); otherwise an exit code other
+ * than 0 throws GitCommandError (rev-parse's 1 is "no such ref").
  */
 export function createVizGit(o: { runner: GitRunner; gitDir: string; dataDir: string }): VizGit {
   if (!absolutePath(o.gitDir)) throw new Error('createVizGit: the git dir must be absolute');
@@ -113,6 +115,10 @@ export function createVizGit(o: { runner: GitRunner; gitDir: string; dataDir: st
   const call = async (args: string[], stdin: Buffer | null, okCodes: readonly number[] = [0]): Promise<GitResult> => {
     if (!vizGitArgvOk(args)) throw new VizGitRefused(args);
     const r = await runner.run(args, { class: 'local', cwd: dataDir, gitDir, config: VIZ_GIT_CONFIG, ...(stdin === null ? {} : { stdin }) });
+    if (r.killedByWatchdog || r.aborted) {
+      const why = r.aborted ? '(aborted: the viewer is stopping)' : '(killed by the watchdog)';
+      throw new GitCommandError(args, r.code, Buffer.concat([r.stderr, Buffer.from(`${r.stderr.length > 0 ? '\n' : ''}${why}`, 'utf8')]));
+    }
     if (!okCodes.includes(r.code)) throw new GitCommandError(args, r.code, r.stderr);
     return r;
   };

@@ -1,0 +1,14 @@
+{
+  "session_id": "f1x7u4e0-0000-4000-8000-000000000011",
+  "transcript_path": "/home/dev/.claude/projects/repo/f1x7u4e0.jsonl",
+  "cwd": "/repo",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "NotebookEdit",
+  "tool_input": {
+    "notebook_path": "/repo/analysis/orders.ipynb",
+    "cell_id": "c1-total",
+    "new_source": "total = sum(o[\"amount\"] * o[\"quantity\"] for o in orders)\nround(total, 2)\n",
+    "cell_type": "code",
+    "edit_mode": "replace"
+  }
+}

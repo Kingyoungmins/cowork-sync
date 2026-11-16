@@ -24,9 +24,21 @@
 // Determinism: the peer's Random is created once and kept across re-creations (re-seeding would replay the same
 // bytes: the same orphan ULIDs, P2-ORPHANNAMES); the log is written at the end of every step, so no file write of a
 // step outlives it; nothing here reads real time or Math.random.
+//
+// Plan 3 (Task 13): EngineDeps.platform = RealEngineOptions.platform(index), else PeerOptions.platform (R3-47's Windows-receiver
+// emulation), else process.platform; the Plan 3 port bindings (plan3Ports(): the edit check, T0 regions, gate and symbol ports); a per-peer
+// Trace wrapper that fills TraceRecorder.monoAt with the peer's virtual mono time; realEngineOf/faultFsOf for the holds ops; and
+// timersSettled (holdTimersSettled's per-peer answer).
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { humanOnlyAttribution, PLAN2_REGION_SPEC, type EngineDeps, type MutantId } from '../../src/engine/deps.js';
+import type { EventOp, OpDraft } from '../../src/board/ops.js';
+import { foldPatch } from '../../src/engine/core.js';
+import { REVERT_EVENT_AFTER_MS } from '../../src/engine/escalation.js';
+import { humanOnlyAttribution, noClaude, PLAN2_REGION_SPEC, type EngineDeps, type MutantId } from '../../src/engine/deps.js';
+import { testRegionDeps } from '../helpers/regionDeps.js';
+import { creationDue } from '../../src/holds/mirror.js';
+import { plan3Ports } from '../../src/holds/ports.js';
+import { guardName, isTerminal } from '../../src/holds/record.js';
 import { DaemonLock, Engine, type EngineInspection } from '../../src/engine/loop.js';
 import type { RecoverResult } from '../../src/engine/recover.js';
 import { RELEASE_NAMESPACE, type RefNamespace } from '../../src/engine/refs.js';
@@ -36,14 +48,33 @@ import { realFs, type Fs } from '../../src/ports/fs.js';
 import { alwaysLeased } from '../../src/ports/lease.js';
 import { fileLog, type Log, type LogLevel, type LogParam } from '../../src/ports/log.js';
 import { randomInt, seededRandom, type Random } from '../../src/ports/random.js';
+import type { Trace } from '../../src/ports/trace.js';
 import { PLUGIN_VERSION } from '../../src/version.js';
 import { FaultFs } from './faultfs.js';
 import { recordGitCalls } from './gitCalls.js';
 import { rejectsPending, remotePartitioned, type EngineFactory, type SimContext, type SimEngine } from './harness.js';
 import type { PeerClone } from './peers.js';
 
-/** publishLocal defaults to 'all' (an edit op may precede a peer's first step). */
-export interface RealEngineOptions { publishLocal?: 'all' | 'none'; mutants?: ReadonlySet<MutantId>; namespace?: RefNamespace; }
+/**
+ * publishLocal defaults to 'all' (an edit op may precede a peer's first step). `platform` (Plan 3): EngineDeps.platform of peer i; absent
+ * = the peer's PeerOptions.platform, else process.platform.
+ */
+export interface RealEngineOptions {
+  publishLocal?: 'all' | 'none'; mutants?: ReadonlySet<MutantId>; namespace?: RefNamespace;
+  platform?: (peerIndex: number) => NodeJS.Platform;
+}
+
+/** HLD-60: a revert record's HOLD_REVERT_HELD event is due at +10 min (escalation.ts REVERT_EVENT_AFTER_MS). */
+const REVERT_HELD = 'HOLD_REVERT_HELD';
+
+/** The refs of a queued HOLD_REVERT_HELD health event draft; [] for any other draft (escalation.ts's own test, read test-side). */
+function revertEventRefs(d: OpDraft): readonly string[] {
+  if (d.type !== 'event') return [];
+  const e = d as Omit<EventOp, 'id'>;
+  return e.kind === 'health' && e.reason_code === REVERT_HELD ? e.refs : [];
+}
+/** HLD-32/HLD-54: a deferral becomes an INCOMING record (and its op) at 60 s. */
+const DEFERRAL_RECORD_MS = 60_000;
 
 /** A SimEngine that also takes the human-typed `/cowork recover` (the real engine's adapter). */
 export interface RecoverableSimEngine extends SimEngine {
@@ -124,6 +155,8 @@ function crashRandom(ctx: SimContext): Random {
 
 class RealSimEngine implements RecoverableSimEngine {
   readonly peer: PeerClone;
+  /** The peer's FaultFs (faultFsOf): one per peer, kept across restarts, as the process's file system would be. */
+  readonly fs: FaultFs;
   private readonly deps: EngineDeps;
   private readonly log: SimLog;
   private readonly publishLocal: 'all' | 'none';
@@ -137,22 +170,71 @@ class RealSimEngine implements RecoverableSimEngine {
   private graceLeft = 0;
 
   constructor(ctx: SimContext, peer: PeerClone, opts: RealEngineOptions) {
+    // Plan 4 Task 5: the regions deps are filled asynchronously at the first boot (bootRegion, inline workers).
+
     this.peer = peer;
     this.publishLocal = opts.publishLocal ?? 'all';
     const clock = ctx.clocks.get(peer.name);
     if (clock === undefined) throw new Error(`realEngine: no clock for ${peer.name}`);
     const fs = new FaultFs(realFs);
+    this.fs = fs;
     const workTree = realpathSync.native(peer.dir);
     const paths = { workTree, gitDir: join(workTree, '.git'), coworkDir: join(workTree, '.git', 'cowork') };
     this.log = new SimLog(fs, clock, join(paths.coworkDir, 'log', 'daemon-0.jsonl'));
+    const index = ctx.peers.indexOf(peer);
+    // TraceRecorder.monoAt: each event of this peer with its virtual mono time (the events carry none, TST-03).
+    const trace: Trace = { emit: (ev) => ctx.trace.emitAt(ev, clock.monoMs()) };
     this.deps = {
       ports: { clock, random: seededRandom(`${ctx.seed}/${peer.name}`), scheduler: ctx.scheduler, fs, git: ctx.git },
-      trace: ctx.trace, log: this.log, lease: alwaysLeased, attribution: humanOnlyAttribution,
+      trace, log: this.log, lease: alwaysLeased, attribution: humanOnlyAttribution, claude: noClaude,
       heartbeatMs: () => clock.monoMs(),
       paths, branch: BRANCH, namespace: opts.namespace ?? RELEASE_NAMESPACE, url: ctx.remote.url, display: `Peer ${peer.name}`,
       pluginVersion: PLUGIN_VERSION, pluginSha: PLUGIN_SHA, regionSpec: PLAN2_REGION_SPEC,
-      platform: process.platform, testBuild: true, testMutants: opts.mutants ?? new Set(),
+      // R3-47: the Windows-receiver emulation (PeerOptions.platform) on any host; an explicit option wins.
+      platform: opts.platform?.(index) ?? peer.opts.platform ?? process.platform, testBuild: true, testMutants: opts.mutants ?? new Set(),
+      ...plan3Ports(),   // Plan 3 Task 10 (R3-03, R3-04, R3-07): the four Plan 3 port bindings, through the one binder
+      // Plan 4 Task 5: set for real at the first boot (boot fills it per core; the constructor cannot await).
+      regions: { } as unknown as EngineDeps['regions'],
     };
+  }
+
+  /** The live Engine (realEngineOf): null before the first step, after a refused start and between a KilledAt and the restart. */
+  get live(): Engine | null {
+    return this.engine;
+  }
+
+  /** EngineDeps.platform of this peer (what the engine believes it runs on). */
+  get platform(): NodeJS.Platform {
+    return this.deps.platform;
+  }
+
+  /**
+   * holdTimersSettled's answer for this peer: no hold timer may push within the next `lookaheadMs` of virtual time (the extra rounds) —
+   * no HOLD_REVERT_HELD event drafted in the outbox and not landed, no non-terminal `revert` record (not INCOMING) whose event is not
+   * in the fold and comes due within the lookahead (age + lookaheadMs ≥ REVERT_EVENT_AFTER_MS; inspect().holdAgeMs is its input), no
+   * record whose creation op creationDue still withholds (an INCOMING not-applicable record before 60 s), and no pending deferral
+   * younger than 60 s (pendingAgeMs: its INCOMING record and op come at 60 s). A peer without a running engine answers true (it
+   * restarts at its next round and is asked again). Fix round 1 ruling (Option A): a fresh record's event, due beyond the lookahead,
+   * never pushes in the extra rounds, so it no longer holds T* back.
+   */
+  async timersSettled(lookaheadMs: number): Promise<boolean> {
+    const engine = this.engine;
+    if (engine === null) return true;
+    const ins = await engine.inspect();
+    if (Object.values(ins.pendingAgeMs).some((ms) => ms < DEFERRAL_RECORD_MS)) return false;
+    const core = engine.core;
+    // A drafted event pushes at the next window whatever its record's state (escalation.ts drafts it into the outbox).
+    for (const d of core.outbox.drafts()) if (revertEventRefs(d).length > 0) return false;
+    const fold = foldPatch(core)?.fold ?? core.view?.fold ?? null;
+    const posted = new Set<string>();
+    if (fold !== null) for (const e of Object.values(fold.events)) if (e.kind === 'health' && e.reason_code === REVERT_HELD) for (const id of e.refs) posted.add(id);
+    for (const r of ins.holds) {
+      if (isTerminal(r)) continue;
+      const age = ins.holdAgeMs[r.id] ?? 0;
+      if (!creationDue(r, age)) return false;
+      if (r.kind !== 'INCOMING' && r.guards.some((g) => guardName(g) === 'revert') && !posted.has(r.id) && age + lookaheadMs >= REVERT_EVENT_AFTER_MS) return false;
+    }
+    return true;
   }
 
   async step(ctx: SimContext): Promise<void> {
@@ -173,6 +255,21 @@ class RealSimEngine implements RecoverableSimEngine {
       if (preview.ok && !preview.done) out.push(await engine.recover(preview.preview.id));
     });
     return out;
+  }
+
+  /**
+   * Plan 3 Task 16 (Review Focus 3): one call on the running Engine as one process step — what `daemon.js resolve` is (R3-02: its own
+   * process, under daemon.lock) — so a KilledAt inside it ends it like a step: the engine is dropped (the process died) and the peer's
+   * next step restarts it from disk. Returns the call's value, `killed` when it died, or null when no engine runs.
+   */
+  async killable<T>(ctx: SimContext, fn: (engine: Engine) => Promise<T>): Promise<{ value: T } | { killed: true } | null> {
+    const engine = this.engine;
+    if (engine === null) return null;
+    let out: { value: T } | null = null;
+    await this.run(ctx, async () => {
+      out = { value: await fn(engine) };
+    });
+    return out ?? { killed: true };
   }
 
   /** One engine call as one daemon process step: a KilledAt ends it (the process died), anything else is thrown. */
@@ -214,7 +311,7 @@ class RealSimEngine implements RecoverableSimEngine {
       this.lock = lock;
     }
     await fs.mkdirp(join(coworkDir, 'log'));
-    const engine = await Engine.create(this.deps);
+    const engine = await Engine.create({ ...this.deps, regions: await testRegionDeps({ clock: this.deps.ports.clock }) });   // Plan 4 Task 5
     ctx.trace.names.set(engine.peerId, this.peer.name);
     this.engine = engine;
     const r = await engine.start({ publishLocal: this.publishLocal });
@@ -288,4 +385,34 @@ export function realEngine(opts?: RealEngineOptions): EngineFactory {
     recordGitCalls(ctx.git);   // INV-OID's fault clause judges every engine git call, from the first step on
     return new RealSimEngine(ctx, peer, o);
   };
+}
+
+/** Whether `sim` is a realEngine peer (the holds ops and holdTimersSettled act on those only). */
+export function isRealEngine(sim: SimEngine): boolean {
+  return sim instanceof RealSimEngine;
+}
+
+function real(sim: SimEngine, what: string): RealSimEngine {
+  if (!(sim instanceof RealSimEngine)) throw new Error(`${what}: ${sim.peer.name}'s SimEngine is not a realEngine peer`);
+  return sim;
+}
+
+/** The live Engine of a realEngine peer; null before its first step (and after a refused start) and between a KilledAt and the restart. */
+export function realEngineOf(sim: SimEngine): Engine | null {
+  return real(sim, 'realEngineOf').live;
+}
+
+/** That realEngine peer's FaultFs (lock ops, planted faults): the same object across its restarts. */
+export function faultFsOf(sim: SimEngine): FaultFs {
+  return real(sim, 'faultFsOf').fs;
+}
+
+/** RealSimEngine.killable of a realEngine peer: one call on its running Engine that a KilledAt ends like a step (Plan 3 Task 16). */
+export function killableCall<T>(sim: SimEngine, ctx: SimContext, fn: (engine: Engine) => Promise<T>): Promise<{ value: T } | { killed: true } | null> {
+  return real(sim, 'killableCall').killable(ctx, fn);
+}
+
+/** EngineDeps.platform of a realEngine peer (RealEngineOptions.platform, else PeerOptions.platform, else process.platform). */
+export function enginePlatformOf(sim: SimEngine): NodeJS.Platform {
+  return real(sim, 'enginePlatformOf').platform;
 }

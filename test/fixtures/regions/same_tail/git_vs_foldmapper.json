@@ -1,0 +1,14 @@
+{
+  "note": "The same-tail divergence that motivates L-ONE-MAPPER, regenerated (R4-21, fix round 1): big_lf.py with the rc_touch edits py_sibling_edit (row 5320) and py_same_tail_def_after (9 rows after 5341) in one post. git (measured, git 2.55.0.windows.3, myers with the indent heuristic) keeps the block after base row 5341; FoldMapper/1 (04 section 3.4 steps 1-3, derived by hand in test/unit/regionFixtures.test.ts) trims the block's last three rows into the common suffix and places the insertion after base row 5338. Both exact, but different.",
+  "base": "big_lf.py",
+  "post": "same_tail/git_vs_foldmapper.post.py",
+  "edits": ["py_sibling_edit", "py_same_tail_def_after"],
+  "git": ["@@ -5320 +5320 @@", "@@ -5341,0 +5342,9 @@"],
+  "foldMapper1": {
+    "hunks": [
+      { "aLo": 5320, "aHi": 5320, "bLo": 5320, "bHi": 5320 },
+      { "aLo": 5339, "aHi": 5338, "bLo": 5339, "bHi": 5347 }
+    ],
+    "images": { "compute_total": [[5331, 5348]] }
+  }
+}

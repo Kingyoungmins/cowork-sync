@@ -1,0 +1,17 @@
+{
+  "name": "2/param_reordered",
+  "check": 2,
+  "lang": "python",
+  "expect": "fail",
+  "reason": "incompatible_caller",
+  "line": 5,
+  "tipEqualsA": true,
+  "A": {
+    "geometry.py": "def area(width, height=1):\n    return width * height\n",
+    "rooms.py": "from geometry import area\n\n\ndef square_meters(w):\n    return area(w)\n"
+  },
+  "R": {
+    "geometry.py": "def area(height, width):\n    return width * height\n",
+    "rooms.py": "from geometry import area\n\n\ndef square_meters(w):\n    return area(w)\n"
+  }
+}

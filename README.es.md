@@ -169,6 +169,14 @@ estado actual) y `log/daemon-0.jsonl` (el registro del daemon).
   archivos sincronizados.
 - Los archivos de más de 1 MiB no se comparten cuando son nuevos, y los
   archivos de 50 MiB o más nunca se sincronizan en vivo.
+- Un búfer del editor que abriste **antes de unirte** y guardas después de
+  unirte, un `/rewind` de Claude ("Restore code") a un checkpoint de antes de
+  que te unieras, o cualquier otra restauración de un archivo entero de antes
+  de que te unieras, puede deshacer filas que escribieron tus compañeros, sin
+  ningún aviso (problema conocido J-PROV, abierto hasta que el diario cubra el
+  rango que trajo tu unión). Después de unirte, recarga los archivos que tenías
+  abiertos desde antes de guardarlos, y no restaures archivos enteros desde
+  checkpoints más antiguos que tu unión.
 - Detener la sincronización o desinstalar el plugin deja las refs
   personalizadas en el remoto. Cuando todos los PC se hayan detenido, puedes
   borrarlas a mano, por ejemplo

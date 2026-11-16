@@ -5,6 +5,7 @@ import type { Fs, FsLstat } from '../../ports/fs.js';
 import { pathOf, withoutTrailingSeparator } from '../../data/pluginDataDir.js';
 import { asUser, admittedSids, ownerOk, parseSddlAces, sddlUserOnly } from '../../sec/sddl.js';
 import type { OwnerProbe } from './ownerProbe.js';
+import { VIEWER_STDERR_FILE } from './stderrFile.js';
 
 // The moved names stay importable from here (F-8a-2): pluginDataDir and resolveDataDir live in src/data, the SDDL reading in src/sec.
 export { pluginDataDir, resolveDataDir } from '../../data/pluginDataDir.js';
@@ -92,7 +93,7 @@ async function changedSince(fs: Fs, dir: string, first: FsLstat): Promise<DataDi
   return now.dev === first.dev && now.ino === first.ino ? null : refuse('probe_failed');
 }
 
-/** The viewer's log folder (12 §3.10.10: <data dir>/log/viz-<instance>-<n>.jsonl). */
+/** The viewer's log folder (12 §3.10.10: <data dir>/log/viz-<instance>-<n>.jsonl; the CLI's stderr file log/viz-stderr.txt). */
 const LOG_DIR = 'log';
 /** The test probe's record (test/fixtures/viz/probeViewer.mjs writes <data dir>/probe.json). */
 const PROBE_RECORD = 'probe.json';
@@ -100,8 +101,9 @@ const isJsonl = (name: string): boolean => name.endsWith('.jsonl');
 
 /**
  * `dir` is empty or holds nothing but the viewer's own files: regular *.jsonl files, the probe record, and a `log` folder (no link or
- * junction) holding only regular *.jsonl files. A data directory the CLI repairs must be one the viewer made: any other folder's DACL is
- * not the CLI's to rewrite (and a link inside could lead the viewer's log writes elsewhere).
+ * junction) holding only regular *.jsonl files and the viewer's stderr file (VIEWER_STDERR_FILE, which every CLI start opens there,
+ * spawn.ts openViewerStderr). A data directory the CLI repairs must be one the viewer made: any other folder's DACL is not the CLI's to
+ * rewrite (and a link inside could lead the viewer's log writes elsewhere).
  */
 async function onlyViewerFiles(fs: Fs, dir: string, platform: NodeJS.Platform): Promise<boolean> {
   const P = pathOf(platform);
@@ -115,7 +117,7 @@ async function onlyViewerFiles(fs: Fs, dir: string, platform: NodeJS.Platform): 
       const s = await fs.lstat(p);
       if (s === null || s.isSymbolicLink || !s.isDirectory) return false;
       for (const inner of await fs.readdir(p)) {
-        if (!isJsonl(inner) || !(await regularFile(P.join(p, inner)))) return false;
+        if (!(isJsonl(inner) || inner === VIEWER_STDERR_FILE) || !(await regularFile(P.join(p, inner)))) return false;
       }
       continue;
     }

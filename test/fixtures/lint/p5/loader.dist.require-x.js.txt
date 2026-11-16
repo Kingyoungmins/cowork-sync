@@ -1,0 +1,4 @@
+// CCI-03 (8): a loader bundle that requires another module.
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+require("./x.js").main();

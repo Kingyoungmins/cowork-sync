@@ -31,7 +31,12 @@ function runIdForRoot(root: string): string {
   return createHash('sha256').update(resolve(root), 'utf8').digest('hex').slice(0, 12);
 }
 
-export interface PeerOptions { name: string; autocrlf: boolean; withFilter: boolean; }
+/**
+ * `platform` (Plan 3 Task 13, R3-47): the platform the peer's engine believes it runs on (EngineDeps.platform; realEngine's
+ * default), e.g. 'win32' for the Windows-receiver emulation on any host (data OQ-26); absent = the host's. The clone itself is
+ * made the same way whatever it says.
+ */
+export interface PeerOptions { name: string; autocrlf: boolean; withFilter: boolean; platform?: NodeJS.Platform; }
 export interface PeerClone { name: string; dir: string; filterCountFile: string; opts: PeerOptions; canary: string; }
 
 /** Single-quote for the sh command line git uses for filter drivers; forward slashes work on every OS. */

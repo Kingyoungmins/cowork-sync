@@ -12,6 +12,7 @@ import { SCENE_EVENT_KINDS, actorKey, type Position, type SceneEvent } from '../
 import type { Layout } from '../../../src/viz/model/layout.js';
 import {
   applyEvent,
+  cloneScene,
   comparePos,
   deskDimmed,
   emptyScene,
@@ -450,4 +451,94 @@ test('the scene\'s desk table stays sparse: an entry exists only for a desk with
   );
   // A start scene with no publish history has no desk entries at all (sec. 3.3.5 independence of later desks).
   assert.equal(scenesAfter([ev('person_enter', [1, 1, 0], { peer: A })]).at(-1)!.desks.size, 0);
+});
+
+/** v with every Map, Set, object and array spelled out in iteration order (deepStrictEqual alone ignores Map, Set and key order). */
+function ordered(v: unknown): unknown {
+  if (typeof v !== 'object' || v === null) return v;
+  if (v instanceof Map) return ['Map', [...v].map(([k, x]) => [k, ordered(x)])];
+  if (v instanceof Set) return ['Set', [...v].map(ordered)];
+  if (Array.isArray(v)) return ['Array', v.map(ordered)];
+  return ['Object', Object.getPrototypeOf(v) === Object.prototype, Object.keys(v).map((k) => [k, ordered((v as Record<string, unknown>)[k])])];
+}
+/** Every object reachable from v (Map values, Set items, array items, object fields). */
+function objectsOf(v: unknown, out = new Set<object>()): Set<object> {
+  if (typeof v !== 'object' || v === null || out.has(v)) return out;
+  out.add(v);
+  if (v instanceof Map) for (const x of v.values()) objectsOf(x, out);
+  else if (v instanceof Set) for (const x of v) objectsOf(x, out);
+  else for (const x of Object.values(v)) objectsOf(x, out);
+  return out;
+}
+
+/** The objects of v reached by more than one path (Map values, array items, object fields): none in a tree. */
+function sharedObjectsOf(v: unknown, seen = new Set<object>(), shared: object[] = []): object[] {
+  if (typeof v !== 'object' || v === null) return shared;
+  if (seen.has(v)) {
+    shared.push(v);
+    return shared;
+  }
+  seen.add(v);
+  if (v instanceof Map) for (const x of v.values()) sharedObjectsOf(x, seen, shared);
+  else for (const x of Object.values(v)) sharedObjectsOf(x, seen, shared);
+  return shared;
+}
+
+test('cloneScene (viz-hosted-perf; T-VIZ-perf first world): equals structuredClone of the scene, Map and key order included, and shares no object with it', () => {
+  const check = (s: Scene): void => {
+    // Every scene is a tree (the reducer copies what it stores: posOf, copyActor, new records), so a copy that does not keep
+    // shared references (structuredClone's) cannot differ from structuredClone's, nor behave differently under a later step.
+    assert.deepEqual(sharedObjectsOf(s), [], 'no object of the scene is reached twice');
+    const c = cloneScene(s);
+    assert.deepStrictEqual(ordered(c), ordered(structuredClone(s)));
+    assert.deepStrictEqual(c, s);
+    const mine = objectsOf(s);
+    assert.deepEqual([...objectsOf(c)].filter((o) => mine.has(o)), [], 'no object of the copy is one of the source\'s');
+  };
+  // The reducer's own scene after each event (peek: what step left, not a copy of it), so a reference step stored twice shows.
+  const own = (events: readonly SceneEvent[], layout: Layout): Scene[] => {
+    const r = new SceneReducer(START, () => layout);
+    return events.map((e) => {
+      r.push(e);
+      return r.peek();
+    });
+  };
+  fc.assert(
+    fc.property(eventsArb({ minLength: 1 }), (events) => {
+      for (const s of own(events, RANDOM_OFFICE)) check(s);
+    }),
+    { numRuns: RUNS, seed: 0xc10e },
+  );
+  check(START);
+  // The tree check's positive control: an actor stored in two places is found.
+  const twice = { peer: A };
+  assert.deepEqual(sharedObjectsOf({ ...START, requests: new Map([['r', { from: twice, holder: twice, desk: D1, status: null }]]) }), [twice]);
+  // Every record kind and a full beat at once (the hand sequences: claims, grants, requests, boxes, persistent "!", pets).
+  for (const seq of [bangSequence(), persistenceSequence()]) for (const s of own(seq, OFFICE)) check(s);
+});
+
+test('cloneScene copies a Set like structuredClone does (its copy\'s Set branch; no Scene field is a Set today): a new Set, items in order, each copied', () => {
+  const item = { peer: A };
+  const list = [1, { seat: 's1' }];
+  const s = { ...START, extra: new Set<unknown>([item, list, 'x', 7]) } as unknown as Scene;
+  const c = cloneScene(s) as unknown as Scene & { extra: Set<unknown> };
+  assert.ok(c.extra instanceof Set);
+  assert.notEqual(c.extra, (s as unknown as { extra: Set<unknown> }).extra, 'a new Set');
+  assert.deepStrictEqual(ordered(c), ordered(structuredClone(s)), 'equal to structuredClone, item order included');
+  const mine = objectsOf(s);
+  assert.deepEqual([...objectsOf(c)].filter((o) => mine.has(o)), [], 'no item of the copy is one of the source\'s');
+});
+
+test('SceneReducer.peek (viz-hosted-perf; the timeline builder\'s RowContext.scene): the reducer\'s scene itself, equal to scene(); a later push replaces it and leaves a scene peeked before unchanged', () => {
+  const seq = persistenceSequence();
+  const r = new SceneReducer(START, () => OFFICE);
+  for (const e of seq) {
+    const before = r.peek();
+    const frozen = structuredClone(before);
+    r.push(e);
+    assert.notEqual(r.peek(), before, 'push replaces the scene');
+    assert.deepStrictEqual(ordered(before), ordered(frozen), 'a scene peeked before a push is unchanged by it');
+    assert.equal(r.peek(), r.peek(), 'no copy');
+    assert.deepStrictEqual(ordered(r.peek()), ordered(r.scene()));
+  }
 });

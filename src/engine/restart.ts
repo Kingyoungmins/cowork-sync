@@ -15,7 +15,8 @@
 //             2 own leftovers, WITHOUT an age check (P2-OWNLOCKS; precondition: the caller holds the daemon lock, and only
 //               this daemon writes them, so a backward clock step never wedges one): every *.lock under
 //               refs/cowork-local/<e>/ and refs/cowork-remote/, <e>.index.lock, tmp/*.index and tmp/*.index.lock
-//               (P2-SCRATCHLOCK), tmp/*.new and tmp/stage; never .git/index.lock; never packed-refs.lock (P2-REPOLOCKS:
+//               (P2-SCRATCHLOCK), tmp/*.new, tmp/merge-* (the merge-file scratch, F2 #153) and tmp/stage; never
+//               .git/index.lock; never packed-refs.lock (P2-REPOLOCKS:
 //               repo-wide, any git process holds it): a stale one is logged PACKED_REFS_LOCK_STALE and left
 //             lost: a broken ref is moved aside to tmp/broken-state-ref-<e>-<k> (the remote checked by ls-remote first:
 //               git fetch dies on a broken local ref), one fetch, the repo identity (the remote branch shares the roots
@@ -23,7 +24,8 @@
 //               | board_malformed}, GENESIS_BOARD_MISSING without a board), the rebuild; a moved ref is put back on any
 //               failure while no state was created (a simulated kill excepted: a dead process does nothing, and its
 //               leftover sends the next start here again); every leftover goes once the new state is committed
-//             5 a missing or unreadable private index → read-tree <state:snap> (before the tick that needs it)
+//             5 a missing or unreadable private index → read-tree <state:snap> (before the tick that needs it); an index naming
+//               an object the store lacks is unreadable (R3-EF4-11: one cat-file --batch-check over the listed oids)
 //               one detection tick (isCarried learns the case collisions before any many-candidate decision)
 //             4 apply|local intent: Writer.rollbackIntent with targets from the journal (t/M, or the local entry's
 //               target), the leftover .old files through MANY CANDIDATES (a byte nothing places becomes a 'restart'
@@ -36,8 +38,12 @@
 //               log) through MANY CANDIDATES against state:snap, its bytes always recorded while p is absent (they may be
 //               the only copy of p); tmp/ring-*.old older than the marker by RING_KEEP_MS deleted; every other .old kept
 //               and logged (never deleted blindly); .redo and .new deleted
+//             settleHoldOps (Plan 3 Task 5): interrupted hold operators settled by DISK_EQ (also on the lost-state path, after the
+//               rebuild attached its state)
 //             the private index is reseeded from state:snap and the stat cache emptied, so the first iteration
-//               stage-reads every tracked path once and re-forms the open human CS from its tick (R-01)
+//               stage-reads every tracked path once and re-forms the open human CS from its tick (R-01); a ready pair's own
+//               path whose snap entry is neither A's nor the newest pair's R entry is observed by that tick when it reads clean
+//               (EF2 D3)
 //   lost      reseed from tree(TIP), one tick and materialize, then per path (tree(TIP) ∪ admitted disk paths ∪ stranded
 //             restores) by scope class against the distinct versions on TIP's first-parent chain back to the live base
 //             (≤ 500 commits), a stranded restore's p read from its .old (final review FD: DISK_EQ form (3), the bytes a
@@ -59,28 +65,31 @@ import { Outbox } from '../board/outbox.js';
 import { newEpoch } from '../board/ids.js';
 import { canon } from '../data/canon.js';
 import { readTeamConfig } from '../data/config.js';
+import { hasRestoreMarkerRow } from '../data/rows.js';
 import { scopeOfTracked, type Scope, type ScopeInputs } from '../data/scope.js';
 import { fetchRefs, lsRemote } from '../git/fetch.js';
-import { ABSENT, parseOid, type Absent, type Oid } from '../git/oid.js';
-import { GitCommandError, type FileMode, type GitRepo, type IndexEdit, type TreeEntry, type TreeMap } from '../git/repo.js';
+import { ABSENT, isOid, parseOid, type Absent, type Oid } from '../git/oid.js';
+import { GitCommandError, isRegularEntry, type FileMode, type GitRepo, type IndexEdit, type TreeEntry, type TreeMap } from '../git/repo.js';
 import type { DeferReason } from '../holds/groups.js';
 import type { RebaseChange } from '../holds/changesets.js';
+import { guardName } from '../holds/record.js';
 import { KilledAt } from '../ports/crashpoint.js';
 import type { FsLstat } from '../ports/fs.js';
 import type { ASetCause } from '../ports/trace.js';
 import { sanitizeUrl } from '../sec/redact.js';
 import { validPathSyntax } from '../sec/validators.js';
 import {
-  applyIntentKept, attachState, currentA, ensureAttrs, foldPatch, hooksDir, joinDraft, liveCodeOf, markApplyIntentKept, pathIsFiltered, pathIsText,
-  prepareIteration, sameEntry, setCurrentA, tickSkip, type EngineCore,
+  applyIntentKept, attachCsTable, attachState, currentA, ensureAttrs, ensureRecordAttrs, foldPatch, joinDraft, liveCodeOf, markApplyIntentKept,
+  pathIsFiltered, pathIsText, prepareIteration, provRebuildFrom, sameEntry, setCurrentA, setReformAtFirstTick, tickSkip, userHooksPathDir, type EngineCore,
 } from './core.js';
 import { isRemoteContentError } from './errors.js';
+import { reseedRestoredWrites, settleHoldOps } from './holdOps.js';
 import { liveBase } from './incident.js';
 import type { Meta } from './meta.js';
-import { onDiskConflictRecords } from './apply.js';
+import { k4Displacement, k4OffDiskPatch, onDiskConflictRecords } from './apply.js';
 import { resolvePushIntent } from './publish.js';
 import type { TickInput, TickResult } from './snapshot.js';
-import { LostStateError, StateCasLostError, type Intent, type JournalTree, type StateView } from './state.js';
+import { LostStateError, readOpSnap, StateCasLostError, type Intent, type JournalTree, type StateView } from './state.js';
 import { stageable } from './stagedRead.js';
 import { editTreeIndexOnly, IndexRefusedPathError } from './treeEdit.js';
 import { LOCAL_INTENT_KEEP, orphanAside, RING_KEEP_MS, type StrandedRestore } from './writer.js';
@@ -133,7 +142,7 @@ const sameAs = (x: TreeEntry | Absent | null, e: TreeEntry | undefined): boolean
  * ScopeInputs at `epochBase` outside an iteration (no IterationCtx before a state exists): the attributes of `paths`
  * (one check-attr, also taken into the core's attribute map by ensureAttrs; a path failing validPathSyntax is never
  * asked: D5 makes it UNMANAGED first), the team config at epochBase, the configured merge drivers and the user's hooks
- * directory by core.ts's hooksDir (the loop's own rule, so start, restart and lost-state scope equal the loop's).
+ * directory by core.ts's userHooksPathDir (the loop's own rule, so start, restart and lost-state scope equal the loop's).
  */
 export async function scopeInputsFor(core: EngineCore, epochBase: Oid, paths: Iterable<string>): Promise<ScopeInputs> {
   const repo = core.repo;
@@ -147,7 +156,7 @@ export async function scopeInputsFor(core: EngineCore, epochBase: Oid, paths: It
     const name = key.slice('merge.'.length, key.length - '.driver'.length);
     if (name.length > 0) mergeDrivers.add(name);
   }
-  const hooksPathDir = hooksDir(core.deps.paths.workTree, await repo.configGet('core.hooksPath'));
+  const hooksPathDir = await userHooksPathDir(repo, core.deps.ports.fs, core.deps.paths.workTree, core.deps.log);   // R3-FF2-F2, R3-EF4-27
   const config = (await readTeamConfig(repo, epochBase)).config;
   return { attrs, config, mergeDrivers, localOnlyPaths: new Set(), hooksPathDir };
 }
@@ -270,6 +279,18 @@ async function unlinkQuiet(core: EngineCore, p: string, what: string): Promise<b
   }
 }
 
+/** rmrf of an own leftover directory; a failure is kept and logged as unlinkQuiet logs one (RESTART_LEFTOVER_KEPT). */
+async function rmrfQuiet(core: EngineCore, p: string, what: string): Promise<boolean> {
+  try {
+    await core.deps.ports.fs.rmrf(p);
+    return true;
+  } catch (e) {
+    if (e instanceof KilledAt) throw e;
+    core.deps.log.write('warn', 'RESTART_LEFTOVER_KEPT', { what, code: codeOf(e) ?? 'unknown' });
+    return false;
+  }
+}
+
 async function readdirQuiet(core: EngineCore, dir: string): Promise<string[]> {
   try {
     return [...(await core.deps.ports.fs.readdir(dir))].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
@@ -335,7 +356,8 @@ export async function removeOwnLocks(core: EngineCore): Promise<void> {
  * ENG-53 step 2, own leftovers only, removed WITHOUT an age check (P2-OWNLOCKS: the caller holds the daemon lock and only
  * this daemon writes them, so one stamped after the marker — a backward clock step, a skewed peer — is as stale as any):
  * every lock under the own namespaces refs/cowork-local/<e>/ and refs/cowork-remote/ (a power loss inside update-ref or
- * fetch), <e>.index.lock, the scratch indexes and their locks (P2-SCRATCHLOCK), every tmp/*.new and the stage copies.
+ * fetch), <e>.index.lock, the scratch indexes and their locks (P2-SCRATCHLOCK), every tmp/*.new, every tmp/merge-* (the
+ * merge-file scratch of ruling G1-FILEFORM, a directory or a stray file; F2 #153, R-T8B-8) and the stage copies.
  * Never .git/index.lock. P2-REPOLOCKS: packed-refs.lock is repo-wide (any git process holds it) and never removed; one at
  * least 30 s older than the marker is logged PACKED_REFS_LOCK_STALE{age_s} once (git's own refusal tells the human the
  * way out). .old and .redo files are the rollback's and the later leftover step's.
@@ -345,8 +367,17 @@ async function removeOwnLeftovers(core: EngineCore, mark: bigint): Promise<void>
   await removeOwnLocks(core);
   const tmp = join(coworkDir, 'tmp');
   for (const name of await readdirQuiet(core, tmp)) {
-    if (!name.endsWith('.new')) continue;
     const f = join(tmp, name);
+    if (name.startsWith('merge-')) {
+      // F2 #153 (R-T8B-8): the merge-file scratch tmp/merge-<pid>-<n>/ (src/git/merge.ts, ruling G1-FILEFORM) a crash left
+      // behind — every merge runs inside an Engine operation of this daemon.lock holder (P2-OWNLOCKS), so none is live now.
+      const st = await lstatQuiet(core, f);
+      if (st === null) continue;
+      if (!st.isDirectory) await unlinkQuiet(core, f, 'own_leftover');
+      else await rmrfQuiet(core, f, 'own_leftover');
+      continue;
+    }
+    if (!name.endsWith('.new')) continue;
     const st = await lstatQuiet(core, f);
     if (st !== null && !st.isDirectory) await unlinkQuiet(core, f, 'own_leftover');
   }
@@ -374,10 +405,12 @@ function coworkRelative(core: EngineCore, file: string): string | null {
  * logs agree with the tmp/ names it reads (a line written before the clone moved names a file outside the cowork dir
  * and is ignored: such an orphan is unknown and kept). Within one log the latest line for a file wins, a null path
  * included (the file becomes unknown); two logs that disagree about a file (two paths, or a path and null) make it
- * unknown. Only the files with a known path are returned; every other orphan is kept, never deleted blindly.
+ * unknown. Only the files with a known path are returned; every other orphan is kept, never deleted blindly. EF2 fix round 1, F1:
+ * with the latest line's `pre` (an apply leftover's pre-image blob, keepAsOrphan), else null.
  */
-async function orphanPaths(core: EngineCore): Promise<Map<string, string>> {
+async function orphanPaths(core: EngineCore): Promise<Map<string, { path: string; pre: Oid | null }>> {
   const all = new Map<string, string | null>();
+  const pres = new Map<string, Oid | null>();
   const ambiguous = new Set<string>();
   const dir = core.path(DAEMON_LOG_DIR);
   const logs = (await readdirQuiet(core, dir))
@@ -397,11 +430,14 @@ async function orphanPaths(core: EngineCore): Promise<Map<string, string>> {
     for (const line of text.split('\n')) {
       if (!line.includes('WRITE_TMP_ORPHAN')) continue;
       try {
-        const o = JSON.parse(line) as { code?: unknown; params?: { file?: unknown; path?: unknown } };
+        const o = JSON.parse(line) as { code?: unknown; params?: { file?: unknown; path?: unknown; pre?: unknown } };
         if (o.code !== 'WRITE_TMP_ORPHAN' || typeof o.params?.file !== 'string') continue;
         const key = coworkRelative(core, o.params.file);
         // The latest line wins, a path that is no string (null: the writer knew none) included.
-        if (key !== null) mine.set(key, typeof o.params.path === 'string' ? o.params.path : null);
+        if (key !== null) {
+          mine.set(key, typeof o.params.path === 'string' ? o.params.path : null);
+          pres.set(key, typeof o.params.pre === 'string' && isOid(o.params.pre) ? o.params.pre : null);
+        }
       } catch {
         // a torn line names nothing
       }
@@ -411,8 +447,8 @@ async function orphanPaths(core: EngineCore): Promise<Map<string, string>> {
       all.set(k, p);
     }
   }
-  const out = new Map<string, string>();
-  for (const [k, p] of all) if (p !== null && !ambiguous.has(k)) out.set(k, p);
+  const out = new Map<string, { path: string; pre: Oid | null }>();
+  for (const [k, p] of all) if (p !== null && !ambiguous.has(k)) out.set(k, { path: p, pre: pres.get(k) ?? null });
   return out;
 }
 
@@ -431,7 +467,7 @@ async function freeTmpName(core: EngineCore, prefix: string, ext: string): Promi
  * CANDIDATES; a failure while drawing the name (its lstat) or renaming leaves it where it is (logged). The name it ends
  * up at.
  */
-async function keepAsOrphan(core: EngineCore, file: string, path: string, why: string): Promise<string> {
+async function keepAsOrphan(core: EngineCore, file: string, path: string, why: string, pre: Oid | null = null): Promise<string> {
   const { fs, random, clock } = core.deps.ports;
   let aside: string;
   try {
@@ -442,7 +478,7 @@ async function keepAsOrphan(core: EngineCore, file: string, path: string, why: s
     core.deps.log.write('warn', 'RESTART_OLD_KEPT', { path, read: why, code: codeOf(e) ?? 'unknown' });
     return file;
   }
-  core.deps.log.write('warn', 'WRITE_TMP_ORPHAN', { file: aside, path, kept: true });
+  core.deps.log.write('warn', 'WRITE_TMP_ORPHAN', { file: aside, path, kept: true, ...(pre !== null ? { pre } : {}) });
   return aside;
 }
 
@@ -499,20 +535,34 @@ export async function restart(core: EngineCore): Promise<RestartReport> {
     if (lost) {
       report.lostState = await rebuildLostState(core, broken);
       report.restartRecords = [...report.lostState.records];
+      // Plan 3 Task 5: interrupted hold operators settle by observation once the rebuilt state is attached (lostStateRebuild).
+      await settleHoldOps(core);
       return report;
     }
     const v = view as StateView;
     attachState(core, v);
+    // R3-69 (Plan 3 Task 12a): the journaled CS table (truth) and the cache (open membership, only when it names this commit).
+    await attachCsTable(core, v);
+    // R3-59 (Plan 3 Task 8): the provenance journal is loaded at LA_C before the intent resolution, so the decision commit appends
+    // only commits after it; a journal left one commit behind (a kill at apply.state) is advanced, a lost or corrupt one rebuilt
+    // over (provRebuildFrom, LA_C].
+    await core.prov.load(v.laC, await provRebuildFrom(core));
     report.intent = v.intent.kind;
     // A moved-aside broken ref next to a usable state: a crash after the new state's commit, before its removal.
     await removeBrokenStateLeftovers(core);
 
-    // 5, before the tick that needs it: a missing or unreadable private index → read-tree <state:snap>.
+    // 5, before the tick that needs it: a missing or unreadable private index → read-tree <state:snap>. EF4 round 2 R-1 (ruling
+    // R3-EF4-11): an index naming an object the store lacks (a private-index-only blob pruned by gc --prune=now while the daemon was
+    // down, 01-engine:145) is unreadable too — the tick below sizes S_raw[p]'s blob for every tracked path (the stat cache is empty)
+    // and would fail at every respawn; one cat-file --batch-check over the oids of the listIndex result just read.
     const privateIndex = join(core.deps.paths.coworkDir, `${core.refs.e}.index`);
     let indexOk = (await lstatQuiet(core, privateIndex)) !== null;
+    let missingObject = false;
     if (indexOk) {
       try {
-        await core.repo.listIndex(privateIndex);
+        const entries = await core.repo.listIndex(privateIndex);
+        missingObject = await core.snapshot.privateIndexNamesMissingObject(entries);
+        indexOk = !missingObject;
       } catch (e) {
         if (e instanceof KilledAt) throw e;
         indexOk = false;
@@ -521,13 +571,15 @@ export async function restart(core: EngineCore): Promise<RestartReport> {
     if (!indexOk) {
       await unlinkQuiet(core, privateIndex, 'private_index');
       await core.snapshot.reseed(v.snap);
-      core.deps.log.write('warn', 'PRIVATE_INDEX_RESEEDED', { snap: v.snap });
+      core.deps.log.write('warn', 'PRIVATE_INDEX_RESEEDED', missingObject ? { snap: v.snap, cause: 'missing_object' } : { snap: v.snap });
     }
 
     // One tick before any many-candidate decision (P2-CARRY: case collisions are known only after a tick).
     const { aTree, A } = await currentA(core);
     const { tick } = await tickOutside(core, A, aTree, v.meta.EPOCH_BASE);
     if (tick.failed) throw new Error('restart: the detection tick failed (a refresh or diff-files error on the private index)');
+    // R3-71: every hold record's paths join the start-time scope, so a record rev before the first iteration is never failed closed.
+    await ensureRecordAttrs(core, v.meta.EPOCH_BASE);
 
     // 4 the journaled intent.
     let handled: ReadonlySet<string> = new Set();
@@ -545,12 +597,20 @@ export async function restart(core: EngineCore): Promise<RestartReport> {
       }
     }
 
+    // Plan 3 Task 5: interrupted hold operators (markers parks, PARK/RESTORE/discard, take captures, K4 TIP writes) settle by
+    // observation after the intent resolution and before the reseed, which then reproduces a completed park's snap entry (R3-60).
+    await settleHoldOps(core);
+
     // tmp/ leftovers of earlier runs (orphans, ring files, .redo).
     await resolveTmpLeftovers(core, mark, report, handled);
 
     // The first iteration stage-reads every tracked path once and re-forms the open human CS from its tick (R-01); a path
     // whose local change an earlier update already took into state:snap reads as unchanged there, so it joins here.
     await core.snapshot.reseed(core.view!.snap);
+    // E16-E (HLD-17, HLD-26 (b)): a restore's write is observed across the restart too — the reseed put snap[p] back in the private
+    // index (a restore makes no snap transition, HLD-57 (e)), so the first tick's delta of p is the restore's own write (and its marker
+    // rows), never an unobserved one (RegistryLocal.restored).
+    await reseedRestoredWrites(core);
     await reformOpenCs(core);
     return report;
   } finally {
@@ -566,12 +626,40 @@ export async function restart(core: EngineCore): Promise<RestartReport> {
  * scope comes from the attributes at EPOCH_BASE and the entry's real blob size (the stat cache is empty after the reseed).
  * First (final review FD, Task 19 round-3 residual) the ready pairs drop their vanished paths (dropVanishedReady), so a
  * created-then-deleted file whose close died with the process is never published.
+ *
+ * EF2 D3 (HLD-36 "every unpublished local delta not in a ready pair" — a delta of diff(A, S_disk), judged against the ready pairs by
+ * content, not by path name): a ready pair's own path can carry a newer local change too — an edit made after the pair's capture,
+ * which an apply's ENG-36 update took into snap. Every path whose snap entry differs from A's and from the newest pair's R entry is
+ * handed to the first tick (setReformAtFirstTick), which observes it when it finds the path clean (S_disk = snap). The verdict waits
+ * for the tick because a capture's state commit does not move snap: snap can lag R while the disk already equals R, a change already
+ * captured.
+ *
+ * EF2 fix round 1, F3 (R-01 as ruled: "diff(A, S_disk) minus the paths whose S_disk entry equals the newest ready pair's R entry", with
+ * the operator-transition exemption): a path whose snap equals A is handed over too — a revert to A's bytes after the capture, which an
+ * apply took into snap, is a local delta against the pair (the stale capture must not publish) — except a path whose snap entry is an
+ * R3-60 snap-only operator transition's write (journal/keep/op_snap, readOpSnap: the park family, `--discard`): an attributed write,
+ * which the running daemon never observes either (its private-index entry is set), so the restart does not turn it into a capture.
+ * EF2 fix round 2: an entry lasts only until a capture names its path (csStep's dropCapturedOpSnap) — a human change captured after
+ * the operator's write, so a later return to the operator's bytes held only by the open CS is handed over like any other change.
  */
 async function reformOpenCs(core: EngineCore): Promise<void> {
   const { A } = await currentA(core);
   const snap = await core.repo.readTreeMap(core.view!.snap);
   await dropVanishedReady(core, A, snap);
   const view = core.view!;
+  const carried = new Map<string, TreeEntry | undefined>();
+  const trees = new Map<Oid, TreeMap>();
+  for (const pair of [...core.cs.ready()].sort((a, b) => a.order - b.order)) {
+    let R = trees.get(pair.R);
+    if (R === undefined) trees.set(pair.R, (R = await core.repo.readTreeMap(pair.R)));
+    for (const p of pair.paths) carried.set(p, R.get(p));
+  }
+  const ops = await readOpSnap(core.repo, view);
+  const operatorWrite = (p: string): boolean => ops.has(p) && ops.get(p) === (snap.get(p)?.oid ?? ABSENT);
+  // A path already waiting for a capture is no handover: dropVanishedReady put a kept pair's vanished creation back into `pending`
+  // (absent from A, snap and the disk), where the capture after the intent's resolution drops it from that pair.
+  const waiting = core.cs.openPaths();
+  setReformAtFirstTick(core, new Set([...carried].filter(([p, r]) => !sameEntry(r, snap.get(p)) && !operatorWrite(p) && !waiting.has(p)).map(([p]) => p)));
   const ready = new Set(core.cs.ready().flatMap((r) => r.paths));
   const candidates: Array<{ path: string; entry: TreeEntry }> = [];
   for (const p of [...new Set([...A.keys(), ...snap.keys()])].sort()) {
@@ -785,12 +873,18 @@ async function resolveWriteIntent(core: EngineCore, v: StateView, report: Restar
       continue;
     }
     if (mc.read === 'ok' && mc.raw !== null) {
-      const id = await restartRecord(core, path, A.get(path), mc.raw, live(path));
+      // R3-75: a stranded .old whose bytes are A[p] holds the local deletion (h0 = A[p], h1 = ABSENT, as the missing-file
+      // branch below), so MASK step 5 withholds p's absence; any other .old holds its own bytes as h1 (the only copy).
+      const held = strandedHere && mc.raw === A.get(path)?.oid ? ABSENT : mc.raw;
+      const id = await restartRecord(core, path, A.get(path), held, live(path));
       report.restartRecords.push(id);
       recorded.add(path);
       await unlinkQuiet(core, file, 'old_recorded');
     } else {
-      handled.add(await keepAsOrphan(core, file, path, mc.raw === null && mc.read === 'ok' ? 'filter_failure' : mc.read));
+      // EF2 r1 F1: an apply's leftover is decided later against its pre-image t/S[p] too (`pre` in the line): the completion's snap
+      // now holds the written blob of a verified write, no longer the pre-image the .old duplicates.
+      const p0 = intent.kind === 'apply' ? (pre.get(path) ?? ABSENT) : ABSENT;
+      handled.add(await keepAsOrphan(core, file, path, mc.raw === null && mc.read === 'ok' ? 'filter_failure' : mc.read, p0 === ABSENT ? null : p0.oid));
     }
   }
 
@@ -801,22 +895,57 @@ async function resolveWriteIntent(core: EngineCore, v: StateView, report: Restar
   // A Map, written back by Object.fromEntries (own keys; group FC's LEFT item): `pending[path] = …` on a plain object would
   // call the prototype setter for a path named `__proto__` and drop it.
   const pending = new Map<string, DeferReason>(Object.entries(v.meta.pending));
+  // EF2 fix round 1, F1 (ENG-36 / 01-engine §3.14 step 4 as ruled for EF2 D4): the completion's snap is t/S with each verified write's
+  // entry (the target M[p] the disk shows; the writer round-tripped the private index to it) and each verified deletion removed — as
+  // applyStep's own state update — so the unconditional reseed from state:snap below (R3-60) reproduces the round trip. With t/S, a
+  // kill after the round trip and before the apply's state commit put the revert detector's prev[p] back on the pre-apply bytes.
+  // The DAT-26/R3-33 index-only entries are not in the journaled intent and stay as t/S holds them (UNMANAGED is masked).
+  const snapEdits: IndexEdit[] = [];
   for (const { path, mc, matchesTarget, matchesPre } of decisions) {
     if (intent.kind === 'apply') {
       if (matchesTarget) {
+        const m = targets.get(path) ?? null;
+        snapEdits.push(m === null ? { path, remove: true } : { path, mode: m.mode, oid: m.oid });
+        // R3-EF4-21 (EF4 r2 I2-2): the decision moves p's private-index entry (the reseed from this snap), so p's ObservedWrites entry
+        // ends, as at applyStep's. A no-op in today's call graph — restart() runs on a fresh core and nothing records before step 4
+        // (settleHoldOps records after it) — kept so the rule holds wherever this decision runs.
+        core.observed.forget(path);
         // The verified write happened: A[p] := TIP[p] (ENG-36 as the crashed apply would have made it).
         const t = TIP!.get(path);
         const a = A.get(path);
         aEdits.push(t === undefined ? { path, remove: true } : { path, mode: t.mode, oid: t.oid });
         aSet.push({ path, blob: t?.oid ?? null });
         // An apply-side K4 the crashed apply created before its write (R-02): TIP[p] is on disk, so EVERY ON_DISK
-        // CONFLICTED conflict record of p goes OFF_DISK, not only one per path (final review FB-5).
-        const recs = onDiskConflictRecords(core, path);
+        // CONFLICTED conflict record of p goes OFF_DISK, not only one per path (final review FB-5) — a PIN K4 target too, and the
+        // write is then a `take_tip` for HLD-41 as in the crashed apply (EF4 round 2 K-2, R3-EF4-15).
+        // Ruling R3-EF4-31 (EF5 merge M-3; as the apply's post-write move, R3-EF4-28): a record carrying `markers` moves only when
+        // the written bytes hold no restore-marker row — k4OffDiskPatch releases `markers` on the premise that the disk then holds
+        // none (DAT-46). The check covers every written path, a TAKE_TIP's included: TIP[p] keeps a row when a teammate's commit put one
+        // there (R3-FF3-B3), and the apply checks its TAKE_TIP paths the same way (ruling R3-SPEC-3); bytes that keep a row (a clean
+        // merge over a stale marker row, or such a TIP blob) leave such a record ON_DISK with `markers` (never unmasked).
+        // Ruling R3-SPEC-7: a path whose records all stay so counts as the merge it was, as the apply counts it (its `how`): `take_tip`
+        // for a TAKE_TIP, told by the journaled target M_disk[p] being TIP[p]'s own entry (the apply's TAKE_TIP writes TIP's entry),
+        // else `clean`. Before, such a path always counted `clean` (R[p] := M_disk[p]), so a ready pair the live apply cancels stayed
+        // ready after a crash. A clean merge whose result is TIP's blob exactly (the local change already in TIP) under a kept record
+        // also counts `take_tip` here: its pairs over p are cancelled and re-captured — one capture more, never a stale R.
+        let recs = onDiskConflictRecords(core, path);
+        const marked = (id: string): boolean => core.holds.get(id)!.guards.some((g) => guardName(g) === 'markers');
+        let kept = false;
+        if (m !== null && isRegularEntry(m) && recs.some(marked) && hasRestoreMarkerRow(await repo.readBlob(m.oid))) {
+          recs = recs.filter((id) => !marked(id));
+          kept = recs.length === 0;
+        }
+        const takeTip = recs.length > 0 || (kept && sameEntry(m ?? undefined, t));
         changes.push({
-          path, aOld: a ?? null, aNew: t ?? null, written: recs.length > 0 ? 'take_tip' : 'clean',
-          sDiskBefore: S!.get(path) ?? null, writtenEntry: recs.length > 0 ? null : (M!.get(path) ?? null),
+          path, aOld: a ?? null, aNew: t ?? null, written: takeTip ? 'take_tip' : 'clean',
+          sDiskBefore: S!.get(path) ?? null, writtenEntry: takeTip ? null : (M!.get(path) ?? null),
         });
-        for (const id of recs) await core.holds.transition(id, { residence: 'OFF_DISK' });
+        // R-02: TIP[p] is on disk; R3-22 (Plan 3 Task 5): displaced_by and peer_authors in the same rev; EF4 E4-1 (R3-EF4-7):
+        // `markers` released in it too for a K4 onto a markers record (k4OffDiskPatch; its companion keeps the marker file).
+        if (recs.length > 0) {
+          const displaced = await k4Displacement(core, intent.tip, path);
+          for (const id of recs) await core.holds.transition(id, k4OffDiskPatch(core.holds.get(id)!, displaced));
+        }
         pending.delete(path);
         continue;
       }
@@ -834,16 +963,22 @@ async function resolveWriteIntent(core: EngineCore, v: StateView, report: Restar
     }
   }
 
-  // ONE state update: A, LA_C, LA_B, the rebased ready pairs, the intent cleared (apply: snap := t/S as ENG-36 writes).
+  // ONE state update: A, LA_C, LA_B, the rebased ready pairs, the intent cleared (apply: snap := t/S with the verified writes, F1).
   const rebase = await core.cs.rebase(repo, changes, core.scratch('r'));
   const newATree = await editTreeIndexOnly(repo, deps.ports.fs, aTree, aEdits, core.scratch('a'));
   const newA = newATree === aTree ? A : await repo.readTreeMap(newATree);
+  const newSnap = intent.kind === 'apply' ? await editTreeIndexOnly(repo, deps.ports.fs, must(v.t.get('S'), 't/S'), snapEdits, core.scratch('a')) : null;
   const keep = new Map(v.keep);
   keep.delete(LOCAL_INTENT_KEEP);
   const fp = foldPatch(core);
   const meta: Meta = { ...v.meta, pending: Object.fromEntries(pending), ...(fp !== null ? fp.meta : {}) };
+  // Plan 3 final review F8 (05-holds Algorithm REV step 8, §8 Q18 option (a)): this completion is itself a clean HLD-41 rebase, and each
+  // revert shrink mark it moved is a reverts.jsonl line appended and fsynced before the state update that stores the rebased pair (as
+  // applyStep's), so the next restart re-derives the moved mark. A kill between the append and the commit is safe: a line whose oid
+  // matches no journaled pair is ignored by rederiveRevertMarks.
+  for (const m of rebase.marksMoved ?? []) await core.reverts.appendMove(m.cs, new Map(Object.entries(m.written)));
   await core.commit({
-    ...(intent.kind === 'apply' ? { laC: intent.tip, laB: intent.board, snap: must(v.t.get('S'), 't/S') } : {}),
+    ...(intent.kind === 'apply' ? { laC: intent.tip, laB: intent.board, snap: newSnap! } : {}),
     base: newATree, meta, intent: { kind: 'none' }, t: new Map(), keep, ready: rebase.ready,
     ...(fp !== null ? { fold: fp.fold } : {}),
   });
@@ -875,8 +1010,8 @@ async function liveScopes(core: EngineCore, epochBase: Oid, A: TreeMap, paths: r
  * tmp/ leftovers of earlier runs (Task 10 carry rulings, Task 15 findings), in name order, with no age check but the
  * ring's (P2-OWNLOCKS: the restart-mark age rule applies to tmp/ring-* only): a known-path orphan .old (its path in a
  * WRITE_TMP_ORPHAN line, P2-ORPHANNAMES) goes through MANY CANDIDATES against S_disk[p] (state:snap) — equal while p is
- * on disk: deleted; else (other bytes, or p absent: the orphan may be the only copy of p, e.g. a stranded restore the
- * writer moved aside) a restart record holding its bytes, then deleted; unreadable: kept; a ring .old (tmp/ring-*) whose
+ * on disk (or its line's `pre`, an apply leftover's pre-image, EF2 r1 F1): deleted; else (other bytes, or p absent: the
+ * orphan may be the only copy of p, e.g. a stranded restore the writer moved aside) a restart record holding its bytes, then deleted; unreadable: kept; a ring .old (tmp/ring-*) whose
  * window ended RING_KEEP_MS before the marker is deleted (younger: a late write moved its mtime, kept); every other .old
  * (an orphan of unknown path, an intent name no intent names any more) is kept and logged — never deleted blindly;
  * .redo and .new files are deleted.
@@ -902,12 +1037,16 @@ async function resolveTmpLeftovers(core: EngineCore, mark: bigint, report: Resta
       else core.deps.log.write('warn', 'RESTART_RING_KEPT', { file });
       continue;
     }
-    const path = known.get(`tmp/${name}`);
-    if (path === undefined || !stageable(path)) {
+    const k = known.get(`tmp/${name}`);
+    const path = k?.path;
+    if (k === undefined || path === undefined || !stageable(path)) {
       core.deps.log.write('warn', 'RESTART_ORPHAN_KEPT', { file, why: 'unknown_path' });
       continue;
     }
-    const mc = await core.diskEq.manyCandidates(path, [snap.get(path) ?? ABSENT], file);
+    // EF2 r1 F1: an apply's kept leftover is also a duplicate of its write's pre-image (the line's `pre`), when that blob still exists.
+    const s0 = snap.get(path);
+    const preEntry = k.pre !== null && k.pre !== s0?.oid && (await core.repo.hasObject(k.pre, 'blob')) ? [{ path, mode: s0?.mode ?? '100644', oid: k.pre } as TreeEntry] : [];
+    const mc = await core.diskEq.manyCandidates(path, [s0 ?? ABSENT, ...preEntry], file);
     if (mc.read === 'missing') continue;
     const onDisk = (await lstatQuiet(core, join(core.deps.paths.workTree, ...path.split('/')))) !== null;
     if (mc.match !== null && onDisk) {
@@ -1115,6 +1254,8 @@ export async function lostStateRebuild(core: EngineCore, T: Oid, mode: 'lost_sta
   }
   const all = [...(paths ?? new Set([...TIP.keys(), ...S.keys(), ...strandedOf.keys()]))].sort();
   const scope = await scopeInputsFor(core, epochBase, all);
+  // R3-71: every hold record's paths join the rebuild's scope (its restart records may attach to them; later revs before the first iteration).
+  await ensureRecordAttrs(core, epochBase);
   const clsOf = (p: string): Scope['cls'] => {
     const e = TIP.get(p) ?? S.get(p);
     return validPathSyntax(p) ? scopeOfEntry(core, scope, p, e?.mode ?? '100644').cls : 'UNMANAGED';
@@ -1248,7 +1389,7 @@ export async function lostStateRebuild(core: EngineCore, T: Oid, mode: 'lost_sta
         ...overrides,
       },
       fold: folded.state,
-    });
+    }, { provenance: 'caller' });   // R3-59: the journal follows below, after attachState, on both branches
   } else {
     const branch = await repo.readRef(core.refs.localBranch);
     const meta: Meta = {
@@ -1267,6 +1408,14 @@ export async function lostStateRebuild(core: EngineCore, T: Oid, mode: 'lost_sta
     next = await writeLostState(core, init);
   }
   attachState(core, next);
+  // R3-69 (Plan 3 Task 12a): the rebuilt state's CS table (a lost-state rebuild and recover's re-anchor both come through here).
+  await attachCsTable(core, next);
+  // R3-36 / R3-59 (Plan 3 Task 8): the provenance journal follows LA_C to TIP — advanced from its newest entry (which advance()
+  // rebuilds over (provRebuildFrom, TIP] when that entry is off TIP's first-parent chain, a re-anchor), or, with nothing loaded in
+  // this run (a restart's lost path) or an empty journal, loaded at TIP (advanced from the file's newest entry, else rebuilt).
+  const newest = core.prov.newest();
+  if (newest !== null) await core.prov.advance(newest, tip, () => provRebuildFrom(core));
+  else await core.prov.load(tip, await provRebuildFrom(core));
   if (next.intent.kind === 'apply' && keptWrite?.kind === 'apply' && keptMark) markApplyIntentKept(core, true);
   await emitASet(core, all, newATree, mode === 'lost_state' ? 'lost_state' : 'recover_reanchor');
   // 01-engine §2: LOST_STATE{mode, restart record ids and paths}, each list bounded by glossary §19's caps.

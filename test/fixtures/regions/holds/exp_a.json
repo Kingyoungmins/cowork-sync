@@ -1,0 +1,44 @@
+{
+  "name": "exp_a",
+  "files": {
+    "m.py": "A_CONST = 1\n\n\ndef foo(x, z):\n    y = x + 1\n    w = z - 4\n    return int(y * w)\n\n\ndef bar(x):\n    return x - 1\n"
+  },
+  "steps": [
+    {
+      "peer": 1,
+      "kind": "edit",
+      "path": "m.py",
+      "bytes": "A_CONST = 1\n\n\ndef foo(x, z):\n    y = x + 2  # B fix\n    w = z - 4\n    return int(y * w)\n\n\ndef bar(x):\n    return x - 1\n"
+    },
+    {
+      "peer": 1,
+      "kind": "publish",
+      "path": "m.py"
+    },
+    {
+      "peer": 0,
+      "kind": "claim",
+      "path": "m.py"
+    },
+    {
+      "peer": 0,
+      "kind": "edit",
+      "path": "m.py",
+      "bytes": "A_CONST = 1\n\n\ndef foo(x, z):\n    y = x + 2  # B fix\n    w = z - 4\n    return int(y * w * 2)\n\n\ndef bar(x):\n    return x - 1\n"
+    },
+    {
+      "peer": 0,
+      "kind": "stale_save",
+      "path": "m.py",
+      "bytes": "A_CONST = 1\n\n\ndef foo(x, z):\n    y = x + 1\n    w = z - 4\n    return int(y * w * 2)\n\n\ndef bar(x):\n    return x - 1\n"
+    },
+    {
+      "peer": 0,
+      "kind": "publish",
+      "path": "m.py"
+    }
+  ],
+  "claimSteps": [
+    2
+  ]
+}

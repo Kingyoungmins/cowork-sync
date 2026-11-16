@@ -11,7 +11,7 @@ import type { MutantId } from '../../src/engine/deps.js';
 import { applyStep } from '../../src/engine/apply.js';
 import { prepareIteration } from '../../src/engine/core.js';
 import { FALLBACK_MS } from '../../src/board/governor.js';
-import type { Oid } from '../../src/git/oid.js';
+import { ABSENT, type Oid } from '../../src/git/oid.js';
 import type { PeerFixture } from '../helpers/coreFixture.js';
 import {
   buf, editAndCapture, failedResult, lines, LogRecorder, prep, pushCalls, remoteBoard, setMutants, stateA, treeOf, withCores, wrapGit,
@@ -162,6 +162,30 @@ test('rejections with the board unchanged give transient, transient, then NONRET
     assert.ok(!JSON.stringify(p.core.holds.all()).includes(marker));
     assert.ok(!JSON.stringify(fx.trace.events).includes(marker));
     assert.ok(!JSON.stringify([r1, r2, r3, later]).includes(marker));
+  });
+});
+
+test('a NONRETRYABLE publish of a root file named __proto__ holds it in the host-reject PIN under that path (own blob-map keys)', async () => {
+  await withCores('rej-nonretryable-proto', { n: 1, files: FILES }, async (fx) => {
+    const p = fx.peers[0]!;
+    const PROTO = '__proto__';
+    const { pair } = await editAndCapture(fx, p, { [PROTO]: 'proto local\n' });
+    assert.deepEqual(pair.paths, [PROTO]);
+    await fx.remote.rejectNext(3, 'policy', '/board');
+    assert.equal((await attempt(p)).outcome, 'transient');
+    fx.advance(31_000);
+    assert.equal((await attempt(p)).outcome, 'transient');
+    fx.advance(61_000);
+    const r3 = await attempt(p);
+    assert.equal(r3.outcome, 'nonretryable', JSON.stringify(r3));
+    const pins = p.core.holds.nonTerminal();
+    assert.equal(pins.length, 1, 'one PIN');
+    const pin = pins[0]!;
+    assert.deepEqual([pin.kind, pin.guards.map((g) => g.name), pin.paths, pin.cs_ids], ['PIN', ['host-reject'], [PROTO], [pair.csId]]);
+    const { h0, h1 } = pin.blobs as { h0: Record<string, string>; h1: Record<string, string> };
+    assert.ok(Object.prototype.hasOwnProperty.call(h0, PROTO) && Object.prototype.hasOwnProperty.call(h1, PROTO), 'own keys');
+    assert.deepEqual([h0[PROTO], h1[PROTO]], [ABSENT, await p.core.repo.hashBytes(buf('proto local\n'), false)]);
+    assert.deepEqual(p.core.view!.meta.nonretryable?.hold_id, pin.id);
   });
 });
 
@@ -489,6 +513,12 @@ test('a 429 on a fetch while only P2-PIN-skipped pairs wait is a fetch with noth
       kind: 'PIN', residence: 'ON_DISK', state: 'ACTIVE', paths: ['src/a.ts'], blobs: { h0: { 'src/a.ts': A0.get('src/a.ts')!.oid }, h1: { 'src/a.ts': local } },
       guard: 'join', origin: 'human', cs_ids: [], displaced_by: null, local_only: false,
     });
+    // Plan 3 Task 4: the fresh PIN's creation mirror goes out first, in one landed window (board-only: the pair stays pinned).
+    fx.advance(6_000);
+    const mirrored = await publishStep(p.core, await prep(p));
+    assert.equal(mirrored.outcome, 'landed', JSON.stringify(mirrored));
+    assert.equal(mirrored.c, null, 'board-only');
+    const pushes = pushCalls(p);
     let on = true;
     wrapGit(p, async (args, opts, inner) => {
       const r = await inner(args, opts);
@@ -501,7 +531,7 @@ test('a 429 on a fetch while only P2-PIN-skipped pairs wait is a fetch with noth
     assert.equal(r.outcome, 'nothing', JSON.stringify(r));
     assert.equal(p.core.governor.mode(), 'fallback', 'the fetch signal enters the fallback');
     assert.equal(p.core.outbox.size, 0, 'no HOST_THROTTLED event (only pinned pairs wait: INV-PRO-QUIET)');
-    assert.equal(pushCalls(p), 0);
+    assert.equal(pushCalls(p), pushes);
     assert.deepEqual(p.core.view!.ready.map((x) => x.csId), [pair.csId], 'the pinned pair stays journaled');
   });
 });

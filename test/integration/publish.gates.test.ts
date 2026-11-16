@@ -1,8 +1,9 @@
 // Publish paths no other test reaches (Task 14 round 1, finding 12): every publishStep gate, resolvePushIntent's deferred-view
 // guard and its discard branch, governedPush's probe-delete body, its foreign-ref refusal and its own window gate, the intent
-// cleared after a denial, applyPushOk's A_cap guard, the P2-PIN skip in the composition with the HLD-41 rebase of the skipped
-// pair at the landed update, publishPending, a watchdog-killed push as slow_push, publish.sent before the classify fetch, and
-// "a 429 is a failed fetch". Each test is shaped so that removing the line it covers changes what it observes.
+// cleared after a denial, applyPushOk's A_cap guard, a held PIN in the composition (HLD-38: it holds its whole publication group;
+// Plan 3 Task 10), the HLD-41 rebase at the landed update of a pair captured while the push intent was kept, publishPending, a
+// watchdog-killed push as slow_push, publish.sent before the classify fetch, and "a 429 is a failed fetch". Each test is shaped so
+// that removing the line it covers changes what it observes.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
@@ -256,9 +257,9 @@ test('applyPushOk moves A[p] to C[p] only where A[p] is unchanged since the capt
   });
 });
 
-// ---- P2-PIN in the composition, HLD-41 at the landed update ----------------------------------------------------------
+// ---- a held PIN in the composition (P2-PIN as HLD-38 replaces it), HLD-41 at the landed update ------------------------
 
-test('P2-PIN: a ready pair touching a held PIN is skipped by the composition and stays journaled; the landed update rebases it (HLD-41) through tmp/r.index (P2-SCRATCHLOCK)', async () => {
+test('P2-PIN (as HLD-38 replaces it, Plan 3 Task 10, R3-44): a held PIN holds its whole publication group — pair 1 shares src/x.ts with pair 2, whose src/y.ts the PIN holds — so nothing of either is composed and both stay journaled; once the PIN is released both land in one commit through tmp/r.index (P2-SCRATCHLOCK)', async () => {
   await withCores('gates-pin-rebase', { n: 1, files: FILES }, async (fx) => {
     const p = fx.peers[0]!;
     const A0 = await stateA(p);
@@ -269,24 +270,81 @@ test('P2-PIN: a ready pair touching a held PIN is skipped by the composition and
     const { pair: pair2, it } = await editAndCapture(fx, p, { 'src/x.ts': X2, 'src/y.ts': Y2 });
     assert.deepEqual(pair2.paths, ['src/x.ts', 'src/y.ts']);
     const localY = (await p.core.repo.readTreeMap(pair2.R)).get('src/y.ts')!.oid;
-    await p.core.holds.hold({
+    const pin = await p.core.holds.hold({
       kind: 'PIN', residence: 'ON_DISK', state: 'ACTIVE', paths: ['src/y.ts'], blobs: { h0: { 'src/y.ts': A0.get('src/y.ts')!.oid }, h1: { 'src/y.ts': localY } },
       guard: 'join', origin: 'human', cs_ids: [], displaced_by: null, local_only: false,
     });
-    await writeFile(`${p.core.scratch('r')}.lock`, '');   // a leftover lock of the rebase's scratch index
     const r = await publishStep(p.core, it);
-    assert.equal(r.outcome, 'landed', JSON.stringify(r));
-    const C = await treeOf(p, r.c!);
-    assert.equal(await blobText(p, C, 'src/x.ts'), X1, 'only pair 1 is published (pair 2 is skipped whole)');
-    assert.equal(C.get('src/y.ts')?.oid, A0.get('src/y.ts')!.oid);
-    const view = p.core.view!;
-    assert.deepEqual(view.ready.map((x) => x.csId), [pair2.csId], 'the skipped pair stays journaled');
-    assert.ok(!view.ready.some((x) => x.csId === pair1.csId));
+    assert.equal(r.c, null, `no code: the PIN holds the whole group ${JSON.stringify(r)}`);
+    assert.deepEqual(p.core.view!.ready.map((x) => x.csId), [pair1.csId, pair2.csId], 'both pairs stay journaled');
+    // The PIN released (its human decision): the group publishes in one commit; a leftover lock of the rebase's scratch index
+    // (tmp/r.index) does not stop the landed update.
+    await p.core.holds.releaseGuard(pin, 'join');
+    await writeFile(`${p.core.scratch('r')}.lock`, '');
+    fx.advance(6_000);
+    const r2 = await publishStep(p.core, await prep(p));
+    assert.equal(r2.outcome, 'landed', JSON.stringify(r2));
+    const C = await treeOf(p, r2.c!);
+    assert.equal(await blobText(p, C, 'src/x.ts'), X2, 'the newest pair per path');
+    assert.equal(await blobText(p, C, 'src/y.ts'), Y2);
+    assert.deepEqual(p.core.view!.ready, []);
     const A = await stateA(p);
     assert.equal(A.get('src/x.ts')?.oid, C.get('src/x.ts')?.oid, 'A := C[x]');
+  });
+});
+
+// Moved here from the P2-PIN test above (Plan 3 Task 10 fix round 1): under HLD-38 a held PIN holds the whole group, so no landed
+// push leaves a path-sharing pair behind there. The landed update still rebases a pair captured while the push intent is kept — a
+// capture without a journaled CS table (R3-68: Plan 2's call shape, which start.ts's captureLocalWork keeps until Task 12b and which a
+// state restored without a table carries) — and the restart's resolution reuses the same ok update (applyPushOk). Task 12a (the Task
+// 10 carry): the loop's captures go through captureStep, whose group form makes a CS sharing a path with a pair the kept intent names
+// wait for the intent's resolution, so in the loop a path-sharing pair is captured over the new A after it (loop.holds.test.ts's
+// order test resolves the intent before its capture); this test keeps covering okUpdateApply's HLD-41 rebase for table-less pairs.
+test('HLD-41 at the landed update: a pair captured while the push intent is kept, sharing src/x.ts with the landed pair, is rebased through tmp/r.index (P2-SCRATCHLOCK): A_cap[x] := A_new[x], R[x] keeps both edits, and it publishes in the next window', async () => {
+  await withCores('gates-landed-rebase', { n: 1, files: FILES }, async (fx) => {
+    const p = fx.peers[0]!;
+    const A0 = await stateA(p);
+    const X1 = withRow(ts('x'), 2, 'export const x2 = 20; // first');
+    const X2 = withRow(X1, 9, 'export const x9 = 90; // second');
+    const Y2 = withRow(ts('y'), 5, 'export const y5 = 50;');
+    const s = lostClassification(p, true);   // the push lands; its classification is lost, so the intent stays journaled
+    const { pair: pair1, it } = await editAndCapture(fx, p, { 'src/x.ts': X1 });
+    const r = await publishStep(p.core, it);
+    assert.deepEqual([r.outcome, r.why], ['network', 'unobserved'], JSON.stringify(r));
+    s.phase = 'off';
+    assert.equal(p.core.view!.intent.kind, 'push', 'the push intent is kept');
+    fx.advance(31_000);   // past the fetch backoff
+    // While the intent is kept: the newer edits of src/x.ts and src/y.ts in a pair of their own, captured over A_old[x].
+    const { pair: pair2 } = await editAndCapture(fx, p, { 'src/x.ts': X2, 'src/y.ts': Y2 });
+    assert.deepEqual(pair2.paths, ['src/x.ts', 'src/y.ts']);
+    assert.equal(p.core.view!.intent.kind, 'push', 'still kept');
+    assert.deepEqual(p.core.view!.ready.map((x) => x.csId), [pair1.csId, pair2.csId]);
+    assert.equal((await p.core.repo.readTreeMap(pair2.A)).get('src/x.ts')?.oid, A0.get('src/x.ts')!.oid, 'A_cap[x] = A_old[x] before the landed update');
+    // A leftover lock of the rebase's scratch index (tmp/r.index) does not stop the landed update.
+    await writeFile(`${p.core.scratch('r')}.lock`, '');
+    fx.advance(6_000);
+    const landed = await resolvePushIntent(p.core, await prep(p));
+    assert.deepEqual([landed.outcome, landed.bnew], ['landed', r.bnew], JSON.stringify(landed));
+    const C = await treeOf(p, r.c!);
+    assert.equal(await blobText(p, C, 'src/x.ts'), X1, 'the landed commit carries pair 1 only');
+    const view = p.core.view!;
+    assert.equal(view.intent.kind, 'none');
+    assert.deepEqual(view.ready.map((x) => x.csId), [pair2.csId], 'the published pair left the journal; the newer pair stays');
+    const A = await stateA(p);
+    assert.equal(A.get('src/x.ts')?.oid, C.get('src/x.ts')?.oid, 'A := C[x]');
+    assert.notEqual(A.get('src/x.ts')?.oid, A0.get('src/x.ts')!.oid);
     const rebased = view.ready[0]!;
     assert.equal((await p.core.repo.readTreeMap(rebased.A)).get('src/x.ts')?.oid, A.get('src/x.ts')?.oid, 'HLD-41: A_cap[x] := A_new[x]');
     assert.equal(await blobText(p, await p.core.repo.readTreeMap(rebased.R), 'src/x.ts'), X2, 'R[x] keeps both edits');
+    assert.equal((await p.core.repo.readTreeMap(rebased.A)).get('src/y.ts')?.oid, A0.get('src/y.ts')!.oid, 'A_cap[y] unchanged (A[y] did not move)');
+    // The rebased pair composes against the new A (no ENG-39 mismatch) and publishes the second edit in a later window.
+    fx.advance(30_000);
+    const next = await publishStep(p.core, await prep(p));
+    assert.equal(next.outcome, 'landed', JSON.stringify(next));
+    const C2 = await treeOf(p, next.c!);
+    assert.equal(await blobText(p, C2, 'src/x.ts'), X2);
+    assert.equal(await blobText(p, C2, 'src/y.ts'), Y2);
+    assert.deepEqual(p.core.view!.ready, []);
   });
 });
 

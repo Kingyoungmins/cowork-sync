@@ -139,7 +139,7 @@ test('changed(): a tip() or advance() that fails at or after its rev-parse leave
       return src.changed();
     };
 
-    // tip(): its rev-list --count fails after the rev-parse ran → the next tick reports a change, the retry pins.
+    // tip(): its rev-list (the page of the new tip's newest commits) fails after the rev-parse ran → the next tick reports a change, the retry pins.
     failOnce('rev-list');
     await assert.rejects(src.tip(), /injected rev-list failure/);
     assert.equal(await tick(), true, 'tip() failed after its rev-parse: changed() is true next tick');

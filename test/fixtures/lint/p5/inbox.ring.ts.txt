@@ -1,0 +1,3 @@
+// CCI-03 (10): daemon code that loads the inbox poster (src/claude/daemon/ring.ts).
+import { realInbox } from '../../ports/inbox.js';
+export const poster = realInbox;

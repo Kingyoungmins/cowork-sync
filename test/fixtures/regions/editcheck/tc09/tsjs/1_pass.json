@@ -1,0 +1,15 @@
+{
+  "name": "tc09/tsjs/1_pass",
+  "check": null,
+  "lang": "typescript",
+  "expect": "pass",
+  "tipEqualsA": true,
+  "A": {
+    "pricing.ts": "export function price(amount: number, qty: number): number {\n  return Math.round(amount * qty * 100) / 100;\n}\n\nexport function discount(amount: number): number {\n  return Math.round(amount * 90) / 100;\n}\n\nexport function legacy(a: number): number {\n  return a + ;\n}\n",
+    "checkout.ts": "import { price, discount } from './pricing';\n\nexport function checkout(cart: Array<{ amount: number; qty: number }>): number {\n  let total = 0;\n  for (const line of cart) {\n    total += price(line.amount, line.qty);\n  }\n  return discount(total);\n}\n"
+  },
+  "R": {
+    "pricing.ts": "export function price(amount: number, qty: number): number {\n  return Math.round(amount * qty * 1000) / 1000;\n}\n\nexport function discount(amount: number): number {\n  return Math.round(amount * 90) / 100;\n}\n\nexport function legacy(a: number): number {\n  return a + ;\n}\n",
+    "checkout.ts": "import { price, discount } from './pricing';\n\nexport function checkout(cart: Array<{ amount: number; qty: number }>): number {\n  let total = 0;\n  for (const line of cart) {\n    total += price(line.amount, line.qty);\n  }\n  return discount(total);\n}\n"
+  }
+}

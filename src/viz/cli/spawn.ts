@@ -10,6 +10,7 @@ import { closeSync, constants, lstatSync, mkdirSync, openSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
 import type { Lang } from '../../i18n/render.js';
 import { isUncOrDevice } from './paths.js';
+import { VIEWER_STDERR_FILE } from './stderrFile.js';
 
 export interface ViewerArgs {
   execPath: string; vizJs: string; dataDir: string; lang: Lang; sha256: string; repos: readonly string[];
@@ -92,6 +93,25 @@ export function viewerOldSpaceMb(rooms: number): number {
   return VIEWER_MAX_OLD_SPACE_MB + VIEWER_OLD_SPACE_ROOM_MB * Math.max(0, n - VIEWER_OLD_SPACE_BASE_ROOMS);
 }
 
+/**
+ * glibc's malloc settings the viewer runs with on linux (12 §3.2 item 2, §3.12 row 1; viz-hosted-perf), set by the CLI's own spawn on
+ * top of the builder environment (which keeps no MALLOC_* name, 09-security §3.4), so the shipped viewer and T-VIZ-perf's real viewer
+ * run with the same ones. The viewer's native memory is mostly short-lived git output: 64 KiB pipe chunks and each call's whole output
+ * (runner.ts, up to ≈ 2 MB per --batch), freed when V8 collects their Buffers. By default glibc raises its mmap threshold to the largest
+ * such block freed (up to 32 MiB), so later blocks come from the heap, whose free middle stays resident: the hosted Linux leg read
+ * 148.6 MB anonymous RSS beside a 40 MB V8 heap after the memory-reducing GC (200.9 MB in all, over the 200 MB budget). Fixed values turn
+ * that off: a block of 64 KiB or more that no free space holds is mmapped and unmapped when freed, the heap top is trimmed past 128 KiB,
+ * and the threads share 2 arenas. Other C libraries (musl) and other platforms ignore these names, so they are set on linux only.
+ */
+export const VIEWER_LINUX_MALLOC_ENV: Readonly<Record<string, string>> = Object.freeze({
+  MALLOC_ARENA_MAX: '2', MALLOC_MMAP_THRESHOLD_: '65536', MALLOC_TRIM_THRESHOLD_: '131072',
+});
+
+/** The viewer's environment: `env` itself, or on linux a copy with VIEWER_LINUX_MALLOC_ENV set (`env` is never changed). */
+function viewerEnv(env: ViewerArgs['env'], platform: NodeJS.Platform): ViewerArgs['env'] {
+  return platform === 'linux' ? { ...env, ...VIEWER_LINUX_MALLOC_ENV } : env;
+}
+
 /** The most rooms the viewer may fold, as the CLI knows it at spawn (VIEWER_MAX_OLD_SPACE_MB's rule). */
 function roomsAtSpawn(a: ViewerArgs): number {
   if (a.repos.length > 0) return a.repos.length;
@@ -124,8 +144,10 @@ export function viewerArgv(a: ViewerArgs): string[] {
  * "heap out of memory" at the old-space cap, which no handler in the process can log. Raw text, so it is not a viewer log file: no
  * viz-*.jsonl name (the 14-day cleanup and the log readers skip it), and it may hold what such a message holds (a stack with paths).
  * Every viewer of this data directory appends to the one file; a spawn that finds it past VIEWER_STDERR_MAX_BYTES starts it over.
+ * The name lives in the leaf stderrFile.ts (the data directory check names it too) and stays importable from here.
  */
-export const VIEWER_STDERR_FILE = 'viz-stderr.txt', VIEWER_STDERR_MAX_BYTES = 1_048_576;
+export { VIEWER_STDERR_FILE };
+export const VIEWER_STDERR_MAX_BYTES = 1_048_576;
 
 /** An open descriptor for the child's stderr; close() drops the CLI's own copy once the child holds its own. */
 export interface StderrFile { fd: number; close(): void; }
@@ -178,7 +200,7 @@ export interface SpawnDeps {
 }
 
 /**
- * spawn(execPath, viewerArgv(a), { shell: false, detached: true, windowsHide: true, stdio: ['ignore', 'pipe', <stderr>], env: a.env, cwd: a.dataDir }),
+ * spawn(execPath, viewerArgv(a), { shell: false, detached: true, windowsHide: true, stdio: ['ignore', 'pipe', <stderr>], env: a.env (on linux with VIEWER_LINUX_MALLOC_ENV), cwd: a.dataDir }),
  * <stderr> = the descriptor of <data dir>/log/viz-stderr.txt (openViewerStderr; the CLI closes its own copy right after the spawn), or
  * 'ignore' when that file cannot be opened;
  * ≤ 512 bytes within readyTimeoutMs(a.platform) (5 s; 15 s on win32); then destroy the pipe and unref(); a timeout, a bad line or an
@@ -207,7 +229,7 @@ export function spawnViewerWith(a: ViewerArgs, d: SpawnDeps): Promise<ReadyLine>
     const err = d.stderr?.(a.dataDir, a.platform) ?? null;
     try {
       child = d.spawn(a.execPath, argv, {
-        shell: false, detached: true, windowsHide: true, stdio: ['ignore', 'pipe', err === null ? 'ignore' : err.fd], env: a.env, cwd: a.dataDir,
+        shell: false, detached: true, windowsHide: true, stdio: ['ignore', 'pipe', err === null ? 'ignore' : err.fd], env: viewerEnv(a.env, a.platform), cwd: a.dataDir,
       });
     } catch {
       resolve(START_FAILED);

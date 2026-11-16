@@ -4,8 +4,9 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ScopeClass } from '../../src/data/scope.js';
 import type { TreeEntry, TreeMap } from '../../src/git/repo.js';
-import { ChangeSets, HUMAN_CS_QUIET_MS, ReadyBaseMismatchError, readyKey, type RebaseChange, type ReadyPair } from '../../src/holds/changesets.js';
-import { maskEntries } from '../../src/holds/mask.js';
+import { ChangeSets, heldPins, HUMAN_CS_QUIET_MS, ReadyBaseMismatchError, readyKey, type RebaseChange, type ReadyPair } from '../../src/holds/changesets.js';
+import { maskEntries, type MaskResult } from '../../src/holds/mask.js';
+import { RebaseCache } from '../../src/holds/rebase.js';
 import { HoldRegistry } from '../../src/holds/registry.js';
 import { RELEASE_NAMESPACE, refNames } from '../../src/engine/refs.js';
 import { nullLog } from '../../src/ports/log.js';
@@ -16,6 +17,8 @@ import { VirtualClock } from '../sim/vclock.js';
 
 const PEER = '0123456789abcdef0123456789abcdef';
 const BASE = 'l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\n';
+/** Every path text and unfiltered (MaskInputs.mergeable). */
+const ALL = (): boolean => true;
 
 interface Ctx {
   f: RepoFixture;
@@ -185,7 +188,7 @@ test('a file created and then deleted before it is published is never published:
   const c = await setup('cs-create-delete');
   try {
     const { cs, f } = c;
-    const mask = (A: TreeMap) => (X: TreeMap) => maskEntries(X, { A, scope: LIVE, records: [] });
+    const mask = (A: TreeMap) => (X: TreeMap) => maskEntries(f.repo, X, { A, scope: LIVE, records: [], mergeable: ALL }, new RebaseCache(f.repo, ALL));
     const text = async (e: TreeEntry | undefined): Promise<string | null> => (e === undefined ? null : (await f.repo.readBlob(e.oid)).toString('utf8'));
     const A = await c.tm({ 'a.txt': 'a0\n' });
     // human/1 created own.txt only; human/2 created own2.txt and edited a.txt. A never has either file.
@@ -206,7 +209,7 @@ test('a file created and then deleted before it is published is never published:
     const shrunk = cs.ready()[0]!;
     assert.deepEqual(shrunk.paths, ['a.txt'], 'the older pair drops the deleted path and keeps its other edit');
     assert.deepEqual(await c.read(shrunk), { R: { 'a.txt': 'a1\n' }, A: { 'a.txt': 'a0\n' } });
-    const composed = await cs.composeP(f.repo, A, mask(A), new Set());
+    const composed = await cs.composeP(f.repo, A, mask(A), []);
     assert.deepEqual([...composed.P.keys()].sort(), ['a.txt'], 'P carries neither created-then-deleted file');
     assert.equal(await text(composed.P.get('a.txt')), 'a1\n');
     assert.deepEqual(composed.csIds, [`${PEER}/human/2`]);
@@ -216,7 +219,7 @@ test('a file created and then deleted before it is published is never published:
     // The journal holds the shrunk pair (StateStore derives paths from R ∪ A_cap): a restart composes the same P.
     const again = new ChangeSets(PEER, c.clock);
     again.restore(cs.ready(), got.nextN);
-    assert.deepEqual([...(await again.composeP(f.repo, A, mask(A), new Set())).P.keys()].sort(), ['a.txt']);
+    assert.deepEqual([...(await again.composeP(f.repo, A, mask(A), [])).P.keys()].sort(), ['a.txt']);
 
     // A path absent from both trees that no ready pair covers still changes nothing: null, as before.
     cs.observe(['tmp.txt']);
@@ -234,7 +237,7 @@ test('a file created and then deleted before it is published is never published:
     assert.deepEqual(mixed.pair.paths, ['a.txt']);
     assert.equal(mixed.nextN, 5);
     assert.deepEqual(cs.ready().map((p) => p.csId), [`${PEER}/human/2`, `${PEER}/human/4`], 'human/3 (own3.txt only) leaves');
-    const last = await cs.composeP(f.repo, A, mask(A), new Set());
+    const last = await cs.composeP(f.repo, A, mask(A), []);
     assert.deepEqual([...last.P.keys()].sort(), ['a.txt']);
     assert.equal(await text(last.P.get('a.txt')), 'a2\n', 'the newest capture wins');
   } finally {
@@ -284,7 +287,7 @@ test('Task 19 ruling (round 3): a ready pair a kept push intent names is never s
     assert.deepEqual(del.paths, ['p.txt']);
     assert.deepEqual(await c.read(del), { R: {}, A: { 'p.txt': 'p1\n' } }, 'a deletion pair: R lacks p.txt, A_cap has it');
     assert.equal(cs.closeDue(), false);
-    const composed = await cs.composeP(f.repo, A1, (X2) => maskEntries(X2, { A: A1, scope: LIVE, records: [] }), new Set());
+    const composed = await cs.composeP(f.repo, A1, (X2) => maskEntries(f.repo, X2, { A: A1, scope: LIVE, records: [], mergeable: ALL }, new RebaseCache(f.repo, ALL)), []);
     assert.deepEqual([...composed.P.keys()].sort(), ['a.txt'], 'the deletion is published');
   } finally {
     await c.f.cleanup();
@@ -299,7 +302,7 @@ test('Task 19 ruling (round 3): not landed (the intent discarded), the next clos
     assert.ok(got !== null && got.pair === null, 'the shrink is a journal change with no new pair');
     assert.deepEqual(cs.ready().map((p) => [p.csId, p.paths]), [[Y.csId, ['a.txt']]], 'X, which only created p.txt, leaves');
     assert.equal(cs.closeDue(), false);
-    const composed = await cs.composeP(f.repo, A0, (X2) => maskEntries(X2, { A: A0, scope: LIVE, records: [] }), new Set());
+    const composed = await cs.composeP(f.repo, A0, (X2) => maskEntries(f.repo, X2, { A: A0, scope: LIVE, records: [], mergeable: ALL }, new RebaseCache(f.repo, ALL)), []);
     assert.deepEqual([...composed.P.keys()].sort(), ['a.txt'], 'the created-then-deleted file is never published');
   } finally {
     await c.f.cleanup();
@@ -316,7 +319,7 @@ test('composeP takes the newest ready pair covering each path, A elsewhere, and 
     const p2 = await c.close(['b.txt', 'c.txt', '.vscode/settings.json'], await c.tm({ 'b.txt': 'b2\n', '.vscode/settings.json': '{"x":1}\n' }), A);
     const scope = (p: string): ScopeClass => (p.startsWith('.vscode/') ? 'QUARANTINED' : 'LIVE');
 
-    const plain = await cs.composeP(f.repo, A, (X) => maskEntries(X, { A, scope, records: [] }), new Set());
+    const plain = await cs.composeP(f.repo, A, (X) => maskEntries(f.repo, X, { A, scope, records: [], mergeable: ALL }, new RebaseCache(f.repo, ALL)), []);
     assert.deepEqual(plain.csIds, [p1.csId, p2.csId]);
     assert.deepEqual([...plain.csPaths.entries()], [[p1.csId, p1.paths], [p2.csId, p2.paths]]);
     const expect = async (P: Map<string, TreeEntry>, files: Record<string, string | null>): Promise<void> => {
@@ -326,14 +329,17 @@ test('composeP takes the newest ready pair covering each path, A elsewhere, and 
     await expect(plain.P, { 'a.txt': 'a1\n', 'b.txt': 'b2\n', 'c.txt': null, 'd.txt': 'd0\n', '.vscode/settings.json': '{}\n' });
 
     // A record created after the capture still masks (HLD-42: MASK runs at compose time).
-    const holds = new HoldRegistry({ repo: f.repo, ref: refNames('main', RELEASE_NAMESPACE).holds, random: seededRandom('cs'), clock: c.clock, peer: PEER, trace: noTrace, log: nullLog });
+    const holds = new HoldRegistry({
+      repo: f.repo, ref: refNames('main', RELEASE_NAMESPACE).holds, random: seededRandom('cs'), clock: c.clock, peer: PEER, trace: noTrace, log: nullLog,
+      scopeOf: () => () => 'LIVE', A: () => new Map(), rebase: new RebaseCache(f.repo, () => true),
+    });
     await holds.load();
     await holds.hold({
       kind: 'PATCH', residence: 'ON_DISK', state: 'ACTIVE', paths: ['a.txt'],
       blobs: { h0: { 'a.txt': A.get('a.txt')!.oid }, h1: { 'a.txt': (await c.e('a.txt', 'a1\n')).oid } },
       guard: 'eol-bom', origin: 'human', cs_ids: [], displaced_by: null, local_only: false,
     });
-    const masked = await cs.composeP(f.repo, A, (X) => maskEntries(X, { A, scope, records: holds.maskingRecords() }), new Set());
+    const masked = await cs.composeP(f.repo, A, (X) => maskEntries(f.repo, X, { A, scope, records: holds.maskingRecords(), mergeable: ALL }, new RebaseCache(f.repo, ALL)), []);
     await expect(masked.P, { 'a.txt': 'a0\n', 'b.txt': 'b2\n', 'c.txt': null, 'd.txt': 'd0\n', '.vscode/settings.json': '{}\n' });
     assert.deepEqual(masked.csIds, [p1.csId, p2.csId], 'a masked path does not take its CS out of P');
     assert.deepEqual(cs.ready().map((p) => p.csId), [p1.csId, p2.csId], 'composing removes nothing');
@@ -341,10 +347,10 @@ test('composeP takes the newest ready pair covering each path, A elsewhere, and 
     // published() drops the published pairs.
     cs.published([p1.csId]);
     assert.deepEqual(cs.ready().map((p) => p.csId), [p2.csId]);
-    const rest = await cs.composeP(f.repo, A, (X) => maskEntries(X, { A, scope: LIVE, records: [] }), new Set());
+    const rest = await cs.composeP(f.repo, A, (X) => maskEntries(f.repo, X, { A, scope: LIVE, records: [], mergeable: ALL }, new RebaseCache(f.repo, ALL)), []);
     await expect(rest.P, { 'a.txt': 'a0\n', 'b.txt': 'b2\n', 'c.txt': null, 'd.txt': 'd0\n', '.vscode/settings.json': '{"x":1}\n' });
     cs.published([p2.csId]);
-    const none = await cs.composeP(f.repo, A, (X) => maskEntries(X, { A, scope: LIVE, records: [] }), new Set());
+    const none = await cs.composeP(f.repo, A, (X) => maskEntries(f.repo, X, { A, scope: LIVE, records: [], mergeable: ALL }, new RebaseCache(f.repo, ALL)), []);
     assert.deepEqual(none.csIds, []);
     assert.deepEqual(new Map([...none.P].sort()), new Map([...A].sort()), 'P = A without ready pairs');
   } finally {
@@ -358,22 +364,22 @@ test('composeP throws ReadyBaseMismatchError when A_cap ≠ A', async () => {
     const { cs, f } = c;
     const A = await c.tm({ 'a.txt': BASE, 'b.txt': 'b0\n' });
     await c.close(['a.txt', 'n.txt'], await c.tm({ 'a.txt': `mine\n${BASE.slice(3)}`, 'b.txt': 'b0\n', 'n.txt': 'new\n' }), A);
-    const mask = (A2: TreeMap) => (X: TreeMap) => maskEntries(X, { A: A2, scope: LIVE, records: [] });
-    await cs.composeP(f.repo, A, mask(A), new Set());   // A_cap == A: fine
+    const mask = (A2: TreeMap) => (X: TreeMap) => maskEntries(f.repo, X, { A: A2, scope: LIVE, records: [], mergeable: ALL }, new RebaseCache(f.repo, ALL));
+    await cs.composeP(f.repo, A, mask(A), []);   // A_cap == A: fine
 
     // Mutant M20's shape: an apply changed A[a.txt] and the pair was not rebased, so A_cap ≠ A.
     const A2 = new Map(A);
     A2.set('a.txt', await c.e('a.txt', `${BASE}l9\n`));
-    await assert.rejects(cs.composeP(f.repo, A2, mask(A2), new Set()), (e: unknown) => e instanceof ReadyBaseMismatchError && e.path === 'a.txt');
+    await assert.rejects(cs.composeP(f.repo, A2, mask(A2), []), (e: unknown) => e instanceof ReadyBaseMismatchError && e.path === 'a.txt');
     // An entry A gained where A_cap is absent is a mismatch too; a path outside every pair is not checked.
     const A3 = new Map(A);
     A3.set('n.txt', await c.e('n.txt', 'theirs\n'));
     A3.set('b.txt', await c.e('b.txt', 'b9\n'));
-    await assert.rejects(cs.composeP(f.repo, A3, mask(A3), new Set()), (e: unknown) => e instanceof ReadyBaseMismatchError && e.path === 'n.txt');
+    await assert.rejects(cs.composeP(f.repo, A3, mask(A3), []), (e: unknown) => e instanceof ReadyBaseMismatchError && e.path === 'n.txt');
     // A mode change is a mismatch.
     const A4 = new Map(A);
     A4.set('a.txt', { ...A.get('a.txt')!, mode: '100755' });
-    await assert.rejects(cs.composeP(f.repo, A4, mask(A4), new Set()), ReadyBaseMismatchError);
+    await assert.rejects(cs.composeP(f.repo, A4, mask(A4), []), ReadyBaseMismatchError);
     assert.ok(new ReadyBaseMismatchError('x') instanceof Error);
   } finally {
     await c.f.cleanup();
@@ -385,7 +391,10 @@ test('composeP skips a ready pair sharing a path with an ON_DISK PIN and keeps i
   try {
     const { cs, f } = c;
     const A = await c.tm({ 'a.txt': 'a0\n', 'b.txt': 'b0\n', 'c.txt': 'c0\n' });
-    const holds = new HoldRegistry({ repo: f.repo, ref: refNames('main', RELEASE_NAMESPACE).holds, random: seededRandom('pin'), clock: c.clock, peer: PEER, trace: noTrace, log: nullLog });
+    const holds = new HoldRegistry({
+      repo: f.repo, ref: refNames('main', RELEASE_NAMESPACE).holds, random: seededRandom('pin'), clock: c.clock, peer: PEER, trace: noTrace, log: nullLog,
+      scopeOf: () => () => 'LIVE', A: () => new Map(), rebase: new RebaseCache(f.repo, () => true),
+    });
     await holds.load();
     // R-22 'none': local work held in one masked join PIN on a.txt.
     await holds.hold({
@@ -393,12 +402,12 @@ test('composeP skips a ready pair sharing a path with an ON_DISK PIN and keeps i
       blobs: { h0: { 'a.txt': A.get('a.txt')!.oid }, h1: { 'a.txt': (await c.e('a.txt', 'a-local\n')).oid } },
       guard: 'join', origin: 'human', cs_ids: [], displaced_by: null, local_only: false,
     });
-    const pinnedPaths = new Set(holds.nonTerminal()
-      .filter((r) => r.kind === 'PIN' && r.residence === 'ON_DISK' && r.guards.length > 0).flatMap((r) => r.paths));
-    const mask = (X: TreeMap): Map<string, TreeEntry> => maskEntries(X, { A, scope: LIVE, records: holds.maskingRecords() });
+    // Plan 3 Task 10: the held PINs (heldPins) replace Plan 2's pinnedPaths; the PIN's group is not ready (HLD-38).
+    const pins = heldPins(holds);
+    const mask = (X: TreeMap): Promise<MaskResult> => maskEntries(f.repo, X, { A, scope: LIVE, records: holds.maskingRecords(), mergeable: ALL }, new RebaseCache(f.repo, ALL));
 
     const pair = await c.close(['a.txt', 'b.txt'], await c.tm({ 'a.txt': 'a1\n', 'b.txt': 'b1\n', 'c.txt': 'c0\n' }), A);
-    const r = await cs.composeP(f.repo, A, mask, pinnedPaths);
+    const r = await cs.composeP(f.repo, A, mask, pins);
     assert.deepEqual(new Map([...r.P].sort()), new Map([...A].sort()), 'P equals A on both paths of the pinned group');
     assert.deepEqual(r.csIds, []);
     assert.equal(r.csPaths.size, 0);
@@ -406,11 +415,50 @@ test('composeP skips a ready pair sharing a path with an ON_DISK PIN and keeps i
 
     // A pair that shares no path with the PIN still publishes; the pinned one is still skipped.
     const other = await c.close(['c.txt'], await c.tm({ 'a.txt': 'a1\n', 'b.txt': 'b1\n', 'c.txt': 'c1\n' }), A);
-    const r2 = await cs.composeP(f.repo, A, mask, pinnedPaths);
+    const r2 = await cs.composeP(f.repo, A, mask, pins);
     assert.deepEqual(r2.csIds, [other.csId]);
     assert.equal(r2.P.get('c.txt')!.oid, (await c.e('c.txt', 'c1\n')).oid);
     assert.equal(r2.P.get('b.txt')!.oid, A.get('b.txt')!.oid);
     assert.deepEqual(cs.ready().map((p) => p.csId), [pair.csId, other.csId]);
+  } finally {
+    await c.f.cleanup();
+  }
+});
+
+test('composeP takes the asynchronous mask', async () => {
+  // Plan 3 Task 2 (R3-19): the mask is `(X) => Promise<MaskResult>` and composeP keeps Plan 2's return shape; P is MASK(R) in
+  // merge-file form: a held line leaves, an unheld edit two lines away publishes; A_cap ≠ A still throws ReadyBaseMismatchError.
+  const c = await setup('cs-async-mask');
+  try {
+    const { cs, f } = c;
+    const A = await c.tm({ 'a.txt': BASE, 'b.txt': 'b0\n' });
+    const held = BASE.replace('l2\n', 'two\n');
+    await c.close(['a.txt'], await c.tm({ 'a.txt': held.replace('l6\n', 'six\n'), 'b.txt': 'b0\n' }), A);
+    const holds = new HoldRegistry({
+      repo: f.repo, ref: refNames('main', RELEASE_NAMESPACE).holds, random: seededRandom('async'), clock: c.clock, peer: PEER, trace: noTrace, log: nullLog,
+      scopeOf: () => () => 'LIVE', A: () => A, rebase: new RebaseCache(f.repo, ALL),
+    });
+    await holds.load();
+    await holds.hold({
+      kind: 'PATCH', residence: 'ON_DISK', state: 'ACTIVE', paths: ['a.txt'],
+      blobs: { h0: { 'a.txt': A.get('a.txt')!.oid }, h1: { 'a.txt': (await c.e('a.txt', held)).oid } },
+      guard: 'revert', origin: 'human', cs_ids: [], displaced_by: null,
+    });
+    const results: MaskResult[] = [];
+    const mask = async (X: TreeMap): Promise<MaskResult> => {
+      const m = await maskEntries(f.repo, X, { A, scope: LIVE, records: holds.maskingRecords(), mergeable: ALL }, new RebaseCache(f.repo, ALL));
+      results.push(m);
+      return m;
+    };
+    const r = await cs.composeP(f.repo, A, mask, []);
+    assert.equal((await f.repo.readBlob(r.P.get('a.txt')!.oid)).toString('utf8'), BASE.replace('l6\n', 'six\n'));
+    assert.equal(r.P.get('b.txt')!.oid, A.get('b.txt')!.oid);
+    assert.deepEqual(Object.keys(r).sort(), ['P', 'csIds', 'csPaths', 'groups', 'withheldWhole'], 'the Composition (Plan 3 Task 10)');
+    assert.equal(results.length, 1);
+    assert.deepEqual([...results[0]!.partial], ['a.txt']);
+    const A2 = new Map(A);
+    A2.set('a.txt', await c.e('a.txt', `${BASE}l9\n`));
+    await assert.rejects(cs.composeP(f.repo, A2, mask, []), (e: unknown) => e instanceof ReadyBaseMismatchError && e.path === 'a.txt');
   } finally {
     await c.f.cleanup();
   }
@@ -446,14 +494,14 @@ test('rebase merges R[p] := merge-file(A_new, A_cap, R) when it is clean', async
     });
     assert.deepEqual(res.ready[1], other, 'a pair the update did not touch is unchanged');
     // A_cap == A again, so the publish assert passes.
-    await cs.composeP(f.repo, A2, (X) => maskEntries(X, { A: A2, scope: LIVE, records: [] }), new Set());
+    await cs.composeP(f.repo, A2, (X) => maskEntries(f.repo, X, { A: A2, scope: LIVE, records: [], mergeable: ALL }, new RebaseCache(f.repo, ALL)), []);
 
     // A deletion in A where the pair left the path unchanged drops the path from the pair.
     const A3 = new Map(A2);
     A3.delete('b.txt');
     const res3 = await cs.rebase(f.repo, [{ path: 'b.txt', aOld: A2.get('b.txt')!, aNew: null, written: 'clean', sDiskBefore: null, writtenEntry: null }], c.scratch);
     assert.deepEqual(res3.ready[0]!.paths, ['a.txt', 'c.txt', 'd.txt']);
-    await cs.composeP(f.repo, A3, (X) => maskEntries(X, { A: A3, scope: LIVE, records: [] }), new Set());
+    await cs.composeP(f.repo, A3, (X) => maskEntries(f.repo, X, { A: A3, scope: LIVE, records: [], mergeable: ALL }, new RebaseCache(f.repo, ALL)), []);
   } finally {
     await c.f.cleanup();
   }
@@ -541,7 +589,7 @@ test('a rebase conflict follows HLD-41\'s split', async () => {
       assert.deepEqual(got.paths, ['a.txt', 'b.txt']);
       assert.deepEqual(await c.read(got), { R: { 'a.txt': BASE.replace('l1\n', 'theirs\n'), 'b.txt': 'b1\n' }, A: { 'a.txt': BASE.replace('l1\n', 'theirs\n'), 'b.txt': 'b0\n' } });
       assert.equal(cs.closeDue(), false);
-      await cs.composeP(f.repo, A2, (X) => maskEntries(X, { A: A2, scope: LIVE, records: [] }), new Set());
+      await cs.composeP(f.repo, A2, (X) => maskEntries(f.repo, X, { A: A2, scope: LIVE, records: [], mergeable: ALL }, new RebaseCache(f.repo, ALL)), []);
     }
 
     // A clean or concat write reported with no written entry while A_new has p (a clean write cannot have deleted p): R never
@@ -591,7 +639,7 @@ test('a rebase conflict follows HLD-41\'s split', async () => {
         assert.equal(res.recapture.size, 0);
         assert.deepEqual(res.ready.map((p) => [p.csId, p.paths]), [[pair.csId, ['d.txt']]]);
         assert.deepEqual(await c.read(res.ready[0]!), { R: { 'd.txt': 'd1 kept\n' }, A: {} });
-        const { P } = await cs.composeP(f.repo, Ad2, (X) => maskEntries(X, { A: Ad2, scope: LIVE, records: [] }), new Set());
+        const { P } = await cs.composeP(f.repo, Ad2, (X) => maskEntries(f.repo, X, { A: Ad2, scope: LIVE, records: [], mergeable: ALL }, new RebaseCache(f.repo, ALL)), []);
         assert.equal(P.get('d.txt')!.oid, kept.oid);
       }
       // clean, S_disk == R, no written entry on a one-path pair: nothing is left in R or A_cap, and the pair does not vanish
@@ -616,7 +664,7 @@ test('a rebase conflict follows HLD-41\'s split', async () => {
         assert.deepEqual(res.cancelled, []);
         assert.equal(res.recapture.size, 0);
         assert.deepEqual(res.ready.map((p) => [p.csId, p.paths]), [[pair.csId, ['e.txt']]]);
-        const { P } = await cs.composeP(f.repo, Ad2, (X) => maskEntries(X, { A: Ad2, scope: LIVE, records: [] }), new Set());
+        const { P } = await cs.composeP(f.repo, Ad2, (X) => maskEntries(f.repo, X, { A: Ad2, scope: LIVE, records: [], mergeable: ALL }, new RebaseCache(f.repo, ALL)), []);
         assert.equal(P.has('d.txt'), false);
         assert.equal(P.get('e.txt')!.oid, sD.get('e.txt')!.oid);
       }
@@ -644,7 +692,7 @@ test('a rebase conflict follows HLD-41\'s split', async () => {
       assert.deepEqual(res.cancelled, []);
       assert.deepEqual(res.ready.map((p) => p.csId), [pair.csId]);
       assert.deepEqual(await c.read(res.ready[0]!), { R: { 'n.txt': 'mine new\ntheir new\n' }, A: { 'n.txt': 'their new\n' } });
-      await cs.composeP(f.repo, An2, (X) => maskEntries(X, { A: An2, scope: LIVE, records: [] }), new Set());
+      await cs.composeP(f.repo, An2, (X) => maskEntries(f.repo, X, { A: An2, scope: LIVE, records: [], mergeable: ALL }, new RebaseCache(f.repo, ALL)), []);
       // The same bytes added on both sides are no conflict: R keeps them and A_cap takes A_new.
       const same2 = await solo(['n.txt'], sN, An);
       const sameRes = await same2.cs.rebase(f.repo, [{ ...add('clean', null), aNew: sN.get('n.txt')! }], c.scratch);

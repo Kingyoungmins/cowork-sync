@@ -3,10 +3,19 @@
 // are matched directly, and the middle is split at a point of an optimal path by the linear-space
 // bisection of Myers' "An O(ND) Difference Algorithm" §4b (the diff-match-patch form), so memory is
 // O(N + M) and a fixture-sized file with a few edits costs a few passes over its rows.
+// The row interning and the blob-level common-rows trim are exported for the churn guard's bounded
+// share (src/data/churn.ts rewrittenRatio), which must not keep a copy of them (Plan 3 Global
+// Constraint "Shared helpers, never copied").
 import { stripEnding } from './rows.js';
 
-/** Myers diff of two row lists compared with endings ignored; the matched index pairs in order. Pure. */
-export function matchedRows(a: readonly Buffer[], b: readonly Buffer[]): Array<[number, number]> {
+const LF = 0x0a;
+const CR = 0x0d;
+
+/**
+ * Two row lists as integer ids, a and b interned together (a first): two rows get one id exactly when they are equal with
+ * their endings ignored (stripEnding; the latin1 key maps every byte to one code unit). Ids are dense: 0 … alphabet − 1. Pure.
+ */
+export function internRows(a: readonly Buffer[], b: readonly Buffer[]): { A: Int32Array; B: Int32Array; alphabet: number } {
   const ids = new Map<string, number>();
   const intern = (row: Buffer): number => {
     const key = stripEnding(row).toString('latin1');
@@ -19,6 +28,68 @@ export function matchedRows(a: readonly Buffer[], b: readonly Buffer[]): Array<[
   };
   const A = Int32Array.from(a, intern);
   const B = Int32Array.from(b, intern);
+  return { A, B, alphabet: ids.size };
+}
+
+/** The end of the row of x that starts at s: after its LF, or x's end for a final run without LF. */
+function rowEndAt(x: Buffer, s: number): number {
+  const nl = x.indexOf(LF, s);
+  return nl < 0 ? x.length : nl + 1;
+}
+
+/** The start of the row of x that ends at e (e > 0, a row end): after the LF before the row's own last byte, else 0. */
+function rowStartAt(x: Buffer, e: number): number {
+  return e >= 2 ? x.lastIndexOf(LF, e - 2) + 1 : 0;
+}
+
+/** The end of x[s, e)'s content without one trailing CR LF or LF (stripEnding's rule on offsets). */
+function contentEnd(x: Buffer, s: number, e: number): number {
+  if (e > s && x[e - 1] === LF) return e - 1 > s && x[e - 2] === CR ? e - 2 : e - 1;
+  return e;
+}
+
+/** Whether the rows a[as, ae) and b[bs, be) are equal with their endings ignored, compared in place. */
+function sameRow(a: Buffer, as: number, ae: number, b: Buffer, bs: number, be: number): boolean {
+  const ax = contentEnd(a, as, ae);
+  const bx = contentEnd(b, bs, be);
+  return ax - as === bx - bs && a.compare(b, bs, bx, as, ax) === 0;
+}
+
+/**
+ * The common leading rows of two blobs, then the common trailing rows of what is left, rows compared with their endings
+ * ignored (as internRows does): a's middle is a[aStart, aEnd) and b's b[bStart, bEnd), each a whole number of rows, and `rows`
+ * counts the common rows (the same number on both sides). The trailing rows never overlap the leading ones. Linear in the
+ * bytes and compared in place: no row list, no interning. Pure.
+ */
+export function commonRowEnds(a: Buffer, b: Buffer): { aStart: number; aEnd: number; bStart: number; bEnd: number; rows: number } {
+  let aStart = 0;
+  let bStart = 0;
+  let common = 0;
+  while (aStart < a.length && bStart < b.length) {
+    const ae = rowEndAt(a, aStart);
+    const be = rowEndAt(b, bStart);
+    if (!sameRow(a, aStart, ae, b, bStart, be)) break;
+    aStart = ae;
+    bStart = be;
+    common += 1;
+  }
+  let aEnd = a.length;
+  let bEnd = b.length;
+  while (aEnd > aStart && bEnd > bStart) {
+    // A leading run ends after an LF (or at its blob's end), so a trailing row never starts before it.
+    const as = Math.max(rowStartAt(a, aEnd), aStart);
+    const bs = Math.max(rowStartAt(b, bEnd), bStart);
+    if (!sameRow(a, as, aEnd, b, bs, bEnd)) break;
+    aEnd = as;
+    bEnd = bs;
+    common += 1;
+  }
+  return { aStart, aEnd, bStart, bEnd, rows: common };
+}
+
+/** Myers diff of two row lists compared with endings ignored; the matched index pairs in order. Pure. */
+export function matchedRows(a: readonly Buffer[], b: readonly Buffer[]): Array<[number, number]> {
+  const { A, B } = internRows(a, b);
   const out: Array<[number, number]> = [];
   diffRange(A, B, 0, A.length, 0, B.length, out);
   return out;

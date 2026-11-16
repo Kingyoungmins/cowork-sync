@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, utimesS
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { TOKEN_ENV } from '../../../src/claude/client/mcp/doorbell.js';
 import { buildDaemonEnv } from '../../../src/git/env.js';
 import type { GitResult, GitRunner } from '../../../src/git/runner.js';
 import { realFs, type Fs } from '../../../src/ports/fs.js';
@@ -402,7 +403,7 @@ test('T-VIZ-env (Linux): the real viewer\'s /proc/<pid>/environ has no CLAUDE_* 
   mkdirSync(home, { recursive: true });
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
-    CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_CODE_MESSAGING_TOKEN: 'viz-env-messaging-canary', CLAUDE_CONFIG_DIR: join(home, '.claude'),
+    CLAUDE_PLUGIN_DATA: dataDir, [TOKEN_ENV]: 'viz-env-messaging-canary', CLAUDE_CONFIG_DIR: join(home, '.claude'),
     NODE_OPTIONS: '--no-warnings', NODE_PATH: join(root, 'node path'), GIT_DIR: join(root, 'git dir'), GIT_INDEX_FILE: join(root, 'index'),
   };
   const rec = recordingEnv({ pluginRoot, cwd: root, home, env, spawnViewer, ownerProbe: realOwnerProbe, uid: process.geteuid?.() ?? null });

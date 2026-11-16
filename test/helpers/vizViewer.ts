@@ -198,7 +198,9 @@ export async function fetchedRoomsFixture(label: string, branches: readonly stri
 }
 
 /** The date and wall-clock forms no viewer surface may carry (T-VIZ-clock, F18): ISO 8601, RFC 2822, YYYY-MM-DD, HH:MM, and the Unix
- *  epoch seconds or milliseconds of this test run's wall clock (± 2 days) or of the fixtures' commit dates. */
+ *  epoch seconds or milliseconds of this test run's wall clock (± 2 days) or of the fixtures' commit dates — except the value of an
+ *  event `seed` key that fits uint32 (12 §3.3.5 "Seed": a hash of fixed fixture positions, never a clock; F1 audit fix #10: the
+ *  served pages' ≈ 2,400 fixed seeds made apiE2E fail whenever one of them read as a Unix second within ± 2 days of the run). */
 export function datesIn(text: string, wallMs: number): string[] {
   const found: string[] = [];
   const patterns: RegExp[] = [
@@ -210,7 +212,10 @@ export function datesIn(text: string, wallMs: number): string[] {
   for (const re of patterns) for (const m of text.matchAll(re)) found.push(m[0]);
   const near = (n: number, at: number, span: number): boolean => Math.abs(n - at) <= span;
   const DAY = 86_400_000;
-  for (const m of text.matchAll(/\d{9,13}/g)) {
+  // A `"seed":<n>` pair (also escaped, `\"seed\":<n>`, inside a JSON string) whose n fits uint32 is blanked before the number scan.
+  const UINT32_MAX = 0xffff_ffff;
+  const numbers = text.replace(/(\\?"seed\\?"\s*:\s*)(\d+)(?!\d)/g, (all: string, key: string, n: string) => (Number(n) <= UINT32_MAX ? `${key}#` : all));
+  for (const m of numbers.matchAll(/\d{9,13}/g)) {
     const n = Number(m[0]);
     if (near(n, wallMs, 2 * DAY) || near(n, wallMs / 1000, 2 * DAY / 1000) || near(n, FIXTURE_WALL_MS, DAY) || near(n, FIXTURE_WALL_MS / 1000, DAY / 1000)) found.push(m[0]);
   }

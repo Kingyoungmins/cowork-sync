@@ -1,0 +1,15 @@
+{
+  "name": "pass/note_possible_caller",
+  "check": null,
+  "lang": "python",
+  "expect": "pass",
+  "tipEqualsA": true,
+  "A": {
+    "lib.py": "def foo(a, b):\n    \"\"\"Price of a line.\"\"\"\n    return a * b\n\n\ndef helper(x):\n    return round(x, 2)\n",
+    "orders.py": "import lib\n\n\ndef run(obj):\n    return obj.foo(1, 2)\n"
+  },
+  "R": {
+    "lib.py": "def foo(a):\n    \"\"\"Price of a line.\"\"\"\n    return a * 2\n\n\ndef helper(x):\n    return round(x, 2)\n",
+    "orders.py": "import lib\n\n\ndef run(obj):\n    return obj.foo(1, 2)\n"
+  }
+}

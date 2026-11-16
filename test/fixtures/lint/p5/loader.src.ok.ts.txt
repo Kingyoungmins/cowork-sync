@@ -1,0 +1,7 @@
+// The loader's admitted loads: node:* and ./core.js through import().
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+void readFileSync;
+void createHash;
+const core = await import('./core.js');
+void core;

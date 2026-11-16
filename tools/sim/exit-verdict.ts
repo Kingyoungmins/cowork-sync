@@ -4,7 +4,7 @@
 // passed — with no lost seed, no problem and every report complete. A count alone never passes it. The summary line
 // carries the per-OS seed and failure counts the ledger records.
 //
-// Usage: tsx tools/sim/exit-verdict.ts --reports <dir> --profile edits|faults --from I --seeds N [--prefix P] [--label L]
+// Usage: tsx tools/sim/exit-verdict.ts --reports <dir> --profile edits|faults|holds --from I --seeds N [--prefix P] [--label L]
 // Exit: 0 the verdict passes, 1 it does not, 2 usage error or a report that cannot be read.
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -35,7 +35,7 @@ function parseArgs(argv: readonly string[]): Args {
     return Number(x);
   };
   const profile = need('--profile');
-  if (!(PROFILES_ALL as readonly string[]).includes(profile)) throw new InputError(`--profile is edits or faults, got ${profile}`);
+  if (!(PROFILES_ALL as readonly string[]).includes(profile)) throw new InputError(`--profile is ${PROFILES_ALL.join(', ')}, got ${profile}`);
   const prefix = v.get('--prefix') ?? '';
   if (badSeedText(prefix, true) !== null) throw new InputError(`--prefix ${JSON.stringify(prefix)} ${badSeedText(prefix, true)}`);
   return { dir: need('--reports'), profile: profile as Profile, from: int('--from', 0), seeds: int('--seeds', 1), prefix, label: v.get('--label') ?? profile };

@@ -6,10 +6,14 @@ import {
   HUGE_BYTES, NEW_FILE_CAP, QUARANTINE_PATTERNS, SECRET_LIKE_PATTERNS, TEMP_PATTERNS,
   admitNew, isDotGitAlias, isQuarantined, portable, scopeOfTracked, validGlob, wildmatch, type ScopeInputs,
 } from '../../src/data/scope.js';
+import { hooksDir, userHooksPathDir } from '../../src/engine/core.js';
 import { parseOid } from '../../src/git/oid.js';
+import { GitCommandError, GitRepo, type RepoContext } from '../../src/git/repo.js';
+import { realFs } from '../../src/ports/fs.js';
+import type { Log, LogParam } from '../../src/ports/log.js';
 
 const EPOCH = parseOid('1'.repeat(40));
-const NO_ATTRS: PathAttrs = { filter: null, merge: null, text: null, binary: false, eol: null, generated: false, coworkOff: false };
+const NO_ATTRS: PathAttrs = { filter: null, merge: null, text: null, binary: false, eol: null, generated: false, coworkOff: false, workingTreeEncoding: null };
 
 function attrsOf(table: Record<string, Partial<PathAttrs>> = {}): AttrSnapshot {
   return { epochBase: EPOCH, get: (p: string): PathAttrs => ({ ...NO_ATTRS, ...(table[p] ?? {}) }) };
@@ -340,4 +344,88 @@ test('isQuarantined: the glossary §16 set', () => {
   assert.equal(isQuarantined('a/hooks/x', 'hooks'), false);
   assert.equal(isQuarantined('a/b/x', 'a/b'), true);
   assert.equal(isQuarantined('hooks/pre-commit', null), false);
+});
+
+test("integration I-3 (r2 rereview F): a core.hooksPath of '.' or the work-tree root fails closed — hooksDir names the root (''), and every standard git hook file name at the root is QUARANTINED", () => {
+  const wt = process.platform === 'win32' ? 'C:\\work\\repo' : '/work/repo';
+  const roots = ['.', './', ' . ', wt, `${wt}${process.platform === 'win32' ? '\\' : '/'}`, ...(process.platform === 'win32' ? ['.\\'] : [])];
+  for (const v of roots) assert.equal(hooksDir(wt, v), '', JSON.stringify(v));
+  assert.equal(hooksDir(wt, 'tools/hooks'), 'tools/hooks');
+  assert.equal(hooksDir(wt, './tools/hooks/'), 'tools/hooks');
+  for (const v of [null, '', '  ', '../elsewhere', process.platform === 'win32' ? 'D:\\hooks' : '/hooks']) assert.equal(hooksDir(wt, v), null, JSON.stringify(v));
+  // githooks(5)'s names at the root (any case: a case-folding disk; `.exe`: Git for Windows runs `<hook>.exe` too).
+  for (const p of ['pre-commit', 'post-checkout', 'pre-push', 'reference-transaction', 'post-merge', 'commit-msg', 'Pre-Commit', 'pre-commit.exe', 'fsmonitor-watchman', 'update']) {
+    assert.equal(isQuarantined(p, ''), true, p);
+    assert.deepEqual(scopeOfTracked(p, '100755', 10, inputs({}, {}, { hooksPathDir: '' })), { cls: 'QUARANTINED', reason: 'quarantine' }, p);
+  }
+  for (const p of ['README.md', 'src/pre-commit', 'hooks/post-checkout', 'pre-commit.sh', 'pre-commitx', 'updates']) {
+    assert.equal(isQuarantined(p, ''), false, p);
+    assert.deepEqual(scopeOfTracked(p, '100644', 10, inputs({}, {}, { hooksPathDir: '' })), { cls: 'LIVE', reason: null }, p);
+  }
+  assert.equal(isQuarantined('pre-commit', null), false, 'no hooks path: a root pre-commit is an ordinary file');
+});
+
+test("R3-EF4-27 (glossary §16): hooksDir resolves a relative core.hooksPath against the work tree (githooks(5)), so a '..' that lands inside it names the directory git runs, and decides containment on the resolved path", () => {
+  const wt = process.platform === 'win32' ? 'C:\\work\\repo' : '/work/repo';
+  const s = process.platform === 'win32' ? '\\' : '/';
+  // The delta probe's forms: git runs <wt>/tools/hooks/pre-commit under each of them.
+  assert.equal(hooksDir(wt, 'tools/../tools/hooks'), 'tools/hooks');
+  assert.equal(hooksDir(wt, '../repo/tools/hooks'), 'tools/hooks');
+  assert.equal(hooksDir(wt, `${wt}${s}tools${s}..${s}tools${s}hooks`), 'tools/hooks');
+  assert.equal(hooksDir(wt, './tools/./hooks/x/..'), 'tools/hooks');
+  assert.equal(isQuarantined('tools/hooks/pre-commit', hooksDir(wt, 'tools/../tools/hooks')), true);
+  assert.equal(hooksDir(wt, 'tools/..'), '', 'a value that resolves to the root is the root (fails closed, integration I-3)');
+  assert.equal(hooksDir(wt, '..foo/hooks'), '..foo/hooks', "a directory whose name starts with '..' is inside");
+  // Outside the work tree: null.
+  for (const v of ['tools/../..', '../repo2/hooks', '../elsewhere/repo/tools/hooks', '..']) assert.equal(hooksDir(wt, v), null, v);
+});
+
+test("R3-EF4-31 (EF5 merge M-1; R3-EF4-27 fails closed): userHooksPathDir excuses only git's exit 128 (a valueless or invalid core.hooksPath) as no hooks directory; any other failure of the read — a spawn failure (the runner's code -1), exit 129 — throws, so the start that reads it refuses", async () => {
+  const wt = process.platform === 'win32' ? 'C:\\work\\repo' : '/work/repo';
+  // A runner that answers every git call with `code` (no process is spawned; the work tree is never read: no value comes back).
+  const repoAnswering = (code: number): GitRepo => new GitRepo(
+    { run: async () => ({ code, stdout: Buffer.alloc(0), stderr: Buffer.from(code === -1 ? 'spawn failed: EAGAIN' : 'fatal: bad config', 'utf8'), killedByWatchdog: false, aborted: false, durationMs: 0 }) },
+    { workTree: wt, gitDir: `${wt}/.git`, coworkDir: `${wt}/.git/cowork` },
+    () => ({ attrTree: null, filterDrivers: [] }) as unknown as RepoContext,
+  );
+  const lines: Array<{ level: string; code: string; params: unknown }> = [];
+  const log: Log = { write: (level, code, params?: Readonly<Record<string, LogParam>>) => { lines.push({ level, code, params }); } };
+  // Exit 1 (no value): git's own answer for an unset key — null, no log line.
+  assert.equal(await userHooksPathDir(repoAnswering(1), realFs, wt, log), null);
+  assert.deepEqual(lines, []);
+  // Exit 128 (the path type refuses the entry): null plus one HOOKS_PATH_INVALID line, never a throw.
+  assert.equal(await userHooksPathDir(repoAnswering(128), realFs, wt, log), null);
+  assert.deepEqual(lines, [{ level: 'warn', code: 'HOOKS_PATH_INVALID', params: { exit: '128' } }]);
+  // Anything else did not read the config at all: it propagates (a start refuses rather than run with the hooks directory LIVE).
+  for (const code of [-1, 129]) {
+    await assert.rejects(userHooksPathDir(repoAnswering(code), realFs, wt, log), (e: unknown) => e instanceof GitCommandError && e.code === code, `exit ${code}`);
+  }
+  assert.equal(lines.length, 1, 'no HOOKS_PATH_INVALID line for a failure that is not the config\'s');
+});
+
+test('isQuarantined: a component in NTFS 8.3 short-name shape is QUARANTINED on every platform (ruling R3-FF2-F1, SEC-31)', () => {
+  // On an 8.3-enabled NTFS volume `CLAUDE~1` IS `.claude`, `GITHUB~1` IS `.github`, `SETTIN~1.JSO` IS `settings.json`:
+  // a name-only match would class these LIVE and an incoming change would be written into the quarantined original.
+  const yes = ['CLAUDE~1/settings.json', 'GITHUB~1/workflows/x.yml', 'claude~1/settings.json', 'Claude~1/settings.local.json',
+    '.vscode/SETTIN~1.JSO', '.vscode/settin~1.jso', 'VSCODE~1/TASKS~1.JSO', 'MCP~1.JSO', 'GITATT~1', 'sub/GITATT~1',
+    'GITLAB~1.YML', 'AZURE-~1.YML', 'DEVCON~1/devcontainer.json', 'ENVRC~1', 'tools/GIT-HO~1/pre-commit', 'CL3E8B~1/x',
+    'A~1', 'ABCDEF~12', 'src/X~9.c', 'CLAUDE~1.', 'CLAUDE~1 /settings.json', 'MCP~1.JSO.'];
+  for (const p of yes) {
+    assert.equal(isQuarantined(p, null), true, p);
+    assert.deepEqual(scopeOfTracked(p, '100644', 10, inputs()), { cls: 'QUARANTINED', reason: 'quarantine' }, p);
+  }
+  // New files: D6 step 2.4 (quarantine) — the paths below are neither temp nor secret-like.
+  for (const p of ['CLAUDE~1/settings.json', 'GITHUB~1/workflows/x.yml', 'claude~1/settings.json', '.vscode/SETTIN~1.JSO', 'MCP~1.JSO']) {
+    assert.deepEqual(admitNew(p, 5, false, new Set(), inputs()), { cls: 'NOT_ADMITTED', reason: 'quarantine' }, p);
+  }
+  // Not 8.3-shaped: no digits after '~', nothing before it, a '.' or '~' in the stem, a 7-character stem, a 4-character
+  // extension, or text after the digits. (Through isQuarantined/scopeOfTracked, not admitNew: `*~` is a temp name there.)
+  const no = ['a~b', 'x~', '~1', 'a.b~1', 'a~b~1', 'ABCDEFG~1', 'CLAUDE~1.JSON', 'CLAUDE~1x', 'CLAUDE~', 'CLAUDE~x1', 'notes~draft.md',
+    'src/a~b/c.txt', 'src/x~/y', 'v1.2~3', 'a~1.b.c'];
+  for (const p of no) {
+    assert.equal(isQuarantined(p, null), false, p);
+    assert.deepEqual(scopeOfTracked(p, '100644', 10, inputs()), { cls: 'LIVE', reason: null }, p);
+  }
+  // git~N stays P2-DOTGIT's (never admitted through D7 rule 2, always carried): not reclassed as a quarantine path.
+  for (const p of ['GIT~1/x', 'sub/git~1/hooks/post-checkout', 'GIT~12']) assert.equal(isQuarantined(p, null), false, p);
 });

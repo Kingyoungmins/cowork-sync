@@ -1,0 +1,24 @@
+{
+  "session_id": "3f9a1c2e-5b7d-4e8f-9a0b-1c2d3e4f5a6b",
+  "transcript_path": "/home/me/.claude/projects/-home-me-repo/3f9a1c2e-5b7d-4e8f-9a0b-1c2d3e4f5a6b.jsonl",
+  "cwd": "/home/me/repo",
+  "hook_event_name": "PreToolUse",
+  "permission_mode": "acceptEdits",
+  "prompt_id": "361954a0-1111-4222-8333-444455556666",
+  "tool_name": "MultiEdit",
+  "tool_use_id": "toolu_01MultiAAAAAAAAAAAAAAAAA",
+  "tool_input": {
+    "file_path": "/home/me/repo/src/b.ts",
+    "edits": [
+      {
+        "old_string": "a",
+        "new_string": "b"
+      },
+      {
+        "old_string": "c",
+        "new_string": "d",
+        "replace_all": true
+      }
+    ]
+  }
+}

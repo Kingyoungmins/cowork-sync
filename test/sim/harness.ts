@@ -10,7 +10,7 @@
 // - nothing that reaches the op-log reads the real clock, timer resolution, GitResult.durationMs or
 //   the temp root path (push trace events carry the remote URL: comparisons normalise it).
 // On a failure the temp root is kept and <root>/artifacts holds op-log.jsonl, trace.jsonl, copies of the remote
-// logs and a bundle of the remote (11-testing §3.3 Failure).
+// logs, a bundle of the remote and (Plan 3 Task 16, TST-09) one bundle of each peer's refs/cowork-local/* (11-testing §3.3 Failure).
 //
 // Plan 2 (Task 18) adds, all behind the optional 4th argument (without it, or with no option set, a run is exactly
 // the Plan 1 run: the same draws, op-log and oids):
@@ -28,6 +28,18 @@
 // - host emulation (§3.3): a partition renames the bare remote away (fetches and pushes fail fast), heal renames it
 //   back; the harness heals (logging the outage it ended) and clears pending rejections before quiescence;
 // - advanceClocks(ctx, ms): virtual time passes for a scripted step exactly as between two harness steps.
+//
+// Plan 3 (Task 13): peerProfile's `platform` reaches PeerOptions.platform (the Windows-receiver emulation of R3-47, on any host);
+// T* is declared only when the K-round rule holds and `settled` answers true — holdTimersSettled by default, so no hold timer's push
+// (the +10 min revert event, a 60 s INCOMING creation op, a deferral's record) can land in the extra rounds (INV-CONVERGE; a timer due
+// beyond them does not hold T* back: the fix round 1 ruling's lookahead). The
+// afterEveryOp oracles run after every op step, every quiescence round and every extra round (oracleGroup and the step-59 unlock
+// applies depend on both).
+//
+// EF2 D2: `beforeQuiescenceRound` (holdsSetup's resumeMassFrozen for the holds profile) runs at the start of every quiescence round,
+// after the round's op-log row and before the engines step; it may run engine calls and add op-log rows (same seed, same rows). EF2
+// fix round 1, F4: a string it returns fails the run at that round (BEFORE_QUIESCENCE_ROUND); QuiescenceInfo.resumes counts its
+// `resume` rows.
 import { copyFile, lstat, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -64,6 +76,11 @@ export interface SimEngine {
   inspect?(): Promise<EngineInspection>;
   /** Push attempts counted so far (cumulative across restarts). */
   pushAttempts?(): number;
+  /**
+   * Plan 3 (Task 13): false while one of this peer's hold timers may push within the next `lookaheadMs` of virtual time (the extra
+   * rounds; realEngine's; see holdTimersSettled). An engine without it has no hold timers.
+   */
+  timersSettled?(lookaheadMs: number): Promise<boolean>;
 }
 export type EngineFactory = (ctx: SimContext, peer: PeerClone) => SimEngine;
 export interface Oracle {
@@ -77,15 +94,33 @@ export interface SimOp { readonly peer: string; readonly kind: string; run(ctx: 
 export interface OpGenerator { next(ctx: SimContext, step: number): SimOp | null; }
 export interface QuiescenceOptions { loopMs: number; k: number; extraLoops: number; maxRounds: number; }
 export const DEFAULT_QUIESCENCE: QuiescenceOptions = Object.freeze({ loopMs: 2_500, k: 20, extraLoops: 40, maxRounds: 400 });
-export interface QuiescenceInfo { reached: boolean; tStar: string | null; rounds: number; pushAttemptsInExtra: number; boardChangedInExtra: boolean; }
+export interface QuiescenceInfo {
+  reached: boolean; tStar: string | null; rounds: number; pushAttemptsInExtra: number; boardChangedInExtra: boolean;
+  /** EF2 fix round 1, F4: the op-log rows of kind `resume` SimOptions.beforeQuiescenceRound added (set by runSim; a seed that needed one shows it). */
+  resumes?: number;
+}
 export interface SimOptions {
   generator?: OpGenerator;
   /** Omitted = Plan 1 behaviour (no quiescence phase). */
   quiescence?: QuiescenceOptions;
   seedFiles?: Record<string, Buffer>;
-  peerProfile?: (index: number) => { autocrlf: boolean; withFilter: boolean };
+  /** `platform` (Plan 3, R3-47: the Windows-receiver emulation on any host) is copied into PeerOptions.platform. */
+  peerProfile?: (index: number) => { autocrlf: boolean; withFilter: boolean; platform?: NodeJS.Platform };
   /** p per step of arming a KilledAt at a random peer's next crashpoint. */
   crash?: { rate: number };
+  /**
+   * Plan 3 (Task 13): T* is declared only when the K-round rule holds and `settled` answers true (asked only then, once per round).
+   * Omitted = holdTimersSettled, so every profile and Plan 2's realEngine SIM runs get it (R3-37: they may hold revert records).
+   */
+  settled?: (ctx: SimContext) => Promise<boolean>;
+  /**
+   * EF2 D2: called at the start of every quiescence round (never in an op step or an extra round), after the round's op-log row and
+   * before the engines step, with that round's step number. holdsSetup sets resumeMassFrozen: R3-47's scripted human `resume` of a
+   * peer frozen MASS (HLD-31: nothing else lifts it), which the generator's own resume cannot reach when the trip happens later.
+   * EF2 fix round 1, F4: a string it returns fails the run there (oracle BEFORE_QUIESCENCE_ROUND, that round's step), like an
+   * oracle's; the op-log rows of kind `resume` it adds are counted in QuiescenceInfo.resumes.
+   */
+  beforeQuiescenceRound?: (ctx: SimContext, step: number) => Promise<string | null | void>;
 }
 export interface SimResult {
   ok: boolean;
@@ -205,10 +240,14 @@ export async function rejectsPending(ctx: Pick<SimContext, 'root'>): Promise<num
 
 // ---- virtual time ------------------------------------------------------------------------------------------------------
 
-/** Per run: the harness's clock mover (every peer clock and the scheduler clock) and the scheduler clock. */
-const runs = new WeakMap<SimContext, { advance(ms: number): void; schedClock: VirtualClock }>();
+/**
+ * Per run: the harness's clock mover (every peer clock and the scheduler clock), the scheduler clock and the run's quiescence options
+ * (holdTimersSettled's lookahead; undefined in a run without a quiescence phase).
+ */
+interface RunHandle { advance(ms: number): void; schedClock: VirtualClock; quiescence: QuiescenceOptions | undefined; }
+const runs = new WeakMap<SimContext, RunHandle>();
 
-function runOf(ctx: SimContext): { advance(ms: number): void; schedClock: VirtualClock } {
+function runOf(ctx: SimContext): RunHandle {
   const r = runs.get(ctx);
   if (r === undefined) throw new Error('not the SimContext of a running runSim');
   return r;
@@ -222,6 +261,24 @@ export function advanceClocks(ctx: SimContext, ms: number): void {
 /** The scheduler clock's mono (it runs ahead of the peer clocks when a drained task was scheduled in their future). */
 export function schedulerMonoMs(ctx: SimContext): number {
   return runOf(ctx).schedClock.monoMs();
+}
+
+// ---- hold timers (Plan 3 Task 13) ---------------------------------------------------------------------------------------
+
+/**
+ * True when no peer has a hold timer due within the next extra rounds (INV-CONVERGE's zero-push clause, R-32): every engine that has
+ * hold timers (realEngine's timersSettled) answers settled over a lookahead of the extra rounds plus one round (extraLoops × loopMs +
+ * loopMs: the slack covers the ±100 ppm wall drift HoldRegistry.ageMs may read on top of the mono rounds) — no HOLD_REVERT_HELD event
+ * drafted and not landed, no non-terminal `revert` record whose event (+10 min, HLD-60) is not in its fold and comes due within the
+ * lookahead, no INCOMING record whose creation op creationDue still withholds (60 s), no pending deferral younger than 60 s (an
+ * INCOMING record and its op at 60 s). True at once for a peer that is not a realEngine peer. Fix round 1 ruling (Option A): a record
+ * whose event is due beyond the lookahead does not hold T* back. Outside a running runSim the lookahead is DEFAULT_QUIESCENCE's.
+ */
+export async function holdTimersSettled(ctx: SimContext): Promise<boolean> {
+  const q = runs.get(ctx)?.quiescence ?? DEFAULT_QUIESCENCE;
+  const lookaheadMs = (q.extraLoops + 1) * q.loopMs;
+  for (const e of ctx.engines) if (e.timersSettled !== undefined && !(await e.timersSettled(lookaheadMs))) return false;
+  return true;
 }
 
 // ---- oracles and artifacts ---------------------------------------------------------------------------------------
@@ -256,9 +313,11 @@ const jsonl = (rows: readonly unknown[]): Buffer => Buffer.from(rows.map((e) => 
  * Writes <root>/artifacts: op-log.jsonl, trace.jsonl (every TraceRecorder event, in emission order), remote-log.jsonl
  * and reftx-log.jsonl (copies of the Task 11 hook logs, empty when the hook never ran) and remote.bundle (`git bundle
  * create --all` of the bare remote, healed first; remote.bundle.err.txt instead when git refuses, e.g. for an empty
- * remote).
+ * remote). Plan 3 Task 16 (TST-09): per peer, <name>-local.bundle — `git bundle create --glob=refs/cowork-local/*` of the
+ * peer's clone (its state ref, hold registry and every other local cowork ref, with the objects they reach);
+ * <name>-local.bundle.err.txt instead when git refuses (a peer that never started has none).
  */
-async function keepArtifacts(root: string, git: GitRunner, remote: BareRemote | undefined, opLog: OpLogEntry[], trace: TraceRecorder): Promise<string> {
+async function keepArtifacts(root: string, git: GitRunner, remote: BareRemote | undefined, opLog: OpLogEntry[], trace: TraceRecorder, peers: readonly PeerClone[]): Promise<string> {
   const dir = join(root, 'artifacts');
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, 'op-log.jsonl'), jsonl(opLog));
@@ -269,6 +328,11 @@ async function keepArtifacts(root: string, git: GitRunner, remote: BareRemote | 
     await healRemote({ remote }).catch(() => false);
     const b = await git.run(['bundle', 'create', '-q', join(dir, 'remote.bundle'), '--all'], { class: 'local', cwd: remote.dir });
     if (b.code !== 0) await writeFile(join(dir, 'remote.bundle.err.txt'), b.stderr);
+  }
+  for (const p of peers) {
+    const file = join(dir, `${p.name}-local.bundle`);
+    const b = await git.run(['bundle', 'create', '-q', file, '--glob=refs/cowork-local/*'], { class: 'local', cwd: p.dir }).catch((e: unknown) => ({ code: -1, stderr: Buffer.from(String(e)) }));
+    if (b.code !== 0) await writeFile(`${file}.err.txt`, b.stderr);
   }
   return dir;
 }
@@ -316,6 +380,8 @@ export async function runSim(t: SeedTuple, makeEngine: EngineFactory, oracles: O
   let remote: BareRemote | undefined;
   const trace = new TraceRecorder();
   let keep = false;
+  /** The run's peers, for the failure artifacts (filled as they are cloned). */
+  const peersSoFar: PeerClone[] = [];
   const crash = opts?.crash;
   /** The peer whose next crashpoint throws (armed), and the peer whose engine step the harness is running (active). */
   let armed: string | null = null;
@@ -341,7 +407,9 @@ export async function runSim(t: SeedTuple, makeEngine: EngineFactory, oracles: O
       const name = `p${i}`;
       // Odd peers use the Windows checkout profile (core.autocrlf=true), 11-testing §3.3 setup 3.
       const profile = opts?.peerProfile?.(i) ?? { autocrlf: i % 2 === 1, withFilter: false };
-      peers.push(await clonePeer(remote, root, { name, autocrlf: profile.autocrlf, withFilter: profile.withFilter }, git));
+      const platform = profile.platform === undefined ? {} : { platform: profile.platform };
+      peers.push(await clonePeer(remote, root, { name, autocrlf: profile.autocrlf, withFilter: profile.withFilter, ...platform }, git));
+      peersSoFar.push(peers[peers.length - 1]!);
       // wallOffsetMs is an offset from SIM_WALL_EPOCH_MS (VirtualClock adds the epoch itself).
       const skewMs = (randomInt(random, 2 * MAX_SKEW_S + 1) - MAX_SKEW_S) * 1000;
       const driftPpm = randomInt(random, 2 * MAX_DRIFT_PPM + 1) - MAX_DRIFT_PPM;
@@ -356,7 +424,7 @@ export async function runSim(t: SeedTuple, makeEngine: EngineFactory, oracles: O
       for (const c of clocks.values()) c.advance(ms);
       schedClock.advance(ms);
     };
-    runs.set(ctx, { advance, schedClock });
+    runs.set(ctx, { advance, schedClock, quiescence: opts?.quiescence });
     const engines = peers.map((p) => makeEngine(ctx, p));
     ctx.engines.push(...engines);
     /** The harness's own heal (at the end of the op budget and of the run), with the outage it ended. */
@@ -434,10 +502,17 @@ export async function runSim(t: SeedTuple, makeEngine: EngineFactory, oracles: O
       const byName = [...engines].sort((a, b) => (a.peer.name < b.peer.name ? -1 : a.peer.name > b.peer.name ? 1 : 0));
       const totalPushes = (): number => engines.reduce((s, e) => s + (e.pushAttempts?.() ?? 0), 0);
       let tip = await boardTip(remote);
+      let hookResumes = 0;
       const round = async (): Promise<SimResult['failure'] | undefined> => {
         const step = next++;
         advance(q.loopMs);
         opLog.push({ step, peer: '*', kind: 'round', detail: `${ctx.phase} tip=${tip ?? '-'}` });
+        if (ctx.phase === 'quiescence' && opts?.beforeQuiescenceRound !== undefined) {
+          const from = opLog.length;
+          const why = await opts.beforeQuiescenceRound(ctx, step);
+          hookResumes += opLog.slice(from).filter((e) => e.kind === 'resume').length;
+          if (typeof why === 'string') return { oracle: 'BEFORE_QUIESCENCE_ROUND', message: why, step };
+        }
         for (const e of byName) await stepEngine(e);
         await drain(step);
         return firstFailure(oracles, 'afterEveryOp', ctx, step);
@@ -452,6 +527,9 @@ export async function runSim(t: SeedTuple, makeEngine: EngineFactory, oracles: O
       let lastChange = 0;
       const observed = new Map<string, number>();
       let reached = false;
+      const settled = opts?.settled ?? holdTimersSettled;
+      /** Rounds in which the K rule held but `settled` answered false (a hold timer still due). */
+      let unsettledRounds = 0;
       while (failure === undefined && rounds < q.maxRounds) {
         rounds++;
         const mark = trace.events.length;
@@ -468,12 +546,16 @@ export async function runSim(t: SeedTuple, makeEngine: EngineFactory, oracles: O
         }
         for (const name of observersOf(trace, mark, tip)) if (!observed.has(name)) observed.set(name, 0);
         const tracked = new Set(trace.names.values());
-        if (byName.every((e) => (tracked.has(e.peer.name) ? (observed.get(e.peer.name) ?? -1) : since) >= q.k)) {
-          reached = true;
-          break;
+        if (failure === undefined && byName.every((e) => (tracked.has(e.peer.name) ? (observed.get(e.peer.name) ?? -1) : since) >= q.k)) {
+          // Plan 3 (Task 13): and no hold timer may push in the extra rounds (asked only once the K rule holds).
+          if (await settled(ctx)) {
+            reached = true;
+            break;
+          }
+          unsettledRounds++;
         }
       }
-      quiescence = { reached, tStar: reached ? tip : null, rounds, pushAttemptsInExtra: 0, boardChangedInExtra: false };
+      quiescence = { reached, tStar: reached ? tip : null, rounds, pushAttemptsInExtra: 0, boardChangedInExtra: false, resumes: hookResumes };
       if (failure === undefined && !reached) {
         // The per-peer rule above, in words: which peers stayed short of K, and why (never observed the tip, or too few
         // rounds since they did; an untracked peer counts from the tip's last change).
@@ -488,7 +570,8 @@ export async function runSim(t: SeedTuple, makeEngine: EngineFactory, oracles: O
         failure = {
           oracle: 'QUIESCENCE',
           message: `no quiescence within ${q.maxRounds} rounds: R-32 needs every peer to run K = ${q.k} rounds after it observed the board tip `
-            + `(tip ${tip ?? '-'}, last changed in round ${lastChange}); short of K: ${short.join(', ')}`,
+            + `(tip ${tip ?? '-'}, last changed in round ${lastChange}); short of K: ${short.length === 0 ? 'none' : short.join(', ')}`
+            + (unsettledRounds > 0 ? `; the K rule held in ${unsettledRounds} round(s) while a hold timer was still due (settled answered false)` : ''),
           step: next,
         };
       }
@@ -512,12 +595,12 @@ export async function runSim(t: SeedTuple, makeEngine: EngineFactory, oracles: O
     const extra = quiescence !== undefined ? { quiescence } : {};
     if (failure === undefined) return { ok: true, opLog, remoteRefs, ...extra };
     keep = true;
-    const artifactsDir = await keepArtifacts(root, git, remote, opLog, trace);
+    const artifactsDir = await keepArtifacts(root, git, remote, opLog, trace, peersSoFar);
     return { ok: false, failure, opLog, remoteRefs, artifactsDir, ...extra };
   } catch (e) {
     // A thrown engine/fixture error is a failure too: keep the root and say where it is.
     keep = true;
-    const where = await keepArtifacts(root, git, remote, opLog, trace).catch(() => root);
+    const where = await keepArtifacts(root, git, remote, opLog, trace, peersSoFar).catch(() => root);
     const message = e instanceof Error ? e.message : String(e);
     throw new Error(`runSim(${t.seed}): ${message}; artifacts kept in ${where}`, { cause: e });
   } finally {

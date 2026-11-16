@@ -10,6 +10,11 @@ export interface TeamConfig {
   merge: { insertionMerge: string[] };
   /** Raw: genesisBudget() decides. */
   host: { pushBudgetPerMin: unknown };
+  /**
+   * Plan 3 Task 12a (contract addition 1; HLD-51, CS-12): the configured checkpoint checks, read leniently — a string array is kept,
+   * anything else keeps the default []; the input of StatusInputs.noChecksConfigured (CS_NO_CHECKS_CONFIGURED, R3-61).
+   */
+  checks: { checkpoint: string[] };
 }
 
 export const DEFAULT_INSERTION_MERGE: readonly string[] = Object.freeze(['CHANGELOG*', 'HISTORY*', 'NEWS*', '*.md', '*.txt']);
@@ -22,6 +27,7 @@ function defaults(): TeamConfig {
     sync: { include: [], exclude: [], allowSecretLike: [], maxNewFileBytes: MAX_NEW_FILE_BYTES },
     merge: { insertionMerge: [...DEFAULT_INSERTION_MERGE] },
     host: { pushBudgetPerMin: undefined },
+    checks: { checkpoint: [] },
   };
 }
 
@@ -97,6 +103,12 @@ export async function readTeamConfig(repo: GitRepo, epochBase: Oid): Promise<{ c
   }
   const host = parsed['host'];
   if (isRecord(host) && 'pushBudgetPerMin' in host) config.host.pushBudgetPerMin = host['pushBudgetPerMin'];
+  // Plan 3 Task 12a: checks.checkpoint, lenient (a mistyped field keeps the default, never makes the config invalid).
+  const checks = parsed['checks'];
+  if (isRecord(checks)) {
+    const checkpoint = stringArray(checks['checkpoint']);
+    if (checkpoint !== null) config.checks.checkpoint = checkpoint;
+  }
   return { config, invalid: false, reason };
 }
 

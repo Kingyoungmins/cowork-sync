@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { canonicalBytes, type Json } from '../../src/board/canonicalJson.js';
 import { parseOid } from '../../src/git/oid.js';
-import { MetaTooNewError, parseMeta, serializeMeta, type Meta } from '../../src/engine/meta.js';
+import { META_V, MetaTooNewError, parseMeta, serializeMeta, type Meta, type SinceMarks } from '../../src/engine/meta.js';
 
 const O = (c: string): ReturnType<typeof parseOid> => parseOid(c.repeat(40));
 
@@ -126,4 +126,67 @@ test('meta.v 2 throws MetaTooNewError', () => {
     assert.throws(() => parseMeta(withField(m, 'v', v)), (e: unknown) => e instanceof Error && !(e instanceof MetaTooNewError), `v = ${JSON.stringify(v)}`);
   }
   assert.ok(new MetaTooNewError('x') instanceof Error);
+});
+
+// ENG-05 (rev 2.5, F04; 01-engine §3.2 and §7 test 6): the parser accepts the optional `since` heights before any build
+// writes them (F04-a); no meta.v change.
+test('a meta without since, with since: null members, and with all three heights parses; an unknown member or a float height fails like any malformed meta; serializeMeta round-trips', () => {
+  assert.equal(META_V, 1, 'no meta.v bump');
+  const malformed = (e: unknown): boolean => e instanceof Error && !(e instanceof MetaTooNewError) && e.name === 'MetaFormatError';
+  const m = fullMeta();
+  // A known malformed meta fails this way, so "like any malformed meta" is the same error kind.
+  assert.throws(() => parseMeta(withField(m, 'seq_next', 1.5)), malformed);
+
+  // Absent: no marks, and the parsed meta carries no since key at all.
+  const absent = parseMeta(serializeMeta(m));
+  assert.ok(!('since' in absent));
+  assert.ok(serializeMeta({ ...m, since: undefined }).equals(serializeMeta(m)), 'an undefined since is written as absent');
+
+  // Null members and heights (0 included) parse and round-trip byte-stably.
+  const forms: SinceMarks[] = [
+    { seen_h: null, return_h: null, run_h: null },
+    { seen_h: 40, return_h: null, run_h: null },
+    { seen_h: 40, return_h: 37, run_h: 0 },
+    { seen_h: Number.MAX_SAFE_INTEGER, return_h: 1, run_h: 255 },
+  ];
+  for (const since of forms) {
+    const withSince: Meta = { ...m, since };
+    const buf = serializeMeta(withSince);
+    assert.ok(buf.equals(canonicalBytes(withSince as unknown as Json)), `canonical bytes for ${JSON.stringify(since)}`);
+    const back = parseMeta(buf);
+    assert.deepEqual(back, withSince);
+    assert.deepEqual(back.since, since);
+    assert.ok(serializeMeta(back).equals(buf), `serialize(parse(b)) == b for ${JSON.stringify(since)}`);
+    // The other fields read as without since (no lost-state rebuild).
+    const { since: _dropped, ...rest } = back;
+    assert.deepEqual(rest, m);
+  }
+
+  // An unknown, missing or ill-typed member, or a since that is not an object, is the ordinary unparsable meta.
+  const bad: Json[] = [
+    { seen_h: 1, return_h: 2, run_h: 3, away_h: 4 },
+    { seen_h: 1, return_h: 2 },
+    {},
+    { seen_h: 1.5, return_h: null, run_h: null },
+    { seen_h: null, return_h: 2.25, run_h: null },
+    { seen_h: null, return_h: null, run_h: -1 },
+    { seen_h: '1', return_h: null, run_h: null },
+    { seen_h: null, return_h: null, run_h: 2 ** 53 },
+    { seen_h: null, return_h: false, run_h: null },
+    { seen_h: [1], return_h: null, run_h: null },
+    { seen_h: 1, return_h: 2, run_h: 3, seen_wall_ms: 1_700_000_000_000 },
+    null,
+    [1, 2, 3],
+    40,
+    'since',
+  ];
+  for (const since of bad) {
+    assert.throws(() => parseMeta(withField(m, 'since', since)), malformed, `since = ${JSON.stringify(since)}`);
+    assert.throws(() => serializeMeta({ ...m, since } as unknown as Meta), malformed, `serializeMeta refuses since = ${JSON.stringify(since)}`);
+  }
+  // A float height in non-canonical spelling is refused too (the byte check), as is a `since` beside a newer meta_v.
+  const o = JSON.parse(serializeMeta({ ...m, since: forms[2]! }).toString('utf8')) as Record<string, Json>;
+  assert.throws(() => parseMeta(Buffer.from(canonicalBytes(o).toString('utf8').replace('"run_h":0', '"run_h":0.0'), 'utf8')), malformed);
+  o['v'] = 2;
+  assert.throws(() => parseMeta(canonicalBytes(o)), MetaTooNewError);
 });

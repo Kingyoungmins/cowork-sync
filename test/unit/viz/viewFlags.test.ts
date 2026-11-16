@@ -37,7 +37,8 @@ test('UX-01: an environment value that throws when read (the locale, the TTY che
     const { pluginRoot } = fakePluginRoot(t.root);
     for (const key of ['locale', 'isTTY', 'home', 'cwd'] as const) {
       // No CLAUDE_PLUGIN_DATA: the data directory is derived from the home folder, so `home` is read too.
-      const rec = recordingEnv({ pluginRoot, cwd: t.root, home: t.root, env: {} });
+      // (Plan 5 Task 1, ruling P5-PF-4: the derivation names the folder by the plugin id of a plugin cache CLAUDE_PLUGIN_ROOT.)
+      const rec = recordingEnv({ pluginRoot, cwd: t.root, home: t.root, env: { CLAUDE_PLUGIN_ROOT: '/home/me/.claude/plugins/cache/test-market/cowork-sync/0.6.0' } });
       Object.defineProperty(rec.env, key, { get() { throw new Error(`boom at ${t.root}`); } });
       assert.equal(await runView(['--demo'], rec.env), 2, key);
       assert.deepEqual(rec.outs, [], key);

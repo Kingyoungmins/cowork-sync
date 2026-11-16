@@ -25,7 +25,7 @@ import { hashNewPath, hashRouteB, hashRouteC, isFilterFailure } from '../data/bl
 import { canon } from '../data/canon.js';
 import type { FilterSet } from '../data/filters.js';
 import { admitNew, portable, scopeOfTracked, type NotSharedReason, type ScopeInputs } from '../data/scope.js';
-import { isOid, parseOid, type Oid } from '../git/oid.js';
+import { ABSENT, isOid, parseOid, type Oid } from '../git/oid.js';
 import { GitCommandError, type FileMode, type GitRepo, type IndexEdit, type TreeEntry, type TreeMap } from '../git/repo.js';
 import type { Clock } from '../ports/clock.js';
 import { crashpoint } from '../ports/crashpoint.js';
@@ -35,7 +35,8 @@ import type { AttributionPort } from './deps.js';
 import { resetScratchIndex, STAGE_TREE_CONFIG } from './diskEq.js';
 import { stageable, stagedRead, type StageDir } from './stagedRead.js';
 import type { StatCache, StatEntry } from './statCache.js';
-import { readTreeIndexOnly, verifyIndexEdits } from './treeEdit.js';
+import { editIndexOnly, readTreeIndexOnly, verifyIndexEdits } from './treeEdit.js';
+import { sameTreeEntry } from './treeDiff.js';
 
 export const QUIET_MS = 300;
 export const DELETE_CONFIRM_MS = 1_000;
@@ -47,6 +48,8 @@ export const SHRINK_STABLE_MS = 1_000;
  * (INV-CONVERGE), so a file the gate misses is still found before quiescence is judged.
  */
 export const UNTRACKED_RESCAN_MS = 30_000;
+/** = hookRead.ts SPILL_DIR (06 §3.7.1; R-F2-16): the daemon's hook-read spill directory under the stage root, kept by an in-run reseed. */
+export const HOOK_SPILL_DIR = '.cowork-snap-spill';
 
 export type Exclusion = 'unreadable' | 'unstable' | 'filter_failure' | 'shrink' | 'deletion_pending' | 'quiet';
 export interface DirtyEntry { kind: 'modify' | 'new' | 'remove'; mode: FileMode; id: Oid | null; }
@@ -58,6 +61,24 @@ export interface SnapshotDeps {
   filters: FilterSet;                            // ruling P2-SNAPFILTERS: required (discovered once at start; R-08 never changes EPOCH_BASE); overCap or an unknown driver → filter_failure exclusion (fail closed)
   /** Task 9 addition (P2-CARRY): the OS whose D7 rules decide which tracked paths cannot be created here; EngineDeps.platform, default process.platform. */
   platform?: NodeJS.Platform;
+  /**
+   * Plan 3 Task 17 (rev 2.5, decision D2; ENG-25's lift, 05 §8 Q18): the revert shrink marks of pending revert CSs (core.ts binds
+   * ChangeSets.revertMarks). `has`: some mark names the path; `covers`: a mark holds exactly this content (ABSENT for a deletion).
+   */
+  revertMark?: { has(path: string): boolean; covers(path: string, content: Oid | 'ABSENT'): boolean };
+  /**
+   * Plan 3 Task EF (01-engine §6, the row "Missing object after user gc --prune=now"): state:snap, the tree materialize reseeds the
+   * private index from when write-tree exits 128 over a private-index entry whose object a user's `git gc --prune=now` removed (a blob
+   * written for the private index only is reachable from no ref); core.ts binds core.view.snap. Absent or null: the error propagates.
+   */
+  snapOf?: () => Oid | null;
+  /** Told of that reseed (core.ts: PRIVATE_INDEX_RESEEDED to the daemon log, as restart's reseed from state:snap). */
+  onReseed?: (snap: Oid) => void;
+}
+
+/** A > 50 % or to-0 shrink of the staged size against the reference size (glossary §26.1 W2, ruling R-25). */
+function isShrink(size: number, refSize: number | null): boolean {
+  return refSize !== null && refSize !== 0 && (size === 0 || size < refSize * SHRINK_RATIO);
 }
 /**
  * aTree = A's tree oid (required, ruling P2-ATREE). A TreeMap decodes path bytes as UTF-8, so the raw spelling of a
@@ -78,6 +99,28 @@ export interface TickResult {
 export interface Materialized { sRaw: Oid; sDisk: Oid; sRawMap: TreeMap; sDiskMap: TreeMap; canonRefused: ReadonlySet<string>;
   excluded: ReadonlyMap<string, Exclusion>;      // materialize-time per-path exclusions (e.g. a route (b) -w rc 128): the path keeps its S_raw entry and stays dirty
   publishBlocked: boolean;                       // a filtered path failed at materialize (ENG-24): nothing publishes this loop
+  /**
+   * Plan 3 Task 8 (05-holds §3.6 step 1, the revert detector's prev[p]): the private-index entries as they were before this
+   * materialization (missing = absent). The paths it re-added or removed are exactly those where prevMap and sRawMap differ
+   * (diffPaths); every other entry equals sRawMap's. Nothing else keeps them once materialize has edited the private index.
+   */
+  prevMap: TreeMap;
+}
+
+/** Plan 3 Task 18 (rev 2.5, F14): one path the last tick (or its materialization) excluded, with its uninterrupted exclusion's start. */
+export interface FlowExclusion { reason: Exclusion; firstSeenMono: number; firstTick: number; }
+/**
+ * Plan 3 Task 18 (rev 2.5, F14; 10-product §3.5.1 "Inputs", UX-33): the snapshot's part of the flow's inputs, as of the last detection
+ * tick — never a newer read. `dirty`: every path whose disk differs from A (the tick's dirty entry, else the private index, S_disk where
+ * the last materialization canonicalized that entry; and the new paths the tick did not admit), with the Δmono of the tick that first
+ * saw it differ, kept while it differs at every tick; `excluded`: this loop's exclusions (the tick's and its materialization's), each
+ * with the Δmono and the tick ordinal (1-based, `ticks` counts them) of its first sighting, kept while the path stays excluded — a
+ * materialization's own exclusion (one the tick's hash does not hit: a stuck route (a) add, route (b) -w failing, a stage copy gone)
+ * stays while its path is still dirty and no later materialization read it; `notAdmitted`: the last tick's D6 reason of every listed
+ * new path it did not admit (the tick lists them all, every tick).
+ */
+export interface SnapshotFlowView {
+  dirty: ReadonlyMap<string, number>; excluded: ReadonlyMap<string, FlowExclusion>; ticks: number; notAdmitted: ReadonlyMap<string, NotSharedReason>;
 }
 
 interface Candidate { path: string; entry: TreeEntry | null; st: FsLstat; }
@@ -235,6 +278,16 @@ function rawEntries(out: Buffer, form: 'index' | 'tree', keys: ReadonlySet<strin
   return res;
 }
 
+/** Plan 3 Task EF: write-tree over the private index exited 128 and an entry names a pruned object (materialize's reseed-and-retry). */
+class PrivateIndexObjectMissing extends Error {
+  override readonly cause: GitCommandError;
+  constructor(cause: GitCommandError) {
+    super(cause.message);
+    this.name = 'PrivateIndexObjectMissing';
+    this.cause = cause;
+  }
+}
+
 export class Snapshotter {
   private readonly d: SnapshotDeps;
   private readonly attrs: AttrCache;
@@ -249,8 +302,18 @@ export class Snapshotter {
   private info: FsInfo | null = null;
   /** The P2-CARRY set, recomputed when the private index map or A is a new object. */
   private carry: { index: ReadonlyMap<string, TreeEntry>; A: TreeMap; set: ReadonlySet<string> } | null = null;
-  /** tipCollisions' last answer, per TIP map object. */
-  private tipColl: { tip: TreeMap; set: ReadonlySet<string> } | null = null;
+  /**
+   * Plan 3 Task 18 (F14, UX-33): flowView()'s maps, replaced at every tick; the exclusions are the tick's (flowTickExcluded) over the
+   * materializations' (flowMatExcluded, replaced at every materialization), merged in flowExcluded. Memory only.
+   */
+  private flowDirty: ReadonlyMap<string, number> = new Map();
+  private flowTickExcluded: ReadonlyMap<string, FlowExclusion> = new Map();
+  private flowMatExcluded: ReadonlyMap<string, FlowExclusion> = new Map();
+  private flowExcluded: ReadonlyMap<string, FlowExclusion> = new Map();
+  private flowNotAdmitted: ReadonlyMap<string, NotSharedReason> = new Map();
+  private tickCount = 0;
+  /** The private-index paths whose entry differs from A's (A-only paths included), per (index map, A map): recomputed only when either changes. */
+  private indexVsA: { index: ReadonlyMap<string, TreeEntry>; A: TreeMap; diff: ReadonlySet<string> } | null = null;
 
   constructor(d: SnapshotDeps) {
     this.d = d;
@@ -259,6 +322,11 @@ export class Snapshotter {
 
   last(): Materialized | null {
     return this.lastMat;
+  }
+
+  /** Plan 3 Task 18 (rev 2.5, F14; UX-33): the flow's view of the last tick (SnapshotFlowView); a pure read of memory. */
+  flowView(): SnapshotFlowView {
+    return { dirty: this.flowDirty, excluded: this.flowExcluded, ticks: this.tickCount, notAdmitted: this.flowNotAdmitted };
   }
 
   /**
@@ -271,17 +339,14 @@ export class Snapshotter {
   }
 
   /**
-   * Final review (ledger Task 13:234): on a case-insensitive volume (core.ignorecase), the paths of `tip` that share one
-   * disk entry with another spelling inside `tip` itself (Foo + foo from a teammate on a case-sensitive OS, or an NFC
-   * pair): no write can give each its own file (the second create fails EEXIST), so the apply treats them as not
-   * applicable 'unmaterializable' instead of deferring their whole change-set race forever. TIP-internal only: A ∪ TIP
-   * would wedge every case-only rename (README.md → readme.md). Memoized per map object.
+   * Whether this volume folds case (core.ignorecase, read once: git sets it when it clones onto a case-insensitive volume).
+   * Final review (ledger Task 13:234) as the controller ruled at the Plan 2 final merge: on such a volume D7 rule 4 binds the
+   * receive side (core.ts receivePortRule): of two spellings of one name in TIP only the first is created; each later one,
+   * which no write could give its own file (the second create would fail EEXIST and defer its change-set race forever), is
+   * not applicable 'unmaterializable' with rule 4.
    */
-  async tipCollisions(tip: TreeMap): Promise<ReadonlySet<string>> {
-    if (this.tipColl !== null && this.tipColl.tip === tip) return this.tipColl.set;
-    const set: ReadonlySet<string> = (await this.fsInfo()).ignoreCase ? caseCollisions(new Set(tip.keys())) : NO_OTHERS;
-    this.tipColl = { tip, set };
-    return set;
+  async foldsCase(): Promise<boolean> {
+    return (await this.fsInfo()).ignoreCase;
   }
 
   /** After a verified write (round trip): p's disk bytes are `id`, and its stat is `stat`. */
@@ -291,11 +356,30 @@ export class Snapshotter {
     this.future.delete(path);
   }
 
-  /** read-tree into the private index; stat cache and stage dir emptied. */
-  async reseed(tree: Oid): Promise<void> {
+  /**
+   * Plan 3 Task 5 (R3-34, R3-36): the private-index entry of one path := `entry` (null removes the path), by treeEdit.ts's
+   * editIndexOnly on the private index (one `update-index --add --replace -z --index-info`, the stdin form of --cacheinfo, with
+   * the INDEX_ONLY config). Writes no object: the park family's and --discard's written blob, or the repair's S_disk[p], so the
+   * next tick reads the written file as clean (writeLocal leaves the private index alone). The in-memory index is reloaded next time.
+   */
+  async setEntry(path: string, entry: TreeEntry | null): Promise<void> {
+    const oidLength = entry === null ? (await this.d.repo.emptyTree()).length : entry.oid.length;
+    await editIndexOnly(this.d.repo, this.d.privateIndex, [entry === null ? { path, remove: true } : { path, mode: entry.mode, oid: entry.oid }], oidLength);
+    this.index = null;
+  }
+
+  /**
+   * read-tree into the private index; stat cache and stage dir emptied. `keepHookSpill` (R-F2-16, ruling R-T8B-5; F2 #105):
+   * the in-run reseed (materialize's PrivateIndexObjectMissing retry) keeps the daemon's hook-read spill directory
+   * HOOK_SPILL_DIR under the stage root — live snapshots still name its files (06 §3.7.1: deleted at their release) — and
+   * empties every other entry; a start-time reseed (no option) empties the whole stage, the spill files included (SEC-37: a
+   * crashed run's plaintext never survives a start).
+   */
+  async reseed(tree: Oid, o?: { keepHookSpill?: boolean }): Promise<void> {
     await this.readTreeInto(this.d.privateIndex, tree);
     this.d.statCache.clear();
-    await this.d.stage.clear();
+    if (o?.keepHookSpill === true) await this.clearStageKeepingHookSpill();
+    else await this.d.stage.clear();
     this.dirty.clear();
     this.future.clear();
     this.index = null;
@@ -303,6 +387,22 @@ export class Snapshotter {
     this.detectKey = null;
     this.lastMat = null;
     this.carry = null;
+  }
+
+  /**
+   * StageDir.clear minus HOOK_SPILL_DIR: every other entry of the stage root removed; a missing root created as clear does (0o700).
+   * F2 fix round 1 (SEC-37: stage operations never act outside tmp/stage/): a root that is a symlink, a junction or not a
+   * directory is never listed or followed — StageDir.clear removes the link itself and recreates the root (no spill kept there).
+   */
+  private async clearStageKeepingHookSpill(): Promise<void> {
+    const root = this.d.stage.root;
+    const st = await this.d.fs.lstat(root);
+    if (st !== null && (st.isSymbolicLink || !st.isDirectory)) {
+      await this.d.stage.clear();
+      return;
+    }
+    await this.d.fs.mkdirp(root, 0o700);
+    for (const name of await this.d.fs.readdir(root)) if (name !== HOOK_SPILL_DIR) await this.d.fs.rmrf(join(root, name));
   }
 
   /** Steps 1–6: a detection tick; writes no object (route (a) does not run; routes (b)/(c) without -w). */
@@ -449,11 +549,18 @@ export class Snapshotter {
       }
     }
 
-    // 6. Shrink guard on the staged size (glossary §26.1 W2, ruling R-25), before any hashing.
+    // 6. Shrink guard on the staged size (glossary §26.1 W2, ruling R-25), before any hashing. Plan 3 Task 17 (ENG-25 rev 2.5, decision
+    // D2): a shrink whose staged blob is exactly a pending revert mark's content for p is attributed now (revertLift) — no second
+    // snapshot, no shrink state left behind; any other shrink of p (a torn read, a later edit) keeps the rule.
     const refSizes = await this.referenceSizes(ok);
     const staged: Staged[] = [];
     for (const c of ok) {
-      if (this.shrinkHeld(c, refSizes.get(c.path) ?? null, now)) {
+      const ref = refSizes.get(c.path) ?? null;
+      if (isShrink(c.bytes.length, ref) && (await this.revertLift(c))) {
+        staged.push(c);
+        continue;
+      }
+      if (this.shrinkHeld(c, ref, now)) {
         excluded.set(c.path, 'shrink');
         continue;
       }
@@ -522,11 +629,143 @@ export class Snapshotter {
     for (const p of new Set([...before.keys(), ...this.dirty.keys()])) {
       if (!sameDirty(before.get(p), this.dirty.get(p))) changed.add(p);
     }
+    this.noteFlowTick(index, inp.A, notAdmitted, excluded, now);
     return { dirty: new Map(this.dirty), changed, excluded, notAdmitted, failed, publishBlocked, carried: new Set(carried) };
   }
 
-  /** Steps 7–9: route (a) add --ignore-errors --pathspec-from-file=- --pathspec-file-nul of dirty unfiltered copies (--work-tree=<tmp/stage>, literal pathspecs), route (b) -w + --cacheinfo for filtered ones, removals, 160000/120000 forced to A, crashpoint('snapshot.index_written'), write-tree → S_raw, canon in tmp/canon.index → S_disk. `only` = a record's paths (occasion (c)). */
+  /**
+   * Plan 3 Task 18 (F14 inputs, UX-33): the flow's view after a tick, from what the tick already holds in memory (no read, no git): the
+   * paths whose disk differs from A, and this tick's exclusions, each keeping its first sighting while it lasts. The index-versus-A
+   * difference is recomputed only when the private index map or A is a new object (a tick on an unchanged tree compares only its dirty
+   * paths).
+   */
+  private noteFlowTick(index: ReadonlyMap<string, TreeEntry>, A: TreeMap, notAdmitted: ReadonlyMap<string, NotSharedReason>, excluded: ReadonlyMap<string, Exclusion>, now: number): void {
+    this.tickCount += 1;
+    let base = this.indexVsA;
+    if (base === null || base.index !== index || base.A !== A) {
+      const diff = new Set<string>();
+      for (const [p, e] of index) if (!sameTreeEntry(e, A.get(p))) diff.add(p);
+      for (const p of A.keys()) if (!index.has(p)) diff.add(p);
+      base = { index, A, diff };
+      this.indexVsA = base;
+    }
+    const last = this.lastMat;
+    const differs = (p: string): boolean => {
+      const de = this.dirty.get(p);
+      if (de !== undefined && de.kind !== 'remove' && de.id === null) return true;   // no id to compare: not known equal
+      let disk = de === undefined ? index.get(p) : de.kind === 'remove' ? undefined : { path: p, mode: de.mode, oid: de.id! };
+      if (last !== null && sameTreeEntry(last.sRawMap.get(p), disk)) disk = last.sDiskMap.get(p);   // S_disk where canon changed the entry
+      return !sameTreeEntry(disk, A.get(p));
+    };
+    const dirty = new Map<string, number>();
+    const see = (p: string): void => {
+      dirty.set(p, this.flowDirty.get(p) ?? now);
+    };
+    for (const p of base.diff) if (differs(p)) see(p);
+    for (const p of this.dirty.keys()) if (!base.diff.has(p) && differs(p)) see(p);
+    for (const p of notAdmitted.keys()) if (!A.has(p)) see(p);
+    this.flowDirty = dirty;
+    this.flowNotAdmitted = notAdmitted;
+    // This tick's exclusions, each keeping its first sighting while it lasts (the previous tick's, or a materialization's while that
+    // excluded the path); a materialization's own exclusion stays while its path is still dirty (finding 6 of the Task 18 review: the
+    // tick never re-derives it, so dropping it here restarted its first sighting at every materialization).
+    const ex = new Map<string, FlowExclusion>();
+    for (const [p, reason] of excluded) {
+      const prev = this.flowTickExcluded.get(p) ?? this.flowMatExcluded.get(p);
+      ex.set(p, { reason, firstSeenMono: prev?.firstSeenMono ?? now, firstTick: prev?.firstTick ?? this.tickCount });
+    }
+    this.flowTickExcluded = ex;
+    if ([...this.flowMatExcluded.keys()].some((p) => !this.dirty.has(p))) {
+      this.flowMatExcluded = new Map([...this.flowMatExcluded].filter(([p]) => this.dirty.has(p)));
+    }
+    this.mergeFlowExcluded();
+  }
+
+  /**
+   * Plan 3 Task 18: a materialization's per-path exclusions replace the previous materialization's (a partial one, `only`, re-reads
+   * only its paths: the others keep theirs), each keeping its first sighting while the path stays excluded.
+   */
+  private noteFlowMaterialized(excluded: ReadonlyMap<string, Exclusion>, only: ReadonlySet<string> | undefined): void {
+    const now = this.d.clock.monoMs();
+    const prev = this.flowMatExcluded;
+    const next = new Map<string, FlowExclusion>();
+    if (only !== undefined) for (const [p, e] of prev) if (!only.has(p)) next.set(p, e);
+    for (const [p, reason] of excluded) {
+      const was = prev.get(p) ?? this.flowTickExcluded.get(p);
+      next.set(p, { reason, firstSeenMono: was?.firstSeenMono ?? now, firstTick: was?.firstTick ?? this.tickCount });
+    }
+    this.flowMatExcluded = next;
+    this.mergeFlowExcluded();
+  }
+
+  /** flowView().excluded: the materializations' exclusions with the tick's over them (a path both name shows the tick's reason). */
+  private mergeFlowExcluded(): void {
+    this.flowExcluded = this.flowMatExcluded.size === 0 ? this.flowTickExcluded : new Map([...this.flowMatExcluded, ...this.flowTickExcluded]);
+  }
+
+  /**
+   * Steps 7–9: route (a) add --ignore-errors --pathspec-from-file=- --pathspec-file-nul of dirty unfiltered copies (--work-tree=<tmp/stage>, literal pathspecs), route (b) -w + --cacheinfo for filtered ones, removals, 160000/120000 forced to A, crashpoint('snapshot.index_written'), write-tree → S_raw, canon in tmp/canon.index → S_disk. `only` = a record's paths (occasion (c)).
+   *
+   * Plan 3 Task EF (01-engine §6, "Missing object after user gc --prune=now | write-tree / merge rc 128 | reseed private index from
+   * state:snap, retry"): when write-tree over the private index exits 128 and an entry of that index names an object the store lacks
+   * (decided by `cat-file --batch-check` over the index's entries, never by git's text), the private index is reseeded from state:snap
+   * (SnapshotDeps.snapOf; onReseed is told), and the materialization is retried once: the reseed emptied the dirty set, the stat cache
+   * and the stage, so one fresh tick restages every path the disk changed against state:snap, then one FULL materialization runs (a
+   * partial one would leave the other paths at state:snap's entries while the caller's tick read them clean against the old private
+   * index). That tick's exclusions are returned as materialize-time exclusions (such a path keeps state:snap's entry and stays dirty,
+   * so materializedOver reports it not current). Any other error, a second failure, or no state:snap propagates.
+   */
   async materialize(inp: TickInput, only?: ReadonlySet<string>): Promise<Materialized> {
+    try {
+      return await this.materializeOnce(inp, only, true);
+    } catch (e) {
+      if (!(e instanceof PrivateIndexObjectMissing)) throw e;
+      const snap = this.d.snapOf?.() ?? null;
+      if (snap === null) throw e.cause;
+      await this.reseed(snap, { keepHookSpill: true });   // in-run: the daemon's live hook-read spill files stay (R-F2-16)
+      this.d.onReseed?.(snap);
+      const t = await this.tick(inp);
+      if (t.failed) throw e.cause;
+      const m = await this.materializeOnce(inp, undefined, false);
+      if (t.excluded.size === 0) return m;
+      const merged: Materialized = { ...m, excluded: new Map([...t.excluded, ...m.excluded]) };
+      this.lastMat = merged;
+      return merged;
+    }
+  }
+
+  /**
+   * EF4 round 2 R-1 (ruling R3-EF4-11; 01-engine §3.14 Restart step 5, "private index missing or unreadable"; 01-engine:145, e8): some
+   * entry of the private index, as `entries` (the listIndex result restart's step 5 already read) lists it, names an object the store
+   * lacks — a blob written for the private index only, pruned by a user's `git gc --prune=now` while the daemon was down. Restart asks
+   * before its detection tick, whose shrink reference (referenceSizes) sizes S_raw[p]'s blob for every tracked path while the stat cache
+   * is empty; such an index counts as unreadable and is reseeded from state:snap. One cat-file --batch-check, no second ls-files.
+   */
+  async privateIndexNamesMissingObject(entries: ReadonlyMap<string, TreeEntry>): Promise<boolean> {
+    return this.namesMissingObject(entries);
+  }
+
+  /** Some stage-0 entry of `indexFile` (a gitlink aside: its commit lives in another repository) names an object the store lacks. */
+  private async missingObjectIn(indexFile: string): Promise<boolean> {
+    let entries: Map<string, TreeEntry>;
+    try {
+      entries = await this.lsIndex(indexFile);
+    } catch {
+      return false;
+    }
+    return this.namesMissingObject(entries);
+  }
+
+  /** One cat-file --batch-check over the unique oids of `entries` (gitlinks aside): true when the store lacks one of them. */
+  private async namesMissingObject(entries: ReadonlyMap<string, TreeEntry>): Promise<boolean> {
+    const oids: Oid[] = [...new Set([...entries.values()].filter((e) => e.mode !== '160000').map((e) => e.oid))];
+    if (oids.length === 0) return false;
+    const r = await this.d.repo.run(['cat-file', '--batch-check'], { stdin: Buffer.from(`${oids.join('\n')}\n`, 'utf8') });
+    // --batch-check prints "<oid> missing" for an object the store lacks (its fixed output format, as GitRepo.blobSizes reads it).
+    return r.stdout.toString('utf8').split('\n').some((l) => l.split(' ')[1] === 'missing');
+  }
+
+  private async materializeOnce(inp: TickInput, only: ReadonlySet<string> | undefined, detectMissing: boolean): Promise<Materialized> {
     requireATree(inp);
     const { repo, stage, privateIndex } = this.d;
     const index = await this.loadIndex();
@@ -617,7 +856,13 @@ export class Snapshotter {
     this.index = null; // the private index changed: reload (and relist) next time
     crashpoint('snapshot.index_written');
 
-    const sRaw = await this.writeTreeOf(privateIndex);
+    let sRaw: Oid;
+    try {
+      sRaw = await this.writeTreeOf(privateIndex);
+    } catch (e) {
+      if (detectMissing && e instanceof GitCommandError && e.code === 128 && (await this.missingObjectIn(privateIndex))) throw new PrivateIndexObjectMissing(e);
+      throw e;
+    }
     const sRawMap = await repo.readTreeMap(sRaw);
     const { sDisk, sDiskMap, canonRefused } = await this.canonTree(inp, sRaw, sRawMap, carried);
 
@@ -631,8 +876,11 @@ export class Snapshotter {
       this.d.statCache.set(p, { stat: ce?.stat ?? null, id: sRawMap.get(p)?.oid ?? oid, state: 'clean' });
       await stage.remove(p);
     }
-    const m: Materialized = { sRaw, sDisk, sRawMap, sDiskMap, canonRefused, excluded: failedPaths, publishBlocked };
+    // prevMap: the private index as loaded before this materialization's edit (loadIndex's map is never mutated; the snapshot
+    // reloads a new one next time), the revert detector's prev side (Task 8).
+    const m: Materialized = { sRaw, sDisk, sRawMap, sDiskMap, canonRefused, excluded: failedPaths, publishBlocked, prevMap: index };
     this.lastMat = m;
+    this.noteFlowMaterialized(failedPaths, only);
     return m;
   }
 
@@ -898,11 +1146,14 @@ export class Snapshotter {
     return wall - mtimeMs < QUIET_MS;
   }
 
-  /** Step 3: a removal only when also missing ≥ DELETE_CONFIRM_MS earlier (Δmono) or hook-attributed. */
+  /**
+   * Step 3: a removal only when also missing ≥ DELETE_CONFIRM_MS earlier (Δmono) or hook-attributed — or (Plan 3 Task 17, ENG-25 rev 2.5,
+   * decision D2) when a pending revert mark for p is ABSENT: the deletion a confirmed revert wrote needs no 1-s second reading.
+   */
   private async missing(path: string, entry: TreeEntry, now: number, excluded: Map<string, Exclusion>): Promise<void> {
     const ce = this.d.statCache.get(path);
     const since = ce?.missingSinceMono;
-    const attributed = this.d.attribution.removalAttributed(path);
+    const attributed = this.d.attribution.removalAttributed(path) || this.d.revertMark?.covers(path, ABSENT) === true;
     if (!attributed && (since === undefined || now - since < DELETE_CONFIRM_MS)) {
       if (since === undefined) {
         const base: StatEntry = ce ?? { stat: null, id: entry.oid, state: 'clean' };
@@ -932,10 +1183,24 @@ export class Snapshotter {
     return out;
   }
 
+  /**
+   * Plan 3 Task 17 (ENG-25 rev 2.5, decision D2, 05 §8 Q18): a shrunk read of p whose blob id (route (b) of its stage copy, no object) is
+   * exactly a pending revert mark's oid for p counts as attributed now: the stage copy stays written for the detection that follows (true).
+   * Otherwise the copy goes again and the ordinary shrink rule decides (false). Hashes only paths some mark names.
+   */
+  private async revertLift(c: Staged): Promise<boolean> {
+    const m = this.d.revertMark;
+    if (m === undefined || !m.has(c.path)) return false;
+    const copy = await this.d.stage.write(c.path, c.bytes);
+    const id = c.entry === null ? await hashNewPath(this.d.repo, c.path, copy, false) : await hashRouteB(this.d.repo, c.path, copy, false);
+    if (!isFilterFailure(id) && m.covers(c.path, id)) return true;
+    await this.discardCopy(c.path);
+    return false;
+  }
+
   /** Step 6 (ruling R-25): true while a > 50 % or to-0 shrink is not yet confirmed by a second tick ≥ 1 s later with the same stat and attribution. */
   private shrinkHeld(c: Staged, refSize: number | null, now: number): boolean {
-    const size = c.bytes.length;
-    if (refSize === null || refSize === 0 || (size !== 0 && size >= refSize * SHRINK_RATIO)) return false;
+    if (!isShrink(c.bytes.length, refSize)) return false;
     const ce = this.d.statCache.get(c.path);
     const sh = ce?.shrink;
     if (sh !== undefined && sameStat(sh.stat, c.stat)) {

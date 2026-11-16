@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { appendFile, mkdir, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { GitCommandError, GitRepo, type RepoContext, type TreeEntry } from '../../src/git/repo.js';
 import { mergeTree } from '../../src/git/merge.js';
 import { ABSENT, OidError, type Oid } from '../../src/git/oid.js';
 import type { GitResult, GitRunner } from '../../src/git/runner.js';
+import { hermeticRepo } from '../helpers/hermetic.js';
 import { FIXTURE_WALL_MS, fixtureContext, makeRepoFixture, type RepoFixture } from '../helpers/repoFixture.js';
 
 /** Wraps a runner and records every git argument list (after the class/cwd options). */
@@ -657,6 +658,56 @@ test('typed plumbing: run, resolve, hasObject, blobs, trees, index, refs and con
     ]);
     assert.deepEqual(await repo.configGetRegexp('^cowork\\.nothing'), []);
     void ABSENT;
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("configGetUser: the user's own value of a key the runner forces with -c (ruling R3-FF2-F2, glossary §16 core.hooksPath)", async () => {
+  const f = await makeRepoFixture('repo-config-user');
+  try {
+    // Integration I-3 (r2 rereview F): hermetic — a developer's or CI runner's global or system core.hooksPath is the user's value
+    // too, so it must not reach this repo's git (private HOME, XDG_CONFIG_HOME, an empty GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM).
+    const { repo, home } = hermeticRepo(f);
+    // Every cowork git call carries -c core.hooksPath=<empty hooks> (command scope), so the effective value is cowork's own.
+    const forced = await repo.configGet('core.hooksPath');
+    assert.ok(forced !== null && forced.length > 0, 'the runner forces a hooks path');
+    assert.equal(await repo.configGetUser('core.hooksPath'), null, 'no user value: null, never the forced one');
+    await repo.run(['config', 'core.hooksPath', 'tools/hooks']);
+    assert.equal(await repo.configGetUser('core.hooksPath'), 'tools/hooks');
+    assert.equal(await repo.configGet('core.hooksPath'), forced, 'configGet still answers the effective (forced) value');
+    // The last non-command value wins, whatever the key's case; a value with spaces and non-ASCII text is read whole.
+    await repo.run(['config', '--add', 'core.hookspath', 'my hooks/훅']);
+    assert.equal(await repo.configGetUser('core.hooksPath'), 'my hooks/훅');
+    await repo.run(['config', '--unset-all', 'core.hooksPath']);
+    assert.equal(await repo.configGetUser('core.hooksPath'), null);
+    assert.equal(await repo.configGetUser('cowork.absent'), null);
+    // A global-scope value is the user's value (read when no local value overrides it).
+    await writeFile(join(home, 'gitconfig'), '[core]\n\thooksPath = global/hooks\n');
+    assert.equal(await repo.configGetUser('core.hooksPath'), 'global/hooks', 'the global value');
+    await repo.run(['config', 'core.hooksPath', 'local/hooks']);
+    assert.equal(await repo.configGetUser('core.hooksPath'), 'local/hooks', 'the local value is read last');
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("R3-EF4-27: configGetUser(key, 'path') reads the user's value as git reads it for its own use (--type=path: '~/' expanded, a relative value left relative, never the forced command value); an entry git cannot read as a path is git's exit 128", async () => {
+  const f = await makeRepoFixture('repo-config-user-path');
+  try {
+    const { repo, home } = hermeticRepo(f);
+    assert.equal(await repo.configGetUser('core.hooksPath', 'path'), null, 'no user value: null, never the forced one');
+    await repo.run(['config', 'core.hooksPath', '~/proj/tools/hooks']);
+    const tilde = await repo.configGetUser('core.hooksPath', 'path');
+    assert.ok(tilde !== null && resolve(tilde) === resolve(home, 'proj', 'tools', 'hooks'), `'~/' expands to HOME: ${String(tilde)}`);
+    assert.equal(await repo.configGetUser('core.hooksPath'), '~/proj/tools/hooks', 'untyped: the raw text, as before');
+    await repo.run(['config', 'core.hooksPath', 'tools/../tools/hooks']);
+    assert.equal(await repo.configGetUser('core.hooksPath', 'path'), 'tools/../tools/hooks', 'a relative value stays relative (the caller resolves it)');
+    // A valueless entry: git refuses it under the path type (exit 128); the untyped read still gives ''.
+    await repo.run(['config', '--unset-all', 'core.hooksPath']);
+    await appendFile(join(f.paths.gitDir, 'config'), '[core]\n\thooksPath\n');
+    await assert.rejects(repo.configGetUser('core.hooksPath', 'path'), (e: unknown) => e instanceof GitCommandError && e.code === 128);
+    assert.equal(await repo.configGetUser('core.hooksPath'), '');
   } finally {
     await f.cleanup();
   }

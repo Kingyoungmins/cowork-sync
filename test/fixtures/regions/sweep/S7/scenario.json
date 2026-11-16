@@ -1,0 +1,22 @@
+{
+  "name": "S7",
+  "files": {
+    "report.py": {
+      "base": "\"\"\"Order helpers (S7 error-tree fixture).\"\"\"\n\n\ndef load_orders(rows):\n    \"\"\"Turn raw rows into order dicts.\"\"\"\n    return [dict(row) for row in rows]\n\n\ndef compute(a, b):\n    \"\"\"Multiply two amounts.\"\"\"\n    return a * b\n\n\ndef order_total(order):\n    \"\"\"Sum the lines of one order.\"\"\"\n    total = 0\n    for line in order[\"lines\"]:\n        total += compute(line[\"price\"], line[\"quantity\"])\n    return total\n\n\ndef report(orders):\n    \"\"\"One line per order.\"\"\"\n    out = []\n    for order in orders:\n        total = compute(order_total(order), 1\n        out.append(f\"{order['id']}: {total}\")\n    return out\n\n\ndef main(rows):\n    \"\"\"Entry point.\"\"\"\n    return report(load_orders(rows))\n",
+      "ours": "\"\"\"Order helpers (S7 error-tree fixture).\"\"\"\n\n\ndef load_orders(rows):\n    \"\"\"Turn raw rows into order dicts.\"\"\"\n    return [dict(row) for row in rows]\n\n\ndef compute(a, b):\n    \"\"\"Multiply two amounts.\"\"\"\n    return round(a * b, 2)\n\n\ndef order_total(order):\n    \"\"\"Sum the lines of one order.\"\"\"\n    total = 0\n    for line in order[\"lines\"]:\n        total += compute(line[\"price\"], line[\"quantity\"])\n    return total\n\n\ndef report(orders):\n    \"\"\"One line per order.\"\"\"\n    out = []\n    for order in orders:\n        total = compute(order_total(order), 1\n        out.append(f\"{order['id']}: {total}\")\n    return out\n\n\ndef main(rows):\n    \"\"\"Entry point.\"\"\"\n    return report(load_orders(rows))\n",
+      "theirs": "\"\"\"Order helpers (S7 error-tree fixture).\"\"\"\n\n\ndef load_orders(rows):\n    \"\"\"Turn raw rows into order dicts.\"\"\"\n    return [dict(row) for row in rows if row]\n\n\ndef compute(a, b):\n    \"\"\"Multiply two amounts.\"\"\"\n    return a * b\n\n\ndef order_total(order):\n    \"\"\"Sum the lines of one order.\"\"\"\n    total = 0\n    for line in order[\"lines\"]:\n        total += compute(line[\"price\"], line[\"quantity\"])\n    return total\n\n\ndef report(orders):\n    \"\"\"One line per order.\"\"\"\n    out = []\n    for order in orders:\n        total = compute(order_total(order), 1\n        out.append(f\"{order['id']}: {total}\")\n    return out\n\n\ndef main(rows):\n    \"\"\"Entry point.\"\"\"\n    return report(load_orders(rows))\n"
+    }
+  },
+  "claims": [
+    {
+      "holderSeat": "p1/seat-holder",
+      "path": "report.py",
+      "claimUnit": "load_orders"
+    }
+  ],
+  "expect": "byte_identical",
+  "oracle": {
+    "report.py": "\"\"\"Order helpers (S7 error-tree fixture).\"\"\"\n\n\ndef load_orders(rows):\n    \"\"\"Turn raw rows into order dicts.\"\"\"\n    return [dict(row) for row in rows if row]\n\n\ndef compute(a, b):\n    \"\"\"Multiply two amounts.\"\"\"\n    return round(a * b, 2)\n\n\ndef order_total(order):\n    \"\"\"Sum the lines of one order.\"\"\"\n    total = 0\n    for line in order[\"lines\"]:\n        total += compute(line[\"price\"], line[\"quantity\"])\n    return total\n\n\ndef report(orders):\n    \"\"\"One line per order.\"\"\"\n    out = []\n    for order in orders:\n        total = compute(order_total(order), 1\n        out.append(f\"{order['id']}: {total}\")\n    return out\n\n\ndef main(rows):\n    \"\"\"Entry point.\"\"\"\n    return report(load_orders(rows))\n"
+  },
+  "corrupting": false
+}

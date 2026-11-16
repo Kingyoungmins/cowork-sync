@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { TOKEN_ENV } from '../../src/claude/client/mcp/doorbell.js';
 import { buildDaemonEnv, FORCED_ENV } from '../../src/git/env.js';
 
 test('FORCED_ENV is exactly the glossary §18 set and is frozen', () => {
@@ -39,7 +40,7 @@ const WIN_SOURCE: Record<string, string | undefined> = {
   GCM_INTERACTIVE: 'always',
   HTTPS_PROXY: 'http://proxy.corp.example:8080',
   JAVA_HOME: 'C:\\jdk-21',
-  CLAUDE_CODE_MESSAGING_TOKEN: 'tok-secret',
+  [TOKEN_ENV]: 'tok-secret',
   CLAUDE_CODE_MESSAGING_SOCKET: '\\\\.\\pipe\\claude-inbox',
   CLAUDE_PROJECT_DIR: 'C:\\r',
   ELECTRON_RUN_AS_NODE: '1',
@@ -162,7 +163,7 @@ test('POSIX-shaped source: LC_*, XDG_*, proxies in both cases, ssh and git confi
 });
 
 test('09-security §7 item 2: session secrets and git redirections never survive, even when passed through', () => {
-  const names = ['GIT_INDEX_FILE', 'GIT_DIR', 'CLAUDE_CODE_MESSAGING_TOKEN', 'NODE_OPTIONS', 'GIT_ASKPASS'];
+  const names = ['GIT_INDEX_FILE', 'GIT_DIR', TOKEN_ENV, 'NODE_OPTIONS', 'GIT_ASKPASS'];
   const source: Record<string, string> = { HTTPS_PROXY: 'http://p:1', SSH_AUTH_SOCK: '/tmp/agent' };
   for (const n of names) source[n] = 'x';
   const out = buildDaemonEnv(source, names);
@@ -172,7 +173,7 @@ test('09-security §7 item 2: session secrets and git redirections never survive
 });
 
 const NEVER_SAMPLES = [
-  'CLAUDE_CODE_MESSAGING_TOKEN', 'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CONFIG_DIR',
+  TOKEN_ENV, 'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CONFIG_DIR',
   'ELECTRON_RUN_AS_NODE', 'VSCODE_IPC_HOOK', 'NODE_OPTIONS', 'NODE_PATH', 'SSH_ASKPASS', 'GIT_ASKPASS',
   'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
   'GIT_COMMON_DIR', 'GIT_NAMESPACE', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0',

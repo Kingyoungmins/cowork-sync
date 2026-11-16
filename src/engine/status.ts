@@ -5,7 +5,9 @@
 //                   (OFFLINE/AUTH > NONRETRYABLE > VERSION), and the message code of the highest condition with its
 //                   params: offline carries {label, explanation, offline_for_s} (glossary §25.2 item 4); in ok,
 //                   BRANCH_REWRITTEN (R-08), else HOST_THROTTLED {source, until_min, budget, fallback_left_s, signal}
-//                   (R-16; it never changes the state), else the last engine event, else null. The params follow
+//                   (R-16; it never changes the state), else the last engine event, else CS_NO_CHECKS_CONFIGURED (Plan 3
+//                   Task 12a), else null; in degraded from not_converged entries alone (R3-61) the newest hold code (the
+//                   hold-code slot, never a Plan 2 engine event), else HOLD_DIVERGED_REGIONS {n, age}, else NOT_CONVERGED. The params follow
 //                   the chapter that owns each code: INCIDENT{n, why, old_board, old_code, new_board, new_code,
 //                   displaced} (01-engine §2, the INCIDENT log line's names), NOT_CONVERGED{cause, guard|reason|check,
 //                   paths, causes} (each path's cause with its 01-engine §2 qualifier, NotConvergedWhy; `cause` and its
@@ -84,6 +86,21 @@ export interface StatusInputs {
   branchRewritten: { hb: string; hr: string } | null;
   lastEvent: { code: string; params: Record<string, Json> } | null;
   counts: { csReady: number; csOpen: number; holdsActive: number; holdsLocalOnly: number; incoming: number };
+  /**
+   * Plan 3 Task 12a (contract addition 4; HLD-24, R3-46, R3-61): n = non-terminal ON_DISK records with a non-empty guard set,
+   * oldestAgeS = the largest HoldRegistry.ageMs among them ÷ 1,000, rounded down; null when n = 0. HOLD_DIVERGED_REGIONS {n, age}'s
+   * input in the degraded rung.
+   */
+  diverged: { n: number; oldestAgeS: number } | null;
+  /** Plan 3 Task 12a (CS-12): TeamConfig.checks.checkpoint is empty — CS_NO_CHECKS_CONFIGURED in the ok ladder, after lastEvent. */
+  noChecksConfigured: boolean;
+  /**
+   * Plan 3 Task 12a fix round 1 (R3-61, the controller's ruling on finding 5): the hold-code slot — the newest hold code (EngineCore.holdCode,
+   * holdStatusInputs' lastEvent), R3-61's "lastEvent (fed by core.holdCode)" of the degraded rung. Kept apart from `lastEvent`, which
+   * Plan 2's engine events (ONLINE, UNFROZEN, FROZEN, LOST_STATE, RECOVERED, INDEX_LOCK_WAIT) also set: those never take the degraded
+   * rung; the ok ladder keeps reading `lastEvent`.
+   */
+  holdCode: { code: string; params: Record<string, Json> } | null;
   branch: string; peerId: string; pluginVersion: string;
   heartbeatMs: number; loopPeriodMs: number; lastFetchAgeMs: number | null; lastPushAgeMs: number | null;
 }
@@ -129,6 +146,14 @@ function stateOf(i: StatusInputs, notConverged: readonly string[]): { state: Sta
   if (i.version !== null) return { state: 'degraded', code: 'VERSION_PAUSED', params: { form: i.version.form, cause: i.version.cause } };
   const explicit = i.notConvergedCause ?? null;
   if (notConverged.length > 0 || explicit !== null) {
+    // Plan 3 Task 12a (R3-61): when only not_converged entries make the state degraded (no explicit Plan 2 cause outranks them), the
+    // newest hold code (the hold-code slot, core.holdCode — never a Plan 2 engine event, fix round 1) is the message, else
+    // HOLD_DIVERGED_REGIONS {n, age} for ON_DISK records, else Plan 2's NOT_CONVERGED.
+    if (explicit === null) {
+      if (i.holdCode !== null) return { state: 'degraded', code: i.holdCode.code, params: { ...i.holdCode.params } };
+      const d = i.diverged;
+      if (d !== null && d.n > 0) return { state: 'degraded', code: 'HOLD_DIVERGED_REGIONS', params: { n: d.n, age: d.oldestAgeS } };
+    }
     const whys = notConverged.map((p): NotConvergedWhy => i.notConvergedCauses?.get(p) ?? { cause: 'not_applicable' });
     // The headline: an explicit cause (no qualifier), else the first path's cause with its qualifier.
     const head: Record<string, Json> = explicit !== null ? { cause: explicit } : whyJson(whys[0]!);
@@ -144,10 +169,16 @@ function stateOf(i: StatusInputs, notConverged: readonly string[]): { state: Sta
     return { state: 'ok', code: 'HOST_THROTTLED', params: { source: t.source, until_min: t.untilMin, budget: t.budget, fallback_left_s: t.fallbackLeftS, signal: t.signal } };
   }
   if (i.lastEvent !== null) return { state: 'ok', code: i.lastEvent.code, params: { ...i.lastEvent.params } };
+  // Plan 3 Task 12a (CS-12, R3-61): the ok ladder's last rung before null.
+  if (i.noChecksConfigured) return { state: 'ok', code: 'CS_NO_CHECKS_CONFIGURED', params: {} };
   return { state: 'ok', code: null, params: {} };
 }
 
-/** State precedence refused > incident > frozen > paused > offline > degraded > ok ('down' only from `down`); message_code of the highest condition; in 'ok': BRANCH_REWRITTEN, else HOST_THROTTLED, else lastEvent, else null. Pure. */
+/**
+ * State precedence refused > incident > frozen > paused > offline > degraded > ok ('down' only from `down`); message_code of the
+ * highest condition; in 'ok': BRANCH_REWRITTEN, else HOST_THROTTLED, else lastEvent, else CS_NO_CHECKS_CONFIGURED, else null; in
+ * 'degraded' from not_converged entries alone: holdCode (the hold-code slot), else HOLD_DIVERGED_REGIONS {n, age}, else NOT_CONVERGED (R3-61). Pure.
+ */
 export function computeStatus(i: StatusInputs): StatusJson {
   const notConverged = [...new Set(i.notConverged)].sort(byCodeUnit);
   const pause = publishPauseOf(i);
@@ -178,6 +209,9 @@ export class StatusWriter {
   private readonly file: string;
   private readonly tmp: string;
   private readonly clock: Clock;
+  /** Task 7's seam (A7-6): every observer registered here is called with every status.json the engine writes,
+   *  before the I/O (a skipped write — a held file after its retries — still reached the observers). */
+  private readonly subs: Array<(s: StatusJson) => void> = [];
   /** Writes are queued: one status write at a time, in call order. */
   private tail: Promise<unknown> = Promise.resolve();
 
@@ -188,8 +222,18 @@ export class StatusWriter {
     this.clock = clock;
   }
 
+  /** Registers one status observer (the daemon's Transitions.observe, A7-6); returns the unsubscribe. */
+  onWrite(cb: (s: StatusJson) => void): () => void {
+    this.subs.push(cb);
+    return () => {
+      const i = this.subs.indexOf(cb);
+      if (i >= 0) this.subs.splice(i, 1);
+    };
+  }
+
   /** temp + rename; EPERM/EACCES/EBUSY retry 3 × 50 ms, then skip (false). Any other error propagates (the temp file removed). */
   write(s: StatusJson): Promise<boolean> {
+    for (const cb of this.subs) cb(s);   // the observers fire on the call, not on the I/O's success
     const run = this.tail.then(() => this.writeNow(s));
     this.tail = run.catch(() => undefined);
     return run;

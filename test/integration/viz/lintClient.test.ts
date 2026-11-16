@@ -107,6 +107,8 @@ test("T-VIZ-lints: the client program's import closure is exactly the R-V35 set"
       ['src/viz/model/placement.ts', 'placement'], ['src/viz/model/cards.ts', 'cards'], ['src/viz/model/labels.ts', 'labels'],
       ['src/viz/render/palette.ts', 'palette'], ['src/viz/server/viewModel.ts', 'viewModel'], ['src/text/sanitize.ts', 'sanitize'],
       ['src/i18n/render.ts', 'render'], ['src/viz/i18n/codes.ts', 'codes'],
+      // rev 2.5, F04-a: the shared area rule zone(p) (12 §3.13; CLIENT_PROGRAM_FILES in tools/lint/vizRules.ts).
+      ['src/data/zone.ts', 'zone'],
     ];
     for (const [file, name] of members) await put(root, file, `export type ${name}T = number;\nexport const ${name} = 1;\n`);
     const fromUi = (file: string): string => path.posix.relative('src/viz/ui', file).replace(/\.ts$/, '.js');

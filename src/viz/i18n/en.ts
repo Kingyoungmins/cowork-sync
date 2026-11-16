@@ -40,7 +40,7 @@ export const EN_VIZ: Catalog = {
   UI_VIZ_DEMO_CAPTION_2: { text: 'Three people join, each from their own PC.' },
   UI_VIZ_DEMO_CAPTION_3: { text: 'Each change-set lands on the desks of its files; paper planes fly to the other files it touched.' },
   UI_VIZ_DEMO_CAPTION_4: { text: 'A git command outside cowork-sync pauses one person; a busy host slows another down.' },
-  UI_VIZ_DEMO_CAPTION_5: { text: 'Three people, three PCs, only git in between.' },
+  UI_VIZ_DEMO_CAPTION_5: { text: 'Someone who has not shared for a while leans back. Three people, three PCs, only git in between.' },
   UI_VIZ_CAUGHT_UP: { text: 'caught up' },
   UI_VIZ_NEW_PILL: { text: 'new' },
   UI_VIZ_MORE: { text: '+{n}', params: { n: 'n' } },
@@ -49,7 +49,9 @@ export const EN_VIZ: Catalog = {
 
   // Scene labels
   UI_VIZ_YOU: { text: 'you' },
-  UI_VIZ_LAST_SHARED_HERE: { text: 'last shared here: {path} (#{height})', params: { path: 'path', height: 'n' } },
+  // {height}: a board height in plain digits, like every '#<height>' of the page (the log, the rewind bar): an 'id' (String(v)), never
+  // an 'n', which Intl.NumberFormat would group as '#1,024' (final review section 4a, Group B)
+  UI_VIZ_LAST_SHARED_HERE: { text: 'last shared here: {path} (#{height})', params: { path: 'path', height: 'id' } },
   UI_VIZ_HOLDING: { text: 'holding {label}', params: { label: 'label' } },
   UI_VIZ_SHELF_DESK: { text: 'more files in {zone}', params: { zone: 'path' } },
   UI_VIZ_BIG_TABLE: { text: '{n} files', ...COUNTED, forms: { one: '{n} file', other: '{n} files' } },
@@ -70,6 +72,16 @@ export const EN_VIZ: Catalog = {
   UI_VIZ_BADGE_RULES: { text: 'different rules' },
   UI_VIZ_BADGE_CREDIT: { text: 'co-author credit' },
   UI_VIZ_BADGE_HEALTH: { text: 'health notice' },
+  // rev 2.5, F32 (12 section 3.8.1, verbatim): the "follow along" sense, never a word of surveillance (T-VIZ-follow-i18n)
+  UI_VIZ_FOLLOWING: { text: 'Following {name}', params: { name: 'name' } },
+  UI_VIZ_NOW_ASKS: { text: 'asks {target} ({id})', params: { target: 'name', id: 'id' } },
+  UI_VIZ_NOW_ASKED_BY: { text: 'asked by {target} ({id})', params: { target: 'name', id: 'id' } },
+  UI_VIZ_NOW_LAST_SHARED: { text: 'last shared: {path} (#{height})', params: { path: 'path', height: 'id' } },
+  UI_VIZ_NOW_LAST_SHARED_TABLE: { text: 'last shared: a change too large to list (#{height})', params: { height: 'id' } },
+  UI_VIZ_NOW_NOTHING: { text: 'Nothing held, asked or shared yet in this view.' },
+  UI_VIZ_NOW_NOT_HERE: { text: '{name} is not in this room at this point.', params: { name: 'name' } },
+  // FEAT-F32-11 (12 section 3.8.1): the follow end offered to the announcer
+  UI_VIZ_FOLLOW_ENDED: { text: 'Stopped following {name}', params: { name: 'name' } },
 
   // Icons (screen-reader labels)
   UI_VIZ_ICON_QUEUED: { text: 'queued until the turn ends' },
@@ -154,6 +166,8 @@ export const EN_VIZ: Catalog = {
   UI_VIZ_FILTER_ACTIVITY: { text: 'Activity' },
   UI_VIZ_FILTER_CONFLICTS: { text: 'Conflicts' },
   UI_VIZ_FILTER_SYSTEM: { text: 'System' },
+  UI_VIZ_CTRL_FOLLOW: { text: 'Follow' },
+  UI_VIZ_CTRL_POSITION: { text: 'Replay position' },
 
   // Log only
   SEC_VIZ_BAD_HOST: { text: 'A request with a foreign Host header was refused.' },

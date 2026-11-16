@@ -49,6 +49,17 @@ export const NET_BACKOFF_MAX_MS = 300_000;
 /** One governed attempt as classified by its caller (never by text): duration, watchdog kill, porcelain status, transient rejection, landed. */
 export interface AttemptEnd { durationMs: number; killed: boolean; hadRefStatus: boolean; transient: boolean; landed: boolean; }
 
+/**
+ * Plan 3 Task 18 (rev 2.5, F14; 02-protocol §3.8 wait_detail(), FEAT-F14-13): the term that keeps this peer's next attempt waiting, in
+ * the display priority of 10-product §3.5.1 (window, own_spacing, peer_cap, team_guard, in_flight, backoff).
+ */
+export type WaitTerm = 'window' | 'own_spacing' | 'peer_cap' | 'team_guard' | 'in_flight' | 'backoff';
+/** `ms` null = not known yet (no tip observed in this run: no window); never Infinity, which JSON would turn into null silently. */
+export interface WaitDetail { ms: number | null; term: WaitTerm; }
+
+/** The terms an exempt attempt (R-21) skips: the window, the own G_eff spacing and the transient backoff (never the cap or the guard). */
+const EXEMPT_TERMS: ReadonlySet<WaitTerm> = new Set<WaitTerm>(['window', 'own_spacing', 'backoff']);
+
 const SIGNALS: ReadonlySet<string> = new Set<ThrottleSignal>(['http_429', 'http_5xx', 'slow_push', 'rejection_streak']);
 /** What a missing or malformed protocol.json field reads as (02-protocol §3.1): the stricter side. */
 const PARAM_FALLBACK: GovernorParams = { budget: 6, G_s: 10, S_s: 3 };
@@ -96,6 +107,8 @@ export class Governor {
   private lastFoldedTeam: Anchor | null = null;
   /** The last HOST_THROTTLED event this daemon queued, or folded from any writer (the 15-min spacing, P2-R18). */
   private lastEvent: Anchor | null = null;
+  /** Plan 3 Task 18: the rank of the newest mayAttempt / msUntilWindow call (waitDetail's default rank); 1 before any. */
+  private lastRank = 1;
 
   constructor(clock: Clock, params: GovernorParams) {
     this.clock = clock;
@@ -252,6 +265,7 @@ export class Governor {
    */
   mayAttempt(rank: number, pending: boolean, stateAllows: boolean, exempt?: boolean): boolean {
     checkRank(rank);
+    this.lastRank = rank;
     const allowed = pending && stateAllows;
     this.notePending(allowed);
     if (!allowed || this.inFlight) return false;
@@ -261,8 +275,29 @@ export class Governor {
   /** Δmono until mayAttempt(rank, …) could be true with nothing else changing; Infinity when nothing is pending, an attempt is in flight or no tip was observed yet. */
   msUntilWindow(rank: number): number {
     checkRank(rank);
+    this.lastRank = rank;
     if (!this.pending || this.inFlight) return Infinity;
     return this.waitMs(rank, false);
+  }
+
+  /**
+   * Plan 3 Task 18 (rev 2.5, F14; 02-protocol §3.8 wait_detail(), FEAT-F14-13; 10-product §3.5.1 O6): what keeps a ready group's next
+   * attempt waiting, for the flow's display. `ms` = Δmono until every condition of mayAttempt (pending and state_allows aside: the
+   * flow asks for a group that is ready) could hold with nothing else changing — mayAttempt's own wait (waitMs over the same terms),
+   * a lower bound, since any tip change resets the anchor and an attempt in flight has no known end; null before the first tip of this
+   * run was observed (no window yet: not known). `term` = the first blocking term in the display priority window > own_spacing >
+   * peer_cap > team_guard > in_flight > backoff (not mayAttempt's evaluation order, which tests "no attempt in flight" before the
+   * spacing); {ms: 0, term: 'window'} when nothing blocks. `rank` defaults to the rank of the newest mayAttempt / msUntilWindow call.
+   * Read-only: no attempt counted, no anchor, level or timer moved, and the 60 s windows are filtered, never pruned (prune runs only
+   * at onFetch, onOwnOk and onAttemptStart).
+   */
+  waitDetail(rank: number = this.lastRank): WaitDetail {
+    checkRank(rank);
+    if (this.anchor === null) return { ms: null, term: 'window' };
+    const terms = this.terms(rank);
+    const ms = Math.max(0, ...terms.map(([, w]) => w));
+    const first = terms.find(([t, w]) => (t === 'in_flight' ? this.inFlight : w > 0));
+    return { ms, term: first?.[0] ?? 'window' };
   }
 
   /** Δmono left in fallback (the latest of the own signal's and the folded events' 30 min); 0 in normal mode. */
@@ -319,21 +354,33 @@ export class Governor {
     }
   }
 
-  /** Δmono until every condition of mayAttempt holds (each, once true, stays true while nothing happens). */
+  /**
+   * Δmono until every condition of mayAttempt holds (each, once true, stays true while nothing happens): the largest of terms(rank),
+   * an exempt attempt skipping EXEMPT_TERMS. Infinity when not exempt before the first tip (the window term).
+   */
   private waitMs(rank: number, exempt: boolean): number {
+    return Math.max(0, ...this.terms(rank).filter(([t]) => !exempt || !EXEMPT_TERMS.has(t)).map(([, w]) => w));
+  }
+
+  /**
+   * Plan 3 Task 18 (finding 4 of its review: one source for waitMs and waitDetail): each condition of mayAttempt as the Δmono it still
+   * needs, in waitDetail's display priority — the window (G_eff + (rank − 1)·S_eff after the anchor, G_base once aged by two
+   * pre-emptions; Infinity before the first tip), the own G_eff spacing, the per-peer cap, the sliding team guard, the attempt in flight
+   * (0: its end is not known) and the ENG-44 transient backoff. A non-positive wait does not block. Read-only (no prune).
+   */
+  private terms(rank: number): Array<[WaitTerm, number]> {
     const eff = this.effective();
-    let w = Math.max(this.windowWait(this.attempts.map((at) => ({ at, n: 1 })), eff.B), this.windowWait(this.landings, eff.B));
-    if (!exempt) {
-      if (this.anchor === null) return Infinity;
-      const wait = this.preempted >= 2 ? eff.Gbase_ms : eff.G_ms + (rank - 1) * eff.S_ms;
-      w = Math.max(w, wait - this.ago(this.anchor));
-      if (this.lastAttempt !== null) w = Math.max(w, eff.G_ms - this.ago(this.lastAttempt));
-      if (this.backoffLevel > 0 && this.backoffFrom !== null) {
-        const backoff = Math.min(NET_BACKOFF_MAX_MS, NET_BACKOFF_MIN_MS * 2 ** (this.backoffLevel - 1));
-        w = Math.max(w, backoff - this.ago(this.backoffFrom));
-      }
-    }
-    return Math.max(0, w);
+    const wait = this.preempted >= 2 ? eff.Gbase_ms : eff.G_ms + (rank - 1) * eff.S_ms;
+    const backoff = this.backoffLevel > 0 && this.backoffFrom !== null
+      ? Math.min(NET_BACKOFF_MAX_MS, NET_BACKOFF_MIN_MS * 2 ** (this.backoffLevel - 1)) - this.ago(this.backoffFrom) : 0;
+    return [
+      ['window', this.anchor === null ? Infinity : wait - this.ago(this.anchor)],
+      ['own_spacing', this.lastAttempt === null ? 0 : eff.G_ms - this.ago(this.lastAttempt)],
+      ['peer_cap', this.windowWait(this.attempts.map((at) => ({ at, n: 1 })), eff.B)],
+      ['team_guard', this.windowWait(this.landings, eff.B)],
+      ['in_flight', 0],
+      ['backoff', backoff],
+    ];
   }
 
   /** Δmono until fewer than B events (oldest first) remain in the last 60 s; 0 when already so. */

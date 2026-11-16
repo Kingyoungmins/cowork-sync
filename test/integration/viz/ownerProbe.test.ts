@@ -3,11 +3,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, join, win32 } from 'node:path';
+import { inspect } from 'node:util';
 import { realFs } from '../../../src/ports/fs.js';
 import { parseSddl, sddlOwnerOk, sddlUserOnly, verifyDataDir } from '../../../src/viz/cli/dataDir.js';
 import { realOwnerProbe, WINDOWS_ACL_COMMAND, type OwnerProbe } from '../../../src/viz/cli/ownerProbe.js';
+import { openViewerStderr, VIEWER_STDERR_FILE } from '../../../src/viz/cli/spawn.js';
 import { makeTempRoot } from '../../helpers/tmp.js';
 import { programsStartedBy } from '../../helpers/vizCli.js';
 
@@ -25,6 +27,33 @@ function setProcessPath(first: string): () => void {
 /** The shape of a SID the probe may report: any authority, as the product parses whoami (S-1-5-21-… local and AD, S-1-12-1-… Entra ID). */
 const SID_SHAPE = /^S-1-[0-9]+(?:-[0-9]+)+$/;
 
+/** An account SID inside any text (PC 2's d079f2d pattern): S-1-5-21-… (local, AD) and S-1-12-1-… (Entra ID); the well-known SY, BA, S-1-5-18 and
+ *  S-1-5-32-544 stay readable. R-F2-12: account data never reaches a record, and node:test prints a failed assertion's message, actual and
+ *  expected into every log (F2 #140). */
+const ACCOUNT_SID = /S-1-[0-9]+-[0-9]+(?:-[0-9]+){3,}/g;
+
+/** v with every account SID in its strings replaced: strings, arrays and plain objects are walked; a RegExp, a number, a boolean, null and
+ *  undefined are returned as they are. */
+function redact(v: unknown): unknown {
+  if (typeof v === 'string') return v.replace(ACCOUNT_SID, '<account SID>');
+  if (Array.isArray(v)) return v.map(redact);
+  if (v !== null && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype) {
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, redact(x)]));
+  }
+  return v;
+}
+
+/** Runs assertions whose message, actual or expected may hold the probe's real SDDL or SID: a failed one is rethrown as an AssertionError
+ *  whose message, actual and expected are redacted (the stack is rebuilt from the redacted message); any other error passes unchanged. */
+function sidSafe(fn: () => void): void {
+  try {
+    fn();
+  } catch (e) {
+    if (!(e instanceof assert.AssertionError)) throw e;
+    throw new assert.AssertionError({ message: redact(e.message) as string, actual: redact(e.actual), expected: redact(e.expected), operator: e.operator });
+  }
+}
+
 test('the probe test accepts what the product accepts: every SID authority (Entra ID S-1-12-1-… included) and the product\'s owner rule (user, BA, or LA for the built-in Administrator)', () => {
   const LOCAL = 'S-1-5-21-1111111111-2222222222-3333333333-1001';
   const ADMIN = 'S-1-5-21-1111111111-2222222222-3333333333-500';
@@ -36,6 +65,33 @@ test('the probe test accepts what the product accepts: every SID authority (Entr
     ['LA', LOCAL, false], [ADMIN, LOCAL, false], ['S-1-5-18', LOCAL, false], [null, LOCAL, false],
   ] as const) {
     assert.equal(sddlOwnerOk(owner, user), ok, `${String(owner)} for ${user}`);
+  }
+});
+
+test('a failing owner-probe assertion prints no account SID: its message, actual and expected are redacted (F2 #140)', () => {
+  // Synthetic SIDs only: a local account and an Entra ID one, beside the well-known SY and BA that stay readable.
+  const user = 'S-1-5-21-1111111111-2222222222-3333333333-1001';
+  const entra = 'S-1-12-1-1234567890-1234567890-1234567890-1234567890';
+  const sddl = `O:${user}G:${user}D:AI(A;OICIID;FA;;;${entra})(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)`;
+  const SID = new RegExp(ACCOUNT_SID.source);   // non-global: test() keeps no lastIndex
+  const cases: ReadonlyArray<readonly [string, () => void]> = [
+    ['an SDDL as the message', () => assert.equal(false, true, sddl)],
+    ['an SDDL as actual', () => assert.match(sddl, /D:P/)],
+    ['a probe answer in actual and expected', () => assert.deepEqual({ sddl, userSid: user }, { sddl: '', userSid: entra })],
+  ];
+  for (const [what, call] of cases) {
+    let err: unknown = null;
+    try {
+      sidSafe(call);
+    } catch (e) {
+      err = e;
+    }
+    assert.ok(err instanceof assert.AssertionError, `${what}: still an AssertionError`);
+    // What the reporter prints: node:test inspects the error (message, stack, actual, expected).
+    const shown = inspect(err, { depth: 5 });
+    assert.equal(SID.test(shown), false, `${what}: an account SID is printed`);
+    assert.ok(shown.includes('<account SID>'), `${what}: the redaction marker is printed`);
+    assert.ok(shown.includes(';;;SY)'), `${what}: a well-known SID stays readable`);
   }
 });
 
@@ -69,13 +125,15 @@ test('the Windows owner probe runs powershell.exe by absolute path with the dire
       const r = await realOwnerProbe.windows(hostile);
       restorePath();
       assert.ok(r !== null, 'the probe answered');
-      assert.match(r.userSid, SID_SHAPE);
+      sidSafe(() => assert.match(r.userSid, SID_SHAPE));
       const s = parseSddl(r.sddl);
-      assert.ok(s !== null, r.sddl);
-      // The owner check is the product's own rule: the user, BUILTIN\Administrators (an elevated user's objects), or LA when the user is
-      // the built-in Administrator; compared by SID.
-      assert.ok(sddlOwnerOk(s.owner, r.userSid), `owner ${String(s.owner)}`);
-      assert.equal(sddlUserOnly(s, r.userSid), true, r.sddl);
+      sidSafe(() => {
+        assert.ok(s !== null, r.sddl);
+        // The owner check is the product's own rule: the user, BUILTIN\Administrators (an elevated user's objects), or LA when the user is
+        // the built-in Administrator; compared by SID.
+        assert.ok(sddlOwnerOk(s.owner, r.userSid), `owner ${String(s.owner)}`);
+        assert.equal(sddlUserOnly(s, r.userSid), true, r.sddl);
+      });
       assert.ok(existsSync(hostile));
 
       // A missing directory, and no usable SystemRoot: no answer, fail closed.
@@ -109,13 +167,15 @@ test('the owner probe works under PowerShell Constrained Language Mode, and take
       });
       assert.equal(clm.status, 0, clm.stderr);
       const sddl = clm.stdout.trim();
-      assert.ok(parseSddl(sddl) !== null, sddl);
+      sidSafe(() => assert.ok(parseSddl(sddl) !== null, sddl));
 
-      // The probe answers the same SDDL, and the user SID whoami.exe reports (its SID column).
+      // The probe answers the same SDDL, and the user SID whoami.exe reports (its SID column). whoami's stdout holds the account name
+      // too, which no SID pattern redacts, so it never enters a message.
       const who = spawnSync(win32.join(SYSTEM32, 'whoami.exe'), ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true });
       const sid = /,"(S-1-[0-9]+(?:-[0-9]+)+)"\s*$/.exec(who.stdout)?.[1];
-      assert.ok(sid !== undefined, who.stdout);
-      assert.deepEqual(await realOwnerProbe.windows(t.root), { sddl, userSid: sid });
+      sidSafe(() => assert.ok(sid !== undefined, 'whoami /user printed no SID column'));
+      const got = await realOwnerProbe.windows(t.root);
+      sidSafe(() => assert.deepEqual(got, { sddl, userSid: sid }));
     } finally {
       await t.cleanup();
     }
@@ -138,8 +198,8 @@ test('a data directory the CLI creates under a parent that grants Everyone read 
       assert.deepEqual(await verifyDataDir(dir, { fs: realFs, probe: realOwnerProbe, platform: 'win32', create: true }), { ok: true });
       const r = await realOwnerProbe.windows(dir);
       assert.ok(r !== null);
-      assert.match(r.sddl, /D:PAI?\(/, 'protected: inheritance removed');
-      assert.ok(!r.sddl.includes(';WD)'), r.sddl);
+      sidSafe(() => assert.match(r.sddl, /D:PAI?\(/, 'protected: inheritance removed'));
+      sidSafe(() => assert.ok(!r.sddl.includes(';WD)'), r.sddl));
 
       // The first protectDir fails (icacls did not run): the new directory fails on its inherited Everyone ACE, gets one more protectDir
       // (the real one) and passes.
@@ -151,12 +211,14 @@ test('a data directory the CLI creates under a parent that grants Everyone read 
       const second = join(parent, 'second data');
       assert.deepEqual(await verifyDataDir(second, { fs: realFs, probe: flaky, platform: 'win32', create: true }), { ok: true });
       assert.deepEqual(calls, [second, second]);
-      assert.match((await realOwnerProbe.windows(second))?.sddl ?? '', /D:PAI?\(/);
+      const secondSddl = (await realOwnerProbe.windows(second))?.sddl ?? '';
+      sidSafe(() => assert.match(secondSddl, /D:PAI?\(/));
       // A directory left behind by such a run (the plain one: owned by the user, failing only on what it inherits) is repaired by the CLI
       // (create: true), never by the viewer (create: false).
       assert.deepEqual(await verifyDataDir(plain, { fs: realFs, probe: realOwnerProbe, platform: 'win32', create: false }), { ok: false, why: 'acl' });
       assert.deepEqual(await verifyDataDir(plain, { fs: realFs, probe: realOwnerProbe, platform: 'win32', create: true }), { ok: true });
-      assert.match((await realOwnerProbe.windows(plain))?.sddl ?? '', /D:PAI?\(/);
+      const plainSddl = (await realOwnerProbe.windows(plain))?.sddl ?? '';
+      sidSafe(() => assert.match(plainSddl, /D:PAI?\(/));
       // An explicit Everyone ACE (someone set it) is never repaired.
       const explicit = join(t.root, 'explicit data');
       mkdirSync(explicit);
@@ -188,7 +250,7 @@ test('a data directory swapped for a junction (or for another directory) between
       const victim = join(parent, 'victim');
       mkdirSync(victim);
       const victimSddl = await sddlOf(victim);
-      assert.ok(victimSddl !== undefined && !victimSddl.includes('D:P'), String(victimSddl));
+      sidSafe(() => assert.ok(victimSddl !== undefined && !victimSddl.includes('D:P'), String(victimSddl)));
       const icaclsArgs: string[][] = [];
       let n = 0;
       for (const [when, to] of [['check', 'junction'], ['repair', 'junction'], ['last probe', 'junction'], ['check', 'directory'], ['repair', 'directory']] as const) {
@@ -224,18 +286,20 @@ test('a data directory swapped for a junction (or for another directory) between
         assert.deepEqual(protects, when === 'check' ? [] : [dir], name);
         // Refused by the lstat right before the repair, right after it (before any re-check), or right after the last probe.
         assert.equal(checks, when === 'last probe' ? 2 : 1, name);
-        assert.equal(await sddlOf(victim), victimSddl, `${name}: the junction target's DACL changed`);
+        const victimNow = await sddlOf(victim);
+        sidSafe(() => assert.equal(victimNow, victimSddl, `${name}: the junction target's DACL changed`));
         for (const c of calls) if (/icacls\.exe$/i.test(c.file)) icaclsArgs.push(c.args);
       }
-      // icacls ran in the three swaps that reached the repair, each time on the path itself, never through a reparse point (/L).
+      // icacls ran in the three swaps that reached the repair, each time on the path itself, never through a reparse point (/L). Its
+      // arguments hold the user's *SID grant, so the message goes through sidSafe too.
       assert.equal(icaclsArgs.length, 3);
-      for (const args of icaclsArgs) assert.ok(args.includes('/L'), args.join(' '));
+      for (const args of icaclsArgs) sidSafe(() => assert.ok(args.includes('/L'), args.join(' ')));
     } finally {
       await t.cleanup();
     }
   });
 
-test('the CLI repairs an existing data directory only when it is empty or holds nothing but the viewer\'s own files; one holding anything else, or a log junction, keeps its DACL and is refused',
+test('the CLI repairs an existing data directory only when it is empty or holds nothing but the viewer\'s own files (an earlier start\'s log\\viz-stderr.txt included); one holding anything else, or a log junction, keeps its DACL and is refused',
   { skip: process.platform !== 'win32' ? 'Windows legs only' : false }, async () => {
     const t = await makeTempRoot('viz-probe-contents');
     try {
@@ -247,7 +311,19 @@ test('the CLI repairs an existing data directory only when it is empty or holds 
       writeFileSync(join(own, 'log', 'viz-ABCDEFGH-1.jsonl'), '{}\n');
       writeFileSync(join(own, 'probe.json'), '{}\n');
       assert.deepEqual(await verify(own), { ok: true });
-      assert.match((await sddlOf(own)) ?? '', /D:PAI?\(/);
+      const ownSddl = (await sddlOf(own)) ?? '';
+      sidSafe(() => assert.match(ownSddl, /D:PAI?\(/));
+      // A data directory an earlier CLI start left behind: the viewer's stderr file log\viz-stderr.txt, opened by the CLI's own
+      // openViewerStderr (Task 15 fix round 2), is one of the viewer's files too (Plan 8a final review, fix Group D).
+      const started = join(parent, 'started data');
+      mkdirSync(started);
+      const err = openViewerStderr(started, 'win32');
+      assert.ok(err !== null, 'the stderr file opens');
+      err.close();
+      assert.deepEqual(readdirSync(join(started, 'log')), [VIEWER_STDERR_FILE]);
+      assert.deepEqual(await verify(started), { ok: true });
+      const startedSddl = (await sddlOf(started)) ?? '';
+      sidSafe(() => assert.match(startedSddl, /D:PAI?\(/));
       // Anything else: the folder is not the viewer's, so its DACL is never rewritten.
       const other = join(parent, 'other data');
       mkdirSync(other);
@@ -259,9 +335,10 @@ test('the CLI repairs an existing data directory only when it is empty or holds 
       symlinkSync(elsewhere, join(linked, 'log'), 'junction');
       for (const dir of [other, linked]) {
         const before = await sddlOf(dir);
-        assert.ok(before !== undefined && !before.includes('D:P'), String(before));
+        sidSafe(() => assert.ok(before !== undefined && !before.includes('D:P'), String(before)));
         assert.deepEqual(await verify(dir), { ok: false, why: 'acl' }, dir);
-        assert.equal(await sddlOf(dir), before, dir);
+        const after = await sddlOf(dir);
+        sidSafe(() => assert.equal(after, before, dir));
       }
       // Listed again after the repair: a file that appears while icacls runs refuses before the re-check.
       const busy = join(parent, 'busy data');

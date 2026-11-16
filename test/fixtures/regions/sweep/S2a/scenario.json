@@ -1,0 +1,32 @@
+{
+  "name": "S2a",
+  "files": {
+    "orders.py": {
+      "base": "from typing import overload\n\n\ndef normalise(items):\n    return [item for item in items if item.quantity > 0]\n\n\n# Sum the line items of an order, rounded to cents.\ndef compute_total(items):\n    total = 0\n    for item in items:\n        price = item.price * item.quantity\n        if item.discount:\n            price -= item.discount\n        total += price\n    return round(total, 2)\n\n\ndef compute_tax(total, rate):\n    total = total * rate\n    return round(total, 2)\n",
+      "ours": "from typing import overload\n\n\ndef normalise(items):\n    return [item for item in items if item.quantity > 0]\n\n\n# Sum the line items of an order, rounded to cents.\ndef compute_total(items):\n    total = 0\n    for item in items:\n        price = item.unit_price * item.quantity\n        if item.discount:\n            price -= item.discount\n        total += price\n    return round(total, 2)\n\n\ndef compute_tax(total, rate):\n    total = total * rate\n    return round(total, 2)\n",
+      "theirs": "from typing import overload\n\n\ndef normalise(items):\n    return [item for item in items if item.quantity > 0]\n\n\ndef compute_tax(total, rate):\n    total = total * rate\n    return round(total, 2)\n\n\n# Sum the line items of an order, rounded to cents.\ndef compute_total(items):\n    total = 0\n    for item in items:\n        price = item.price * item.quantity\n        if item.discount:\n            price -= item.discount\n        total += round(price, 2)\n    return round(total, 2)\n"
+    }
+  },
+  "claims": [
+    {
+      "holderSeat": "p1/seat-holder",
+      "path": "orders.py",
+      "claimUnit": "compute_total"
+    }
+  ],
+  "expect": "held",
+  "oracle": {
+    "orders.py": "from typing import overload\n\n\ndef normalise(items):\n    return [item for item in items if item.quantity > 0]\n\n\ndef compute_tax(total, rate):\n    total = total * rate\n    return round(total, 2)\n\n\n# Sum the line items of an order, rounded to cents.\ndef compute_total(items):\n    total = 0\n    for item in items:\n        price = item.price * item.quantity\n        if item.discount:\n            price -= item.discount\n        total += round(price, 2)\n    return round(total, 2)\n"
+  },
+  "corrupting": true,
+  "corruptOut": {
+    "orders.py": "from typing import overload\n\n\ndef normalise(items):\n    return [item for item in items if item.quantity > 0]\n\n\n# Sum the line items of an order, rounded to cents.\ndef compute_total(items):\n    total = 0\n    for item in items:\n        price = item.unit_price * item.quantity\n        if item.discount:\n            price -= item.discount\n        total += price\n    return round(total, 2)\n\n\ndef compute_tax(total, rate):\n    total = total * rate\n    return round(total, 2)\n\n\n# Sum the line items of an order, rounded to cents.\ndef compute_total(items):\n    total = 0\n    for item in items:\n        price = item.price * item.quantity\n        if item.discount:\n            price -= item.discount\n        total += round(price, 2)\n    return round(total, 2)\n"
+  },
+  "hazard": {
+    "path": "orders.py",
+    "pattern": "def compute_total(",
+    "count": 2
+  },
+  "caughtBy": "tripwire_b",
+  "duplicatedKey": "function\u0000compute_total\u0000"
+}

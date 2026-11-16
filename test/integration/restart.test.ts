@@ -22,7 +22,8 @@ import { realFs } from '../../src/ports/fs.js';
 import type { Log, LogLevel, LogParam } from '../../src/ports/log.js';
 import { seededRandom } from '../../src/ports/random.js';
 import { readWork, workPath, writeWork, type CoreFixture, type PeerFixture } from '../helpers/coreFixture.js';
-import { blobText, buf, captureReady, editAndCapture, lines, LogRecorder, prep, remoteBoard, setMutants, treeOf, withCores, wrapGit } from '../helpers/publishHelpers.js';
+import { privateBlobs } from '../helpers/incomingFixture.js';
+import { blobText, buf, captureReady, editAndCapture, lines, LogRecorder, prep, remoteBoard, remoteLiveCode, setMutants, treeOf, withCores, wrapGit } from '../helpers/publishHelpers.js';
 import { gitIn, gitRemote, restartCore, startOk } from '../helpers/startFixture.js';
 import { makeTempRoot, testRunner } from '../helpers/tmp.js';
 import { SIM_WALL_EPOCH_MS, VirtualClock } from '../sim/vclock.js';
@@ -213,6 +214,62 @@ test('a kill after the writes and before ENG-36 with a journaled ready pair on a
   });
 });
 
+// EF2 fix round 1, F1 (the other half of EF2 D4; ENG-36 and 01-engine §3.14 step 4 as ruled: snap := S_disk with each verified-written
+// path set to the written blob and each verified deletion removed, at the apply and at the ENG-53 completion). A kill after the writer's
+// round trip moved the private index to the written blob and before the apply's state commit leaves the intent journaled; the restart
+// completes it (A[p] := TIP[p] for each path the disk shows at its target) and then reseeds the private index from state:snap
+// (unconditionally, R3-60). With snap := t/S there, the revert detector's prev[p] went back to the pre-apply bytes (a rewind removing
+// the applied rows read as no removal) and the path re-entered the human CS (A ≠ snap).
+for (const point of ['apply.group.phase2', 'apply.between_groups'] as const) {
+  test(`a kill at ${point} (after the round trip, before the ENG-36 state commit), then a restart: the ENG-53 completion's state:snap holds the written blob of every path the disk shows at its target, the reseeded private index with it, and those paths join no human change-set (EF2 r1 F1)`, async () => {
+    await withCores(`restart-snap-${point}`, { n: 1, files: FILES }, async (fx) => {
+      const p = fx.peers[0]!;
+      // A local edit the apply merges (b.txt row 10: M[b] is neither S[b] nor TIP[b]), and two incoming change-sets of two paths each
+      // (two write groups, so apply.between_groups is reached after the first group's round trip).
+      await writeWork(p, 'b.txt', row(BASE, 10, 'row 10 edited by p1'));
+      await prep(p);
+      await fx.pushTeamChange({ 'a.txt': buf(row(BASE, 3, 'row 3 by the team')), 'b.txt': buf(row(BASE, 1, 'row 1 by the team')) });
+      await fx.pushTeamChange({ 'c.txt': buf(row(BASE, 5, 'row 5 by the team')), 'd.txt': buf(row(BASE, 5, 'row 5 by the team')) });
+      fx.advance(10_000);
+      await killedAt(point, async () => applyStep(p.core, await prep(p)));
+      const v = (await p.core.state.read())!;
+      assert.equal(v.intent.kind, 'apply', 'the apply intent is journaled');
+      const M = await p.core.repo.readTreeMap(v.t.get('M')!);
+      const S = await p.core.repo.readTreeMap(v.t.get('S')!);
+      const TIP = await p.core.repo.readTreeMap(v.t.get('TIP')!);
+      const journaled = v.intent.kind === 'apply' ? v.intent.groups.flatMap((g) => g.entries.map((e) => e.path)) : [];
+
+      await restartCore(p);
+      const r = await startOk(p, 'restart');
+      assert.equal(r.restart?.intent, 'apply');
+      const snap = await p.core.repo.readTreeMap(p.core.view!.snap);
+      const index = await privateBlobs(p);
+      const written: string[] = [];
+      for (const path of journaled) {
+        const disk = await readWork(p, path);
+        const onDisk = disk === null ? ABSENT : await p.core.repo.hashBytes(disk, false);
+        const target = M.get(path)?.oid ?? ABSENT;
+        if (onDisk === target) {
+          written.push(path);
+          assert.equal(snap.get(path)?.oid ?? ABSENT, target, `${path}: state:snap holds the written blob, never t/S's ${S.get(path)?.oid ?? ABSENT}`);
+          assert.equal(index(path), target, `${path}: the reseeded private-index entry is the written blob`);
+        } else {
+          assert.equal(snap.get(path)?.oid ?? ABSENT, S.get(path)?.oid ?? ABSENT, `${path}: not written, snap keeps t/S's entry`);
+        }
+      }
+      assert.ok(written.includes('b.txt') || written.includes('a.txt'), `the first write group was written before the kill: ${JSON.stringify(written)}`);
+      assert.ok(written.some((x) => M.get(x)?.oid !== S.get(x)?.oid), 'a written path whose target differs from t/S (else the test is vacuous)');
+      // The first tick after the restart: a written path whose target is TIP's (no local delta) reads clean and joins no human CS; b.txt
+      // (the merge with p1's row 10, an unpublished local delta) is re-formed as before.
+      await prep(p);
+      const clean = written.filter((x) => M.get(x)?.oid === TIP.get(x)?.oid);
+      assert.ok(clean.length > 0, `a written path with no local delta: ${JSON.stringify(written)}`);
+      for (const path of clean) assert.ok(!p.core.cs.openPaths().has(path), `${path} joins no human change-set: ${JSON.stringify([...p.core.cs.openPaths()])}`);
+      if (written.includes('b.txt')) assert.ok(p.core.cs.openPaths().has('b.txt'), 'b.txt\'s local row 10 is re-formed (A ≠ snap)');
+    });
+  });
+}
+
 test('38(c) under a kill: a concat write keeps its pair ready with R = the written concat, a TAKE_TIP displacement cancels its pair (CS_READY_CANCELLED) and moves its conflict record OFF_DISK', async () => {
   const files = { ...FILES, 'notes.md': buf('# Notes\n\nalpha\n') };
   await withCores('restart-38c', { n: 1, files }, async (fx) => {
@@ -401,6 +458,116 @@ test('an open human change-set whose edit an apply already took into state:snap,
   });
 });
 
+// EF2 D3 (Task 15 finding 2; HLD-36's "every unpublished local delta not in a ready pair", HLD-40 "edits after the trigger stay in
+// the still-open CS"): the re-form after a restart judged "in a ready pair" by path name, so a change made on a ready pair's own path
+// after its capture, once an apply's ENG-36 update had taken it into state:snap, was in no change-set after a kill: the first tick
+// compares the disk with snap and saw nothing, and the older pair published its superseded R. Two shapes: a newer edit
+// (R[b] = CAPTURED, snap = AFTER) and the D2 holds-time-13 shape (a pair naming b with R[b] == A[b], snap = AFTER). (A revert to A
+// after the capture — snap == A, no delta against A — is outside HLD-36's re-form; reported for a ruling, not pinned here.)
+for (const variant of ['newer-edit', 'noop-pair'] as const) {
+  test(`a change on a ready pair's own path after its capture (${variant}), taken into state:snap by an apply, then a kill at snapshot.index_written: the restart re-forms it and the newest bytes publish (EF2 D3)`, async () => {
+    await withCores(`restart-open-cs-ready-${variant}`, { n: 1, files: FILES }, async (fx) => {
+      const p = fx.peers[0]!;
+      const CAPTURED = variant === 'noop-pair' ? BASE : row(BASE, 4, 'row 4 captured before the crash');
+      let earlier;
+      if (variant === 'noop-pair') {
+        // b.txt joins the open CS, then returns to A's bytes before the capture: the pair names b.txt with R[b] == A[b].
+        await writeWork(p, 'b.txt', row(BASE, 2, 'row 2 for a moment'));
+        await prep(p);
+        fx.advance(5_000);
+        ({ pair: earlier } = await editAndCapture(fx, p, { 'b.txt': BASE, 'd.txt': row(BASE, 6, 'row 6 captured') }));
+        assert.ok(earlier.paths.includes('b.txt'), `the pair names b.txt: ${JSON.stringify(earlier.paths)}`);
+        const R0 = await p.core.repo.readTreeMap(earlier.R);
+        assert.equal(await blobText(p, R0, 'b.txt'), BASE, 'with R[b.txt] == A[b.txt]');
+      } else {
+        ({ pair: earlier } = await editAndCapture(fx, p, { 'b.txt': CAPTURED }));
+      }
+      // The same path changes again after the capture: the open CS holds it, never journaled.
+      const AFTER = row(CAPTURED, 9, 'row 9 edited after the capture, its change-set still open');
+      await writeWork(p, 'b.txt', AFTER);
+      await prep(p);
+      // A teammate change on c.txt: the apply's ENG-36 update takes S_disk (with b.txt's newest bytes) into state:snap.
+      await fx.pushTeamChange({ 'c.txt': buf(row(BASE, 5, 'row 5 by the team')) });
+      fx.advance(10_000);
+      const applied = await applyStep(p.core, await prep(p));
+      assert.equal(applied.skipped, null, `the apply ran: ${JSON.stringify(applied)}`);
+      const snap = await p.core.repo.readTreeMap(p.core.view!.snap);
+      assert.equal(await blobText(p, snap, 'b.txt'), AFTER, 'state:snap holds the change made after the capture');
+      assert.deepEqual(p.core.cs.ready().map((x) => x.csId), [earlier.csId], 'only the earlier pair is journaled');
+      fx.advance(1_000);
+      await killedAt('snapshot.index_written', () => prep(p, true));
+
+      await restartCore(p);
+      await startOk(p, 'restart');
+      await prep(p);   // the first iteration after the restart: the clean side (disk == snap, != A and != the pair's R) is observed here
+      assert.ok(p.core.cs.openPaths().has('b.txt'), `b.txt is in the re-formed open change-set: ${JSON.stringify([...p.core.cs.openPaths()])}`);
+      fx.advance(20_000);
+      await captureReady(p, await prep(p, true));
+      fx.advance(30_000);
+      const pub = await publishStep(p.core, await prep(p));
+      assert.equal(pub.outcome, 'landed', JSON.stringify(pub));
+      const pushed = await treeOf(p, pub.c!);
+      assert.equal(await blobText(p, pushed, 'b.txt'), AFTER, 'the newest bytes of b.txt are published, never the superseded capture');
+      assert.equal(await blobText(p, pushed, 'c.txt'), row(BASE, 5, 'row 5 by the team'));
+      if (variant === 'noop-pair') assert.equal(await blobText(p, pushed, 'd.txt'), row(BASE, 6, 'row 6 captured'), 'the earlier pair publishes too');
+    });
+  });
+}
+
+// EF2 fix round 1 (the review's d3probe shapes). F2: the D3 handover ran only once — the first tick after the restart emptied it
+// before filtering, so a handed path that tick did not read (a share-none lock: UNREADABLE, an editor mid-save) was dropped for good;
+// once readable the disk equals snap and nothing observes it again. F3 (ruling: R-01 also hands over snap == A paths, except those
+// whose snap entry came from an R3-60 snap-only operator transition): a revert to A's bytes after the capture, taken into snap by an
+// apply, was skipped by the re-form (snap == A), so the stale capture published the bytes the user had undone and the disk never
+// converged. Both: the newest bytes publish, never the superseded capture.
+for (const variant of ['locked-at-first-tick', 'revert-to-A'] as const) {
+  test(`a change on a ready pair's own path after its capture (${variant}), taken into state:snap by an apply, then a kill at snapshot.index_written: the restart re-forms it and the newest bytes publish, never the superseded capture (EF2 r1 ${variant === 'revert-to-A' ? 'F3' : 'F2'})`, async () => {
+    await withCores(`restart-reform-${variant}`, { n: 1, files: FILES }, async (fx) => {
+      const p = fx.peers[0]!;
+      const CAPTURED = row(BASE, 4, 'row 4 captured before the crash');
+      const { pair: earlier } = await editAndCapture(fx, p, { 'b.txt': CAPTURED });
+      const AFTER = variant === 'revert-to-A' ? BASE : row(CAPTURED, 9, 'row 9 edited after the capture, its change-set still open');
+      await writeWork(p, 'b.txt', AFTER);
+      await prep(p);
+      await fx.pushTeamChange({ 'c.txt': buf(row(BASE, 5, 'row 5 by the team')) });
+      fx.advance(10_000);
+      const applied = await applyStep(p.core, await prep(p));
+      assert.equal(applied.skipped, null, `the apply ran: ${JSON.stringify(applied)}`);
+      assert.equal(await blobText(p, await p.core.repo.readTreeMap(p.core.view!.snap), 'b.txt'), AFTER, 'state:snap holds the change made after the capture');
+      assert.deepEqual(p.core.cs.ready().map((x) => x.csId), [earlier.csId], 'only the earlier pair is journaled');
+      fx.advance(1_000);
+      await killedAt('snapshot.index_written', () => prep(p, true));
+
+      await restartCore(p);
+      await startOk(p, 'restart');
+      if (variant === 'locked-at-first-tick') {
+        // The first tick after the restart cannot read b.txt (a share-none holder): it decides nothing about it, so b.txt stays handed over.
+        const release = p.fs.holdLock(workPath(p, 'b.txt'), 'share-none');
+        try {
+          const it = await prep(p);
+          assert.equal(it.tick?.excluded.get('b.txt'), 'unreadable', `the first tick did not read b.txt: ${JSON.stringify([...(it.tick?.excluded ?? new Map())])}`);
+        } finally {
+          release();
+        }
+        fx.advance(2_500);
+      }
+      await prep(p);   // the first tick that reads b.txt: it reads clean (disk == snap) and observes it
+      assert.ok(p.core.cs.openPaths().has('b.txt'), `b.txt is in the re-formed open change-set: ${JSON.stringify([...p.core.cs.openPaths()])}`);
+      fx.advance(20_000);
+      await captureReady(p, await prep(p, true));
+      for (let i = 0; i < 4 && p.core.cs.ready().length > 0; i++) {
+        fx.advance(30_000);
+        const pub = await publishStep(p.core, await prep(p));
+        if (pub.c !== undefined && pub.c !== null) assert.equal(await blobText(p, await treeOf(p, pub.c), 'b.txt'), AFTER, `the newest bytes of b.txt are published, never the superseded capture (${pub.outcome})`);
+      }
+      assert.deepEqual(p.core.cs.ready().map((x) => x.csId), [], 'every pair left journal/ready/');
+      assert.equal(await blobText(p, await treeOf(p, await remoteLiveCode(fx, p)), 'b.txt'), AFTER, 'live b.txt is the newest bytes');
+      assert.equal(await blobText(p, (await prep(p)).A, 'b.txt'), AFTER, 'A[b.txt] converged with the disk');
+      assert.equal((await readWork(p, 'b.txt'))?.toString('utf8'), AFTER);
+    });
+  });
+}
+
 test('a kill inside a local write with a DELETE entry, then a restart: the targets come from the journal, the deletion reads as done (no record, nothing resurrected)', async () => {
   await withCores('restart-local-delete', { n: 1, files: FILES }, async (fx) => {
     const p = fx.peers[0]!;
@@ -441,7 +608,9 @@ test('a kill inside a local write whose relink fails again at the restart: the b
     const rec = p.core.holds.nonTerminal().find((h) => h.id === r.restart!.restartRecords[0]);
     assert.ok(rec !== undefined);
     assert.deepEqual([rec.kind, rec.residence, rec.state, rec.paths], ['PATCH', 'ON_DISK', 'ACTIVE', ['a.txt']]);
-    assert.equal(heldBlob(rec, 'a.txt'), A.get('a.txt'), 'the record holds the .old bytes (the only copy)');
+    // R3-75: the .old bytes are A[a.txt], so the record holds them as h0 and its held change is the deletion (h1 ABSENT).
+    assert.equal('h0' in rec.blobs ? rec.blobs.h0['a.txt'] : undefined, A.get('a.txt'), 'the record holds the .old bytes (the only copy)');
+    assert.equal(heldBlob(rec, 'a.txt'), ABSENT, 'its held change is the stranded deletion');
     assert.ok(p.core.holds.maskingRecords().some((h) => h.id === rec.id), 'masked');
     assert.deepEqual(oldsIn(p), [], 'the .old went only after its record');
     // The absence is observed, confirmed, captured and composed; the record masks it, the other edit publishes.
@@ -460,6 +629,60 @@ test('a kill inside a local write whose relink fails again at the restart: the b
     const live = await treeOf(p, pub.c);
     assert.equal(live.get('a.txt')?.oid, A.get('a.txt'), 'a.txt was never published as deleted');
     assert.equal(await blobText(p, live, 'keep.txt'), 'keep, edited after the crash\n');
+  });
+});
+
+test('a kill inside a local write over a locally edited file whose relink fails again at the restart: the restart record keeps the .old bytes as its held side (R3-75\'s second arm) and the absence is never published', async () => {
+  await withCores('restart-local-relink-edited', { n: 1, files: FILES }, async (fx) => {
+    const p = fx.peers[0]!;
+    const A = new Map([...(await p.core.repo.readTreeMap(p.core.view!.base))].map(([k, v]) => [k, v.oid]));
+    // The disk holds an unpublished local edit of a.txt: the write's pre-image (and its .old) is not A[a.txt].
+    const LOCAL = row(BASE, 2, 'row 2 edited locally');
+    await writeWork(p, 'a.txt', LOCAL);
+    const local = await p.core.repo.hashBytes(buf(LOCAL), true);
+    assert.notEqual(local, A.get('a.txt'));
+    const target = await p.core.repo.hashBytes(buf(row(LOCAL, 4, 'row 4 by a local write')), true);
+    await prep(p);
+    await killedAt('apply.group.phase1', () => p.core.writer.writeLocalGroup([{ path: 'a.txt', expected: local, target }], 'test'));
+    assert.equal(await readWork(p, 'a.txt'), null, 'P1 moved a.txt to its .old');
+    p.fs.addRule({ op: 'link', pathIncludes: workPath(p, 'a.txt'), code: 'EPERM', times: 1 });
+    await restartCore(p);
+    const r = await startOk(p, 'restart');
+    assert.equal(r.restart?.restartRecords.length, 1, 'one restart record');
+    const rec = p.core.holds.nonTerminal().find((h) => h.id === r.restart!.restartRecords[0]);
+    assert.ok(rec !== undefined);
+    assert.deepEqual([rec.kind, rec.residence, rec.state, rec.paths], ['PATCH', 'ON_DISK', 'ACTIVE', ['a.txt']]);
+    // R3-75: the .old bytes differ from A[a.txt], so the record keeps them as its held side (Plan 2's shape): h1 = the .old blob,
+    // the only copy of the local edit; never ABSENT, which would drop them.
+    assert.equal('h0' in rec.blobs ? rec.blobs.h0['a.txt'] : undefined, A.get('a.txt'), 'h0 = A[a.txt]');
+    assert.equal(heldBlob(rec, 'a.txt'), local, 'h1 = the .old bytes (the local edit)');
+    assert.deepEqual(oldsIn(p), [], 'the .old went only after its record');
+    // The absence is observed, confirmed, captured and composed: MASK step 5 cannot reverse-merge a held edit out of an absent file
+    // (the whole-file form conflicts), so a.txt is withheld whole, the record becomes CONFLICTED (HLD-15) and keeps the bytes.
+    // Final review F9: Algorithm P then recomposes, and the rest of the group (keep.txt, captured with the absence) waits in a
+    // dependency PIN (HLD-42): nothing of the group publishes, so the CS never publishes without its deletion.
+    await writeWork(p, 'keep.txt', 'keep, edited after the crash\n');
+    await prep(p);
+    fx.advance(1_500);
+    await prep(p);
+    fx.advance(20_000);
+    const it = await prep(p, true);
+    const pair = await captureReady(p, it);
+    assert.ok(pair.paths.includes('a.txt'), 'the deletion was captured');
+    const tip0 = await remoteLiveCode(fx, p);
+    fx.advance(30_000);
+    const pub = await publishStep(p.core, await prep(p));
+    assert.equal(pub.outcome, 'landed', JSON.stringify(pub));
+    assert.equal(pub.c, null, `no code commit: keep.txt waits with the withheld absence: ${JSON.stringify(pub)}`);
+    assert.equal(await remoteLiveCode(fx, p), tip0, 'a.txt was never published as deleted');
+    assert.equal(pub.dependencyPins.length, 1);
+    const pin = p.core.holds.get(pub.dependencyPins[0]!)!;
+    assert.deepEqual([pin.guards.map((g) => g.name), pin.cs_ids], [[`dependency:${rec.id}`], [pair.csId]]);
+    assert.ok(pin.paths.includes('keep.txt'));
+    assert.equal(await p.core.repo.readBlob(heldBlob(pin, 'keep.txt') as Oid).then((b) => b.toString('utf8')), 'keep, edited after the crash\n', 'the PIN holds keep.txt\'s edit (H1 = R)');
+    const after = p.core.holds.get(rec.id)!;
+    assert.equal(after.state, 'CONFLICTED');
+    assert.equal(heldBlob(after, 'a.txt'), local, 'the local edit is still held');
   });
 });
 
@@ -556,7 +779,9 @@ test('final review FB-5: a kill after an apply wrote TIP[p] over two ON_DISK con
     const onDisk = (): string[] => p.core.holds.nonTerminal()
       .filter((h) => h.residence === 'ON_DISK' && h.state === 'CONFLICTED' && h.paths.includes('a.txt')).map((h) => h.id);
     await restartCore(p);
-    assert.equal(onDisk().length, 2, 'two ON_DISK conflict records of a.txt before the restart decides');
+    // Plan 3 HLD-07 / 05 P6 (registry attachOf, merge of the finished Plan 2): the apply's K4 on a.txt attaches to the ON_DISK
+    // publish-side record (one change, one id) instead of making a second record, so one ON_DISK conflict record holds a.txt.
+    assert.deepEqual(onDisk(), [pub.records[0]], 'the ON_DISK conflict record of a.txt (the publish-side K4, now with the apply stages) before the restart decides');
     await startOk(p, 'restart');
     assert.equal((await readWork(p, 'a.txt'))?.toString('utf8'), X_TEAM, 'TIP[p] is on disk');
     assert.deepEqual(onDisk(), [], 'both records are OFF_DISK');

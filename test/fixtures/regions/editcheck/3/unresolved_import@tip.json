@@ -1,0 +1,21 @@
+{
+  "name": "3/unresolved_import@tip",
+  "check": 3,
+  "lang": "python",
+  "expect": "fail",
+  "reason": "unresolved_import",
+  "line": 1,
+  "tipEqualsA": false,
+  "A": {
+    "m.py": "def n(x):\n    return x + 1\n\n\ndef other(x):\n    return x - 1\n",
+    "app.py": "def run(x):\n    return x\n"
+  },
+  "R": {
+    "m.py": "def n(x):\n    return x + 1\n\n\ndef other(x):\n    return x - 1\n",
+    "app.py": "from m import n\n\n\ndef run(x):\n    return n(x)\n"
+  },
+  "TIP": {
+    "m.py": "def other(x):\n    return x - 1\n",
+    "app.py": "def run(x):\n    return x\n"
+  }
+}

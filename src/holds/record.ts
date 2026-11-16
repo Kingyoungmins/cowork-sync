@@ -2,8 +2,14 @@
 // `records/<id>.json` blob in the local registry (src/holds/registry.ts): canonical JSON (RFC 8785) of exactly
 // the glossary §9 keys, an ABSENT side written as the string "ABSENT". parseRecord accepts only what
 // serializeRecord writes: the schema, Table 1's residence × state combinations and canonical bytes.
+//
+// Plan 3 (Task 1; R3-09, R3-12): the closed Table 3 guard table with the 05 §2 argument grammar and `{REASON}` keys, the
+// HLD-03 local_only causes and the 05 §2 whole-path test. Validation is Plan 2's: a guard name may be any text (a name
+// outside Table 3 loads as an unknown DECISION guard, HLD-05), INCOMING is ON_DISK ACTIVE or terminal, and the pathless
+// host-reject PIN of Plan 2 Task 14 stays the only empty-path record.
 import { canonicalBytes, type Json } from '../board/canonicalJson.js';
 import type { PeerId } from '../board/ids.js';
+import { isSecretLike, type ScopeClass } from '../data/scope.js';
 import { ABSENT, isOid, type OidOrAbsent } from '../git/oid.js';
 import { validId, validPathSyntax } from '../sec/validators.js';
 
@@ -27,22 +33,132 @@ export interface HoldRecord {
   age_anchor: AgeAnchor; proto: 1;
 }
 
-/** The guards Plan 2 creates (ruling R-03). */
-export type Plan2Guard = 'conflict' | 'restart' | 'phantom' | 'host-reject' | 'eol-bom' | 'join';
+// ---- Table 3: the closed guard table (05-holds §3.3, §2; HLD-05; ruling R3-09) ----------------------------------------
 
-/** 05-holds Table 3: eol-bom is a PREDICATE guard, the rest are DECISION guards. */
-export const PLAN2_GUARD_CLASS: Readonly<Record<Plan2Guard, 'PREDICATE' | 'DECISION'>> = Object.freeze({
-  conflict: 'DECISION', restart: 'DECISION', phantom: 'DECISION', 'host-reject': 'DECISION', 'eol-bom': 'PREDICATE', join: 'DECISION',
-});
+export type GuardClass = 'PREDICATE' | 'DECISION';
+/** 05-holds §2 `{REASON}` keys (Table 3's last column, plus `local` for a local_only record). */
+export type ReasonKey = 'answer' | 'bundle' | 'checks' | 'unstable' | 'incoming' | 'form' | 'markers' | 'local' | 'revert' | 'conflict' | 'git' | 'user' | 'wake-scope';
+export type GuardName = 'claim' | 'dependency' | 't0' | 'unreadable' | 'unstable' | 'lock' | 'unmaterializable' | 'eol-bom' | 'eol-form' | 'markers'
+  | 'local-only-conflict' | 'filter-failure' | 'secret-scan' | 'revert' | 'conflict' | 'claim-breach' | 'base-move' | 'join' | 'restart' | 'phantom'
+  | 'host-reject' | 'portability' | 'generated?' | 'collision' | 'quarantine-review' | 'wake-scope';
+/**
+ * One Table 3 row: class, the owner column verbatim, the `{REASON}` key, whether the guard withholds its path whole (05 §2),
+ * whether Table 3 names a human `--publish` among its releases, and whether the name takes a `:<arg>` (05 §2 grammar).
+ */
+export interface GuardRow { name: GuardName; cls: GuardClass; owner: string; key: ReasonKey; wholePath: boolean; humanRelease: boolean; takesArg: boolean; }
+
+const row = (name: GuardName, cls: GuardClass, owner: string, key: ReasonKey, wholePath = false, humanRelease = false, takesArg = false): GuardRow =>
+  Object.freeze({ name, cls, owner, key, wholePath, humanRelease, takesArg });
+
+/** 05-holds Table 3 in row order, owner column verbatim (HLD-05). */
+export const GUARD_TABLE: readonly GuardRow[] = Object.freeze([
+  row('claim', 'PREDICATE', 'HLD/REG', 'answer', false, false, true),
+  row('dependency', 'PREDICATE', 'HLD', 'bundle', false, false, true),
+  row('t0', 'PREDICATE', 'HLD/REG', 'checks'),
+  row('unreadable', 'PREDICATE', 'HLD/ENG', 'unstable'),
+  row('unstable', 'PREDICATE', 'HLD/ENG', 'unstable'),
+  row('lock', 'PREDICATE', 'HLD/ENG', 'incoming'),
+  row('unmaterializable', 'PREDICATE', 'DAT', 'incoming'),
+  row('eol-bom', 'PREDICATE', 'DAT', 'form', true),
+  row('eol-form', 'PREDICATE', 'DAT', 'form'),
+  row('markers', 'PREDICATE', 'DAT/HLD', 'markers', true),
+  row('local-only-conflict', 'PREDICATE', 'HLD', 'incoming'),
+  row('filter-failure', 'DECISION', 'DAT/SEC', 'local', false, true),
+  row('secret-scan', 'DECISION', 'SEC (local human, glossary §16)', 'local', false, true),
+  row('revert', 'DECISION', 'HLD', 'revert', false, true),
+  row('conflict', 'DECISION', 'DAT', 'conflict', false, true),
+  row('claim-breach', 'DECISION', 'DAT/COO', 'conflict', false, true),
+  row('base-move', 'DECISION', 'ENG', 'git'),
+  row('join', 'DECISION', 'LIF', 'user', false, true),
+  row('restart', 'DECISION', 'ENG', 'git', false, true),
+  row('phantom', 'DECISION', 'ENG', 'user', false, true),
+  row('host-reject', 'DECISION', 'ENG', 'user'),
+  row('portability', 'DECISION', 'DAT', 'user', true),
+  row('generated?', 'DECISION', 'DAT', 'user', true, true, true),
+  row('collision', 'DECISION', 'DAT', 'user', false, true, true),
+  row('quarantine-review', 'DECISION', 'SEC (local human)', 'user'),
+  row('wake-scope', 'DECISION', 'local human', 'wake-scope', false, true),
+]);
+
+const ROW_INDEX: ReadonlyMap<string, number> = new Map(GUARD_TABLE.map((r, i) => [r.name, i] as const));
+
+/** The name part of `<name>[:<arg>]`. */
+function namePart(full: string): string {
+  const colon = full.indexOf(':');
+  return colon < 0 ? full : full.slice(0, colon);
+}
+
+/** Row of `<name>[:<arg>]`; null for a name outside Table 3 (an unknown DECISION guard: never released or transitioned here, HLD-05). */
+export function guardRow(full: string): GuardRow | null {
+  const i = ROW_INDEX.get(namePart(full));
+  return i === undefined ? null : GUARD_TABLE[i]!;
+}
+
+/** claim_id: 16 lowercase base32 characters (glossary §2 "claim"). */
+const CLAIM_ID = /^[a-z2-7]{16}$/;
+/** 05 §2 guard arguments: required for claim and dependency, the two human answers for generated? and collision, none elsewhere. */
+const ARG_RULES: Readonly<Partial<Record<GuardName, { required: boolean; ok: (arg: string) => boolean }>>> = {
+  claim: { required: true, ok: (a) => CLAIM_ID.test(a) },
+  dependency: { required: true, ok: (a) => validId('ulid', a) },
+  'generated?': { required: false, ok: (a) => a === 'exclude' },
+  collision: { required: false, ok: (a) => a === 'keep' },
+};
+
+/** A Table 3 guard with its fixed class and owner; throws on an unknown name or a malformed argument (05 §2 grammar; `generated?:exclude`, `collision:keep`). */
+export function makeGuard(full: string): Guard {
+  if (typeof full !== 'string') throw new TypeError(`guard: ${String(full)} is not a string`);
+  const r = guardRow(full);
+  if (r === null) throw new TypeError(`guard: ${JSON.stringify(full)} is not a Table 3 guard`);
+  const colon = full.indexOf(':');
+  const rule = ARG_RULES[r.name];
+  if (colon < 0) {
+    if (rule?.required === true) throw new TypeError(`guard: ${r.name} needs an argument`);
+  } else if (rule === undefined || !rule.ok(full.slice(colon + 1))) {
+    throw new TypeError(`guard: ${JSON.stringify(full)} has a malformed argument`);
+  }
+  return { name: full, class: r.cls, owner: r.owner };
+}
+
+/** The `<arg>` of a guard, or null. */
+export function guardArg(g: Guard): string | null {
+  const colon = g.name.indexOf(':');
+  return colon < 0 ? null : g.name.slice(colon + 1);
+}
+
+/** A guard whose name is outside Table 3 (written by a newer daemon): a DECISION guard this daemon never releases or transitions (HLD-05). */
+export function isUnknownGuard(g: Guard): boolean {
+  return guardRow(g.name) === null;
+}
+
+/** The guards Plan 2 creates (ruling R-03), a view of GUARD_TABLE. */
+export type Plan2Guard = Extract<GuardName, 'conflict' | 'restart' | 'phantom' | 'host-reject' | 'eol-bom' | 'join'>;
+
+/** 05-holds Table 3's class of the Plan 2 guards (eol-bom PREDICATE, the rest DECISION), derived from GUARD_TABLE. */
+export const PLAN2_GUARD_CLASS: Readonly<Record<Plan2Guard, GuardClass>> = Object.freeze(Object.fromEntries(
+  (['conflict', 'restart', 'phantom', 'host-reject', 'eol-bom', 'join'] as const).map((n) => [n, guardRow(n)!.cls] as const),
+) as Record<Plan2Guard, GuardClass>);
 
 /** 05-holds §2 "whole-path guard" (by name, without a `:<arg>`); every guard of a local_only record withholds its path whole too (MASK step 2). */
-export const WHOLE_PATH_GUARDS: ReadonlySet<string> = Object.freeze(new Set(['eol-bom', 'generated?', 'portability', 'markers']));
+export const WHOLE_PATH_GUARDS: ReadonlySet<string> = Object.freeze(new Set(GUARD_TABLE.filter((r) => r.wholePath).map((r) => r.name)));
 
 /** Terminal states carry no residence (glossary §9, 05-holds Table 1). */
 export const TERMINAL_STATES: ReadonlySet<HoldState> = Object.freeze(new Set<HoldState>(['SUBSUMED', 'GONE', 'RESOLVED_PUBLISH', 'RESOLVED_DISCARD']));
 
 export function isTerminal(r: HoldRecord): boolean {
   return TERMINAL_STATES.has(r.state);
+}
+
+/**
+ * A BlobMap entry by own key: `__proto__` and `constructor` are valid root paths, so a plain `m[p]` read (which finds
+ * Object.prototype members) or write (which `__proto__` turns into a prototype change) is never used on a BlobMap.
+ */
+export function blobAt(m: BlobMap, path: string): OidOrAbsent | undefined {
+  return Object.prototype.hasOwnProperty.call(m, path) ? m[path] : undefined;
+}
+
+/** Sets a BlobMap entry as an own enumerable property (see blobAt). */
+export function setBlob(m: BlobMap, path: string, oid: OidOrAbsent): void {
+  Object.defineProperty(m, path, { value: oid, enumerable: true, writable: true, configurable: true });
 }
 
 /** The held version: h1, or s2 (LOCAL) for a stage record. */
@@ -52,8 +168,89 @@ export function heldSide(r: HoldRecord): BlobMap {
 
 /** The name part of a guard `<name>[:<arg>]`. */
 export function guardName(g: Guard): string {
-  const colon = g.name.indexOf(':');
-  return colon < 0 ? g.name : g.name.slice(0, colon);
+  return namePart(g.name);
+}
+
+/** Table 3 row index of a guard; an unknown name ranks after every row (05 §2 `{REASON}`, Task 1). */
+function rank(g: Guard): number {
+  return ROW_INDEX.get(guardName(g)) ?? GUARD_TABLE.length;
+}
+
+/**
+ * {REASON} key (05 §2): 'local' for a local_only record, else the key of the first DECISION guard in Table 3 row order, else
+ * of the first PREDICATE guard (record order ignored); `dependency:<id>` → 'answer' when record <id> carries a `claim` guard
+ * (a SHADOW PATCH or a claim PIN), else 'bundle'; an unknown name is a DECISION guard ranked after every row → 'user';
+ * null for an empty guard set.
+ */
+export function reasonKey(r: HoldRecord, lookup: (id: string) => HoldRecord | undefined): ReasonKey | null {
+  if (r.local_only) return 'local';
+  if (r.guards.length === 0) return null;
+  const isDecision = (g: Guard): boolean => isUnknownGuard(g) || guardRow(g.name)!.cls === 'DECISION';
+  const decision = r.guards.filter(isDecision);
+  const pool = decision.length > 0 ? decision : r.guards;
+  const first = [...pool].sort((a, b) => rank(a) - rank(b))[0]!;
+  const row = guardRow(first.name);
+  if (row === null) return 'user';
+  if (row.name === 'dependency') {
+    const target = lookup(guardArg(first) ?? '');
+    const viaClaim = target !== undefined && (target.kind === 'PATCH' || target.kind === 'PIN') && target.guards.some((g) => guardName(g) === 'claim');
+    return viaClaim ? 'answer' : 'bundle';
+  }
+  return row.key;
+}
+
+export type LocalOnlyCause = 'filter-failure' | 'secret-scan' | 'secret-like' | 'not-live' | 'marker-companion';
+
+/**
+ * HLD-03 / DAT-31: why the record is local_only at this rev ([] = it is not); secret-like per the U10 list in src/data/scope.ts.
+ * A LOCAL_ONLY scope class counts as 'not-live' only when otherLocalOnly(p) — another non-terminal ON_DISK local_only record
+ * (id ≠ r.id) covers p, computed by the registry — else as LIVE (r's own effect, D5 row 9). A path the scope cannot classify
+ * (scopeOf throws: a scope error, attributes never requested) counts as 'not-live': local_only never fails open (R3-71).
+ * A record carrying `portability` counts as 'not-live' too (final review F3): its name is NOT_ADMITTED by D6 rule 2.6 for exactly as
+ * long as the guard holds (portabilityStep releases it when D7 passes), while the registry's scope is D5 (scopeOfTracked, no D7 row),
+ * which classes a stageable name LIVE once a later iteration requested its attributes (ensureRecordAttrs) — without this every later
+ * rev (an age flush at a clean exit, an attach, a guard) would make the record mirrored and put the not-admitted bytes into held/.
+ * Causes in declaration order.
+ */
+export function localOnlyCauses(
+  r: Pick<HoldRecord, 'paths' | 'guards'>, scopeOf: (path: string) => ScopeClass, isCompanion: boolean, otherLocalOnly: (path: string) => boolean,
+): LocalOnlyCause[] {
+  const out: LocalOnlyCause[] = [];
+  const names = new Set(r.guards.map(guardName));
+  if (names.has('filter-failure')) out.push('filter-failure');
+  if (names.has('secret-scan')) out.push('secret-scan');
+  if (r.paths.some((p) => isSecretLike(p))) out.push('secret-like');
+  const notLive = (p: string): boolean => {
+    let cls: ScopeClass;
+    try {
+      cls = scopeOf(p);
+    } catch {
+      return true;   // R3-71: no bytes are mirrored for a path we cannot classify
+    }
+    return cls === 'LOCAL_ONLY' ? otherLocalOnly(p) : cls !== 'LIVE';
+  };
+  if (names.has('portability') || r.paths.some(notLive)) out.push('not-live');
+  if (isCompanion) out.push('marker-companion');
+  return out;
+}
+
+/** 05 §2 whole-path guards: eol-bom, generated? (any argument), portability, markers, and every guard of a local_only record. */
+export function hasWholePathGuard(r: HoldRecord): boolean {
+  if (r.local_only && r.guards.length > 0) return true;
+  return r.guards.some((g) => WHOLE_PATH_GUARDS.has(guardName(g)));
+}
+
+/**
+ * A K4 record (03-data DAT-43) that still IS the conflict function's TAKE_TIP displacement: stage blobs, CONFLICTED, still carrying the
+ * displacement guard `conflict` (ruling R3-EF4-14; the engine's other readings of a pending displacement key on the same guard: apply.ts
+ * onDiskConflictRecords, evaluate.ts "displacement pending"). Only such a record is INV-HLD-ATOMIC-PUB's exception (c) (glossary §24
+ * default 3): it never pins its group (HLD-42). Stage blobs are a lasting mark of a K4-born record, the displacement a passing one:
+ * HLD-17's RESTORE releases `conflict` and the record keeps its stages, so from then on it withholds like any other record (`markers`
+ * after a conflicted restore, MASK step 4 while it stays CONFLICTED). HLD-42's OFF_DISK `claim-breach` pin is Plan 4's (no such guard in
+ * Plan 3) and is not read here.
+ */
+export function isK4Displacement(r: HoldRecord): boolean {
+  return 's2' in r.blobs && r.state === 'CONFLICTED' && r.guards.some((g) => guardName(g) === 'conflict');
 }
 
 // ---- validation ----------------------------------------------------------------------------------------

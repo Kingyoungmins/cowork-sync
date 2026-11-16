@@ -427,11 +427,24 @@ test('one ENG-36 state update sets A, LA_C := TIP, LA_B := T, snap, pending and 
     const view = core.view!;
     assert.equal(view.laC, live, 'LA_C := TIP');
     assert.equal(view.laB, board, 'LA_B := T');
-    assert.equal(view.snap, it.mat!.sDisk, 'snap := the S_disk the apply merged against');
     assert.deepEqual(view.meta.pending, {});
     assert.equal(view.intent.kind, 'none');
     const A = await stateA(p);
     const tipTree = await core.repo.readTreeMap((await core.repo.readCommit(live)).tree);
+    // EF2 D4: snap := the S_disk the apply merged against, with this transition's private-index edits — each verified write's entry
+    // (the writer's round trip), each verified deletion removed, the DAT-26 index-only entries — so a restart's reseed from state:snap
+    // reproduces the round trip (05 D2 step 1's prev[p]). Here: notes.md's concat and src/k.txt's TIP (written), gen/out.txt's TIP
+    // (unmanaged_follow, index only); every other path keeps its S_disk entry.
+    const WRITTEN = ['gen/out.txt', 'notes.md', 'src/k.txt'];
+    const snap = await core.repo.readTreeMap(view.snap);
+    const index = await core.repo.listIndex(core.path(`${core.refs.e}.index`));
+    for (const path of WRITTEN) assert.equal(snap.get(path)?.oid, index.get(path)?.oid, `snap[${path}] is the private index's round-tripped entry`);
+    assert.equal(snap.get('src/k.txt')?.oid, tipTree.get('src/k.txt')?.oid);
+    assert.equal(snap.get('gen/out.txt')?.oid, tipTree.get('gen/out.txt')?.oid);
+    assert.equal(snap.get('notes.md')?.oid, await core.repo.hashBytes(buf('# Notes\n\nalpha\nteam line\nlocal line\n'), false));
+    const sDisk = it.mat!.sDiskMap;
+    assert.deepEqual([...snap.keys()].filter((x) => !WRITTEN.includes(x)).sort(), [...sDisk.keys()].filter((x) => !WRITTEN.includes(x)).sort());
+    for (const [path, e] of sDisk) if (!WRITTEN.includes(path)) assert.equal(snap.get(path)?.oid, e.oid, `snap[${path}] = S_disk[${path}]`);
     for (const path of ['notes.md', 'src/k.txt', 'gen/out.txt']) assert.equal(A.get(path)?.oid, tipTree.get(path)?.oid, `A[${path}] := TIP[${path}]`);
     // (a) the concat write keeps CS notes ready with R[p] == M_disk[p] (the verified-written concat) and A_cap == A_new.
     assert.deepEqual(view.ready.map((x) => x.csId), [csNotes]);
@@ -752,7 +765,13 @@ test('final review FB-5: a publish-side K4 record whose LOCAL the user edited ag
     const { r } = await apply(fx, p);
     assert.deepEqual(r.written, ['src/x.ts']);
     assert.equal(r.records.length, 1);
-    assert.notEqual(r.records[0], r1, 'R2 is a second record');
+    // Plan 3 HLD-07 / 05 P6 (registry attachOf, merge of the finished Plan 2): a K4 on a path set an ON_DISK PATCH already holds
+    // transitions that record, so the apply's TAKE_TIP is R1 again — one change, one id — carrying the apply's own stages (s2 = the
+    // re-edited LOCAL); Plan 2's registry made a second record R2 here. FB-5's rule (every ON_DISK conflict record of p goes
+    // OFF_DISK) is checked below either way.
+    assert.equal(r.records[0], r1, 'HLD-07: the apply K4 attaches to R1');
+    const r1Blobs = p.core.holds.get(r1)!.blobs;
+    assert.equal('s2' in r1Blobs ? r1Blobs.s2['src/x.ts'] : undefined, await p.core.repo.hashBytes(buf(X_MORE), false), 'R1 holds the apply s2 (the re-edited LOCAL)');
     assert.deepEqual(await readWork(p, 'src/x.ts'), buf(X_TEAM), 'TIP[p] is on disk');
     assert.deepEqual(onDiskConflicts(p, 'src/x.ts'), [], 'no LOCAL of any record is on disk: every one is OFF_DISK (INV-HLD-OFFDISK)');
     // A later edit of x on top of TIP is published.
@@ -767,7 +786,7 @@ test('final review FB-5: a publish-side K4 record whose LOCAL the user edited ag
   });
 });
 
-test('final review (ledger Task 13:234): under core.ignorecase a TIP holding two spellings of one new file (Notes.txt + notes.txt from a case-sensitive teammate) makes both not applicable unmaterializable, so the rest of their change-set applies instead of deferring race (EEXIST at the second create) forever', async () => {
+test('final review (ledger Task 13:234), D7 rule 4 against this disk (controller ruling at the Plan 2 final merge): under core.ignorecase a TIP holding two spellings of one new file (Notes.txt + notes.txt from a case-sensitive teammate) applies the first spelling and makes each later one not applicable unmaterializable (rule 4), so the change-set applies instead of deferring race (EEXIST at the second create) forever', async () => {
   const fx = await makeCores('apply-case-pair', { n: 1, files: FILES });
   try {
     const p = fx.peers[0]!;
@@ -778,27 +797,42 @@ test('final review (ledger Task 13:234): under core.ignorecase a TIP holding two
     await fx.pushTeamChange({ 'Notes.txt': buf('upper\n'), 'notes.txt': buf('lower\n'), 'src/a.ts': buf('export const a = 2;\n') });
     const { r } = await apply(fx, p);
     assert.equal(r.ran, true);
-    assert.equal(r.notApplicable.get('Notes.txt'), 'unmaterializable');
+    // D7 rule 4 against this disk: of the pair the first spelling in code-unit order ('N' < 'n') is created; the later one is not.
+    assert.equal(r.notApplicable.has('Notes.txt'), false, 'the first spelling applies');
     assert.equal(r.notApplicable.get('notes.txt'), 'unmaterializable');
-    assert.deepEqual(r.written, ['src/a.ts'], 'the rest of the change-set applies');
+    assert.equal(r.notApplicableRules.get('notes.txt'), 4, 'the later spelling names D7 rule 4 (INCOMING_UNMATERIALIZABLE)');
+    assert.deepEqual(r.written, ['Notes.txt', 'src/a.ts'], 'the first spelling and the rest of the change-set apply');
     assert.equal(r.deferred.size, 0, 'no race deferral');
     assert.deepEqual(await readWork(p, 'src/a.ts'), buf('export const a = 2;\n'));
-    assert.equal(await readWork(p, 'notes.txt'), null, 'neither spelling is written');
-    assert.deepEqual(p.core.view!.meta.pending, { 'Notes.txt': 'unmaterializable', 'notes.txt': 'unmaterializable' });
+    assert.deepEqual(await readWork(p, 'Notes.txt'), buf('upper\n'));
+    const names = readdirSync(p.deps.paths.workTree);
+    assert.ok(names.includes('Notes.txt') && !names.includes('notes.txt'), `one file, the first spelling (${JSON.stringify(names)})`);
+    assert.deepEqual(p.core.view!.meta.pending, { 'notes.txt': 'unmaterializable' });
     const A = await stateA(p);
-    assert.equal(A.has('Notes.txt') || A.has('notes.txt'), false, 'A keeps its entries (none)');
-    // P2-NA-TRIGGER: the pair's per-loop re-check (unmaterializableHere) holds, so it alone never triggers an apply.
-    assert.equal(applyNeeded(p.core, await prep(p, false)), false, 'the pair alone triggers no apply');
-    // A later teammate change elsewhere applies as usual; the pair stays not applicable while TIP holds both.
+    assert.equal(A.has('Notes.txt'), true, 'A follows TIP for the first spelling');
+    assert.equal(A.has('notes.txt'), false, 'A keeps its entry (none) for the later one');
+    // P2-NA-TRIGGER: the later spelling's per-loop re-check (unmaterializableHere) holds, so it alone never triggers an apply.
+    assert.equal(applyNeeded(p.core, await prep(p, false)), false, 'the later spelling alone triggers no apply');
+    // A later teammate change elsewhere applies as usual; the later spelling stays not applicable while TIP holds both.
     await fx.pushTeamChange({ 'README.md': buf('# apply fixture, later\n') });
     const next = await apply(fx, p);
     assert.deepEqual(next.r.written, ['README.md']);
     assert.equal(next.r.notApplicable.get('notes.txt'), 'unmaterializable');
-    // One spelling leaves TIP: the other is an ordinary new file again.
+    assert.equal(next.r.deferred.size, 0, 'still no race deferral');
+    // The first spelling leaves TIP: the other is an ordinary new file again — on this disk a case-only rename, which may
+    // take a second apply (the creation collides with the old spelling's file until that apply deleted it).
     await fx.pushTeamChange({ 'Notes.txt': null });
-    const last = await apply(fx, p);
-    assert.deepEqual(last.r.written, ['notes.txt']);
+    const written: string[] = [];
+    for (let i = 0; i < 3 && !written.includes('notes.txt'); i++) {
+      const step = await apply(fx, p);
+      assert.equal(step.r.deferred.size, 0, `apply ${i}: no race deferral`);
+      written.push(...step.r.written);
+    }
+    assert.ok(written.includes('notes.txt'), `the later spelling is written once it is alone (${JSON.stringify(written)})`);
     assert.deepEqual(await readWork(p, 'notes.txt'), buf('lower\n'));
+    const after = readdirSync(p.deps.paths.workTree);
+    assert.ok(after.includes('notes.txt') && !after.includes('Notes.txt'), `one file, the remaining spelling (${JSON.stringify(after)})`);
+    assert.deepEqual(p.core.view!.meta.pending, {});
   } finally {
     await fx.cleanup();
   }

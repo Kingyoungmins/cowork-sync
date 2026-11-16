@@ -1,0 +1,4 @@
+// CCI-03 (5): a hook output naming permissionDecision, here with the value "defer" (src/claude/client/output.ts).
+export function encode(): string {
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'defer' } });
+}

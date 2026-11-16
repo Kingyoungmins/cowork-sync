@@ -20,6 +20,11 @@ import {
 import type { Oid } from '../../src/git/oid.js';
 import { foldAll, generateBoard, genDraft } from '../helpers/foldBoard.js';
 
+/** R3-55: every test of this file carries the 10-minute node:test timeout. */
+const T10 = { timeout: 10 * 60_000 };
+/** The terminal hold states (glossary §9). */
+const HOLD_TERMINAL: ReadonlySet<string> = new Set(['SUBSUMED', 'GONE', 'RESOLVED_PUBLISH', 'RESOLVED_DISCARD']);
+
 const SELF = '5e1f5e1f5e1f5e1f5e1f5e1f5e1f5e1f';
 const OTHER = '07e207e207e207e207e207e207e207e2';
 const E1 = 'e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1';
@@ -91,7 +96,7 @@ const protocolArb = fc.oneof(
 const csArb = fc.array(fc.record({ key: fc.constantFrom('Cowork-CS', 'Cowork-CS-Paths', 'X'), value: fc.string({ maxLength: 60 }) }), { maxLength: 4 })
   .map((t) => parseCsTrailers(t).cs);
 
-test('random bytes, truncated JSON, deep nesting and huge numbers never throw, and a 1,000-op commit folds in ≤ 50 ms', () => {
+test('random bytes, truncated JSON, deep nesting and huge numbers never throw, and a 1,000-op commit folds in ≤ 50 ms', T10, () => {
   const states = [initialFoldState(PROTOCOL), seededState()];
   fc.assert(
     fc.property(fc.constantFrom(0, 1), writerArb, fc.array(lineArb, { maxLength: 40 }), protocolArb, csArb, fc.constantFrom(SELF, OTHER), (si, writer, lines, protocol, cs, self) => {
@@ -151,10 +156,12 @@ test('random bytes, truncated JSON, deep nesting and huge numbers never throw, a
   assert.ok(median <= 50, `a 1,000-op commit folded in ${median.toFixed(1)} ms (runs: ${times.map((t) => t.toFixed(1)).join(', ')})`);
 });
 
-test('folds of one 600-commit board from genesis and from each checkpoint are byte-identical at every height, and no non-terminal record is compacted', () => {
+// Plan 3 Task 3: the property also folds `hold` ops — a run draws the generator's hold profile with probability 1/2, and the
+// example (seed 2,024 with holds) makes at least one run of every execution a hold board.
+test('folds of one 600-commit board from genesis and from each checkpoint are byte-identical at every height, and no non-terminal record is compacted', T10, () => {
   fc.assert(
-    fc.property(fc.integer({ min: 0, max: 2 ** 31 - 1 }), (seed) => {
-      const gen = generateBoard(`fold-prop-${seed}`, 600);
+    fc.property(fc.integer({ min: 0, max: 2 ** 31 - 1 }), fc.boolean(), (seed, holds) => {
+      const gen = generateBoard(`fold-prop-${seed}`, 600, { holds });
       const self = gen.peers[1]!;
       const states = foldAll(gen, self, L0);
       const bytes = states.map((s) => serializeFold(s));
@@ -189,6 +196,14 @@ test('folds of one 600-commit board from genesis and from each checkpoint are by
           assert.ok(ev.height <= h - COMPACT_AGE);
         }
         for (const p of Object.keys(prev.peers)) assert.ok(cur.peers[p] !== undefined, `peer ${p} vanished`);
+        // Holds (PRO-27): a hold leaves only by compaction, terminal and at least COMPACT_AGE past its terminal_height.
+        for (const [hid, x] of Object.entries(prev.holds)) {
+          if (cur.holds[hid] !== undefined) continue;
+          dropped++;
+          assert.equal(h % CHECKPOINT_EVERY, 0, `seed ${seed}: hold ${hid} vanished at height ${h}`);
+          assert.ok(HOLD_TERMINAL.has(x.state), `seed ${seed}: a ${x.state} hold was compacted at ${h}`);
+          assert.ok(x.terminal_height !== undefined && x.terminal_height <= h - COMPACT_AGE, `seed ${seed}: hold ${hid} compacted too young at ${h}`);
+        }
       }
       assert.ok(dropped >= 2, 'compaction at 512 dropped the height-0 event and the B0 seat');
       assert.ok(Object.values(states[511]!.events).some((e) => e.height === 0));
@@ -196,7 +211,14 @@ test('folds of one 600-commit board from genesis and from each checkpoint are by
       // PRO-27 for seats: the seat B0 ended at height 0 is still there at 511 and gone at 512.
       assert.deepEqual(states[511]!.seats[gen.b0SeatKey], { status: 'ended', permission_mode: 'default', ended_height: 0 }, `seed ${seed}: the B0 seat at 511`);
       assert.equal(states[512]!.seats[gen.b0SeatKey], undefined, `seed ${seed}: the B0 seat was compacted at 512`);
+      if (holds) {
+        // The hold profile: the fold holds records, and the hold B0 ended at height 0 is compacted at 512.
+        assert.ok(gen.b0HoldId !== undefined, `seed ${seed}: a hold board`);
+        assert.ok(Object.keys(states[599]!.holds).length > 0, `seed ${seed}: hold records were folded`);
+        assert.equal(states[511]!.holds[gen.b0HoldId]?.terminal_height, 0, `seed ${seed}: the B0 hold at 511`);
+        assert.equal(states[512]!.holds[gen.b0HoldId], undefined, `seed ${seed}: the B0 hold was compacted at 512`);
+      }
     }),
-    { numRuns: 6 },
+    { numRuns: 6, examples: [[2_024, true]] },
   );
 });

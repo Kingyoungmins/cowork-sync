@@ -2,6 +2,11 @@
 // (recursively, sorted by code unit) and runs them with `tsx --test`.
 // Needed because Node 20's `node --test` does not expand glob patterns and
 // npm runs scripts through cmd.exe on Windows, which does not expand them either.
+//
+// `--sim-full` (first argument; Plan 3 Task 16, R3-55): `npm run test:sim` — the same run with TEST_SIM_FULL=1 in every test file's
+// environment, set here so the script is cross-platform with no dependency (cmd.exe has no `VAR=x cmd`): every multi-seed SIM test
+// runs all its seeds (the fuzz all its trials) instead of its first. On Node 20-23, where --test-timeout is a budget per test file
+// (testFlags.mjs), that budget becomes SIM_FULL_FILE_BUDGET_MS unless COWORK_TEST_TIMEOUT_MS is set: a full-form file runs for hours.
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -30,10 +35,21 @@ function tsxCliPath() {
   return join(dirname(pkgPath), bin);
 }
 
-const dirs = process.argv.slice(2);
+/** The budget per test file of a --sim-full run on Node 20-23: sim-exit.yml's test:sim step timeout (330 min). */
+const SIM_FULL_FILE_BUDGET_MS = 330 * 60_000;
+
+const args0 = process.argv.slice(2);
+const simFull = args0[0] === '--sim-full';
+const dirs = simFull ? args0.slice(1) : args0;
 if (dirs.length === 0) {
-  process.stderr.write('usage: node tools/test/run-tests.mjs <dir> [<dir>...]\n');
+  process.stderr.write('usage: node tools/test/run-tests.mjs [--sim-full] <dir> [<dir>...]\n');
   process.exit(2);
+}
+if (simFull) {
+  process.env.TEST_SIM_FULL = '1';
+  if (process.env.COWORK_TEST_TIMEOUT_MS === undefined && testTimeout(process.versions.node, process.env).scope === 'file') {
+    process.env.COWORK_TEST_TIMEOUT_MS = String(SIM_FULL_FILE_BUDGET_MS);
+  }
 }
 const files = [];
 for (const d of dirs) collect(resolve(repoRoot, d), files);
