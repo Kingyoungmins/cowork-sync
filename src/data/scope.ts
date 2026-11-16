@@ -15,9 +15,11 @@ export interface ScopeInputs {
   config: TeamConfig;
   /** Names with merge.<name>.driver configured. */
   mergeDrivers: ReadonlySet<string>;
-  /** Non-terminal local_only records (empty in Plan 2). */
+  /** Paths of non-terminal ON_DISK local_only records (empty in Plan 2; R3-21). */
   localOnlyPaths: ReadonlySet<string>;
-  /** User core.hooksPath as a repo-relative directory (quarantine set). */
+  /** D5 row 9's reason for a localOnlyPaths path (DAT-31: one reason per path, from its record's guard); absent → 'secret-like' as in Plan 2 (Plan 3 Task 2). */
+  localOnlyReason?: (path: string) => 'secret-scan' | 'filter-failure' | 'secret-like';
+  /** User core.hooksPath as a repo-relative directory (quarantine set); '' for the work-tree root (its hook names only, isQuarantined). */
   hooksPathDir: string | null;
 }
 
@@ -247,17 +249,49 @@ function isTemp(path: string): boolean {
   return TEMP_PATTERNS.some((p) => wildmatch(p, path, true) || (p.includes('/') && wildmatch(`**/${p}`, path, true)));
 }
 
-function isSecretLike(path: string): boolean {
+/** The U10 secret-like test over SECRET_LIKE_PATTERNS, case-insensitive (glossary §16); localOnlyCauses (src/holds/record.ts) reads it too. */
+export function isSecretLike(path: string): boolean {
   return matchesAny(SECRET_LIKE_PATTERNS, path, true);
 }
 
+/** NTFS 8.3 short-name shape: 1–6 characters without '~' or '.', '~' and digits, an optional 1–3 character extension. */
+const SHORT_NAME = /^[^~.]{1,6}~[0-9]+(?:\.[^.]{1,3})?$/;
+
+/**
+ * Ruling R3-FF2-F1 (SEC-31): a path component an NTFS volume with 8.3 names on may resolve to another name — `CLAUDE~1`
+ * is `.claude`, `GITHUB~1` is `.github`, `SETTIN~1.JSO` is `settings.json` — so a name-only match would class the alias
+ * LIVE and write through it into a quarantined original. Shape only, case-insensitive (the shape has no letters), on EVERY
+ * platform (A is shared with Windows peers), with isDotGitAlias's trailing rule (Windows strips trailing dots and spaces).
+ * `git~<digits>` stays isDotGitAlias's (P2-DOTGIT: never admitted, always carried — stronger than a quarantine).
+ */
+function isShortNameAlias(component: string): boolean {
+  if (isDotGitAlias(component)) return false;
+  return SHORT_NAME.test(component.replace(/[. ]+$/, ''));
+}
+
+/**
+ * githooks(5)'s hook names (git 2.43–2.47): the files git runs from a core.hooksPath directory. Matched case-insensitively and with
+ * an optional `.exe` (Git for Windows also runs `<hook>.exe`) when that directory is the work-tree root (isQuarantined, '').
+ */
+const ROOT_HOOK_NAMES: ReadonlySet<string> = new Set([
+  'applypatch-msg', 'pre-applypatch', 'post-applypatch', 'pre-commit', 'pre-merge-commit', 'prepare-commit-msg', 'commit-msg',
+  'post-commit', 'pre-rebase', 'post-checkout', 'post-merge', 'pre-push', 'pre-receive', 'update', 'proc-receive', 'post-receive',
+  'post-update', 'reference-transaction', 'push-to-checkout', 'pre-auto-gc', 'post-rewrite', 'sendemail-validate', 'fsmonitor-watchman',
+  'p4-changelist', 'p4-prepare-changelist', 'p4-post-changelist', 'p4-pre-submit', 'post-index-change',
+]);
+
 /**
  * Glossary §16 quarantine set (case-insensitive: on a case-folding disk `.Claude/` is `.claude/`, and
- * a wider match can only withhold more) plus the user's `core.hooksPath` directory and below.
+ * a wider match can only withhold more) plus the user's `core.hooksPath` directory and below, plus any path with an
+ * 8.3 short-name component (isShortNameAlias: it may name a quarantined file on a Windows peer's disk).
  * New symlinks and submodules are decided by the callers from the entry mode.
  */
 export function isQuarantined(path: string, hooksPathDir: string | null): boolean {
   if (matchesAny(QUARANTINE_PATTERNS, path, true)) return true;
+  if (path.split('/').some(isShortNameAlias)) return true;
+  // Integration I-3 (r2 rereview F): '' is a core.hooksPath of the work-tree root ('.', or its absolute path), where quarantining
+  // the whole directory would stop all sync: the standard hook file names at the root are QUARANTINED instead (fail closed).
+  if (hooksPathDir === '') return !path.includes('/') && ROOT_HOOK_NAMES.has(path.toLowerCase().replace(/\.exe$/, ''));
   if (hooksPathDir !== null && hooksPathDir.length > 0) {
     const dir = hooksPathDir.replace(/\/+$/, '').toLowerCase();
     const lower = path.toLowerCase();
@@ -301,7 +335,8 @@ function componentOk(c: string): boolean {
   return Buffer.byteLength(c, 'utf8') <= 255;
 }
 
-const collisionKey = (x: string): string => x.normalize('NFC').toUpperCase().toLowerCase();
+/** D7 rule 4's comparison key: NFC, then upper-then-lower case (exported for the receive side's rule 4, core.ts receivePortRule; Plan 3 Task 6). */
+export const collisionKey = (x: string): string => x.normalize('NFC').toUpperCase().toLowerCase();
 
 /** The path and every directory prefix of it. */
 function nameAndPrefixes(path: string): string[] {
@@ -354,7 +389,7 @@ export function scopeOfTracked(path: string, mode: FileMode, size: number, inp: 
   if (basename(path) === '.gitignore') return scope('SAVE_ONLY', 'save-only'); // 6
   if (a.merge !== null && inp.mergeDrivers.has(a.merge)) return scope('SAVE_ONLY', 'merge-driver'); // 7
   if (size >= HUGE_BYTES) return scope('SAVE_ONLY', 'huge'); // 8
-  if (inp.localOnlyPaths.has(path)) return scope('LOCAL_ONLY', 'secret-like'); // 9: the record's guard is not known here
+  if (inp.localOnlyPaths.has(path)) return scope('LOCAL_ONLY', inp.localOnlyReason?.(path) ?? 'secret-like'); // 9: per its record's guard
   return LIVE_SCOPE; // 10: tracked-in-live paths are exempt from the new-file cap
 }
 

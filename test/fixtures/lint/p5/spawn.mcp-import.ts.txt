@@ -1,0 +1,3 @@
+// CCI-03 (12): the MCP server importing the daemon spawner (src/claude/client/mcp/server.ts).
+import { spawnDaemon } from '../spawn.js';
+export const start = spawnDaemon;

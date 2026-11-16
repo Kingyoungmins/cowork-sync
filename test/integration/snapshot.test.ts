@@ -268,7 +268,7 @@ test('a deletion is staged only after two reads at least 1 s apart', async () =>
     assert.equal(after.dirty.size, 0);
   });
   // A hook-attributed removal needs no second read.
-  const attributed: AttributionPort = { removalAttributed: (p) => p === 'src/c.txt', shrinkAttributed: () => true };
+  const attributed: AttributionPort = { removalAttributed: (p) => p === 'src/c.txt', shrinkAttributed: () => true, observedEdit: () => false, hookAttributed: () => false };
   await withSnap('snap-delete-attr', async ({ s, snap, inp }) => {
     await snap.tick(inp);
     await fsp.rm(s.abs('src/c.txt'));
@@ -400,7 +400,7 @@ test('a shrink over 50 % or to 0 bytes needs two ticks at least 1 s apart with t
     assert.equal(r.dirty.get('src/b.txt')?.kind, 'modify');
   });
   // Without attribution a stable shrink stays excluded.
-  const noShrink: AttributionPort = { removalAttributed: () => false, shrinkAttributed: () => false };
+  const noShrink: AttributionPort = { removalAttributed: () => false, shrinkAttributed: () => false, observedEdit: () => false, hookAttributed: () => false };
   await withSnap('snap-shrink-noattr', async ({ s, snap, inp }) => {
     await snap.tick(inp);
     await s.write('big.txt', Buffer.alloc(0));

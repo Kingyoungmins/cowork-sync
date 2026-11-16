@@ -15,7 +15,7 @@ import { realEngine } from '../sim/engineAdapter.js';
 import { editGenerator, PROFILES, seedFilesPlan2, type GeneratorProfile } from '../sim/generators.js';
 import { DEFAULT_QUIESCENCE, runSim, type EngineFactory, type OpGenerator, type Oracle, type SimContext, type SimResult } from '../sim/harness.js';
 import { naiveEngine } from '../sim/naiveEngine.js';
-import { oracleFF, oracleOID } from '../sim/oracles.js';
+import { laBAtTStar, oracleFF, oracleOID } from '../sim/oracles.js';
 import { only, scripted, startAll } from '../sim/scripted.js';
 
 const BOARD = 'refs/cowork/main/board';
@@ -42,7 +42,11 @@ function capture<T>(at: (ctx: SimContext) => Promise<T>): Oracle & { ctx: SimCon
   return o;
 }
 
-/** R-32's LA_B == T* for every engine (atQuiescence). */
+/**
+ * R-32's LA_B == T* for every engine (atQuiescence), read as Plan 2's Task 18 ruling reads it (laBAtTStar): a teammate's
+ * board-only last change — with Plan 3, the K4 record's hold mirror — leaves LA_B on T*'s first-parent chain with the same live
+ * code tree (ENG-36).
+ */
 const laBIsTStar: Oracle = {
   name: 'LA_B',
   async atQuiescence(ctx) {
@@ -50,7 +54,8 @@ const laBIsTStar: Oracle = {
     if (q === null || !q.reached || q.tStar === null) return `no T* (${JSON.stringify(q)})`;
     for (const e of ctx.engines) {
       const ins = await e.inspect!();
-      if (ins.laB !== q.tStar) return `${e.peer.name}: LA_B ${ins.laB} != T* ${q.tStar}`;
+      const why = await laBAtTStar(ctx, e.peer, ins.laB, q.tStar);
+      if (why !== null) return why;
     }
     return null;
   },

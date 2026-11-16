@@ -222,7 +222,8 @@ const saveRow: OpRowMapper = (c) => {
  * 12 §3.4, the rows of the effective op types of this build, keyed by op type (X-91). caps has no image and is not unknown
  * (R-V17: B0's room_open is its event). A type with no row here — claim, release, request, request_status, answer, note,
  * presume_absent, hold in Plan 2 — draws nothing even when a later build's fold made it effective, and counts in unknown;
- * Plans 3–7 add their rows here in the commit that gives the type its fold effect.
+ * Plans 3–7 add their rows here in the commit that gives the type its fold effect. hold is the exception so far: Plan 3
+ * folds it (PLAN2_FOLDED_TYPES) while its rows are follow-up 3-V's, so until then an effective hold op counts in unknown.
  */
 export const OP_SCENE_ROWS: ReadonlyMap<OpType, OpRowMapper> = new Map<OpType, OpRowMapper>([
   ['join', joinRow],
@@ -313,9 +314,19 @@ const boardLevelRow: DerivedRoomRow = (c) => {
 /** Derived room-level rows, before every actor's. */
 export const DERIVED_ROOM_ROWS: readonly DerivedRoomRow[] = [boardLevelRow];
 
-/** person_ghost: in liveSet(after), in rankedSet(before), not in rankedSet(after) (the fold's own ghost rule). */
+/** A seat key that is live in the fold state after the frame (a folded seat_start and no seat_end or retirement since). */
+const liveFoldedSeat = (c: RowContext, seat: string): boolean => Object.hasOwn(c.frame.after.seats, seat) && c.frame.after.seats[seat]!.status === 'live';
+/**
+ * person_ghost: in liveSet(after), in rankedSet(before), not in rankedSet(after) (the fold's own ghost rule); then (VIZ-21, §8 Q7)
+ * pet_poof per live pet of that peer whose seat key is not a live folded seat — a footprint-only seat, which PRO-20 lets end
+ * without seat_end — in ascending seat key. A seat live in the fold keeps its pet (seat_end, retirement or leave removes it);
+ * a later footprint spawns a poofed one again (ordinaryCode).
+ */
 const ghostRow: DerivedActorRow = (c, a) => {
-  if ('peer' in a && c.liveAfter.has(a.peer) && c.rankedBefore.has(a.peer) && !c.rankedAfter.has(a.peer)) c.emit('ghost', { kind: 'person_ghost', peer: a.peer });
+  if (!('peer' in a) || !c.liveAfter.has(a.peer) || !c.rankedBefore.has(a.peer) || c.rankedAfter.has(a.peer)) return;
+  const peer = a.peer;
+  c.emit('ghost', { kind: 'person_ghost', peer });
+  for (const seat of petsOf(c.scene(), peer, (k) => !liveFoldedSeat(c, k))) c.emit('ghost', { kind: 'pet_poof', seat, owner: ownerOfSeatKey(seat) });
 };
 /** person_unghost: in rankedSet(after), in liveSet(before), not in rankedSet(before). */
 const unghostRow: DerivedActorRow = (c, a) => {
@@ -466,7 +477,6 @@ export class TimelineBuilder {
   private readonly lb: LayoutBuilder;
   private cached: Layout | null = null;
   private reducer: SceneReducer;
-  private view: Scene | null = null;
   private readonly saved: Set<DeskRef>;
   private readonly h0: number;
   private last: number;
@@ -486,12 +496,11 @@ export class TimelineBuilder {
     const layoutNow = (): Layout => (this.cached ??= this.lb.layout());
     this.reducer = new SceneReducer(o.carry.scene, layoutNow);
     this.port = {
-      scene: () => (this.view ??= this.reducer.scene()),
+      // The reducer's own scene, read only (RowContext.scene): push() replaces it and never changes it, so no copy is needed
+      // (viz-hosted-perf: the copy per emit was most of the fold's CPU).
+      scene: () => this.reducer.peek(),
       layout: layoutNow,
-      apply: (e) => {
-        this.reducer.push(e);
-        this.view = null;
-      },
+      apply: (e) => this.reducer.push(e),
       home: (peer) => {
         if (layoutNow().homeOrder.includes(peer)) return;
         this.lb.home(peer);

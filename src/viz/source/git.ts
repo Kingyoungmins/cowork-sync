@@ -122,6 +122,11 @@ export class GitRoomSource implements RoomSource {
    * holds the same oid there — across ff, rewrites above it and re-pins alike); insertion order = recency, ≤ FOLD_CACHE_MAX.
    */
   private folds = new Map<number, { oid: Oid; state: FoldState }>();
+  /**
+   * startAt(h, upTo)'s reads above h (from h + 1; from 0 when h = 0) on the pin `pin`, with the prevLive they were read after: the
+   * first batch of the next frames() from `from` (batchReads). Dropped by the next pin, startAt, or the frames() call that takes them.
+   */
+  private ahead: { pin: Oid; from: number; prevLive: Oid | null; reads: Array<BoardRead | BoardReadFailure> } | null = null;
 
   constructor(spec: RoomSpec, git: VizGit, deps: { fs: Fs; clock: Clock }) {
     if (spec.kind !== 'git' || spec.gitDir === null || spec.boardRef === null) throw new Error('GitRoomSource: a git room needs a gitDir and a board ref');
@@ -163,12 +168,25 @@ export class GitRoomSource implements RoomSource {
     return false;
   }
 
-  /** rev-parse of the board ref (the stat pairs taken first, so an update between the two is seen next tick) and the pin; then its height by rev-list --count when it is new. */
+  /**
+   * rev-parse of the board ref (the stat pairs taken first, so an update between the two is seen next tick) and the pin; when it is
+   * new, its newest FF_PAGE commits in one rev-list page (R-V31's form): a shorter page is the whole chain and gives the height, a
+   * full one needs rev-list --count. The page's oids are kept by height: they hold every height of a first window (≤ 1,279), so
+   * building it lists nothing more (viz-hosted-perf; 12 §3.12 row 4).
+   */
   async tip(): Promise<TipInfo | null> {
     return this.resolving(async (oid) => {
       if (oid === null) return this.pin(null, false);
       if (this.pinned !== null && this.pinned.oid === oid) return { height: this.pinned.height, key: oid };
-      return this.pin({ oid, height: (await this.git.chainCount(oid)) - 2 }, false);
+      const page = await this.git.chain(oid, 0, FF_PAGE);
+      const height = page.length < FF_PAGE ? page.length - 2 : (await this.git.chainCount(oid)) - 2;
+      const to = this.pin({ oid, height }, false);
+      if (to !== null) {
+        page.forEach((o, i) => {
+          if (height - i >= 0) this.oids.set(height - i, o);
+        });
+      }
+      return to;
     });
   }
 
@@ -218,12 +236,27 @@ export class GitRoomSource implements RoomSource {
    * down) folded up to h — that state is cached for h and its board oid (FOLD_CACHE_MAX), and a cached state is served
    * (a copy) before anything is read, so a run of unparseable checkpoints is folded up once, from the last good state. The
    * board commit at h is read with its live commit, which seeds frames from h + 1 (after a cached state, frames reads it).
+   *
+   * upTo (viz-hosted-perf; the store's first window, 12 §3.12 row 4): the frames the caller folds next end at upTo. When h…upTo
+   * fit one batch (≤ READ_BATCH_MAX heights, as a first window's ≤ 1,279 always do), they are listed and read with h in one
+   * --batch-check/--batch pair, and the next frames() call from h (h = 0) or h + 1 takes its first batch from those reads instead
+   * of reading it again: the same reads, as readBoardCommits gives each item the previous item's liveCode as its prevLive.
    */
-  async startAt(h: number): Promise<FoldState> {
+  async startAt(h: number, upTo?: number): Promise<FoldState> {
     const pin = this.requirePin();
     if (!Number.isSafeInteger(h) || h < 0 || h > pin.height || h % CHECKPOINT_EVERY !== 0) throw new RangeError(`GitRoomSource.startAt: ${h} is not a checkpoint height of the pinned tip (0…${pin.height})`);
+    this.ahead = null;
+    const one = upTo !== undefined && Number.isSafeInteger(upTo) && upTo >= h && upTo <= pin.height && upTo - h < READ_BATCH_MAX;
+    return this.startFrom(pin, h, one ? upTo : h, one);
+  }
+
+  /**
+   * startAt(h) reading h…to with h (to = h: h alone), its reads above h kept for frames() when `keep`; the fold-up below an
+   * unparseable checkpoint comes back here with h alone.
+   */
+  private async startFrom(pin: { oid: Oid; height: number }, h: number, to: number, keep: boolean): Promise<FoldState> {
     if (h > 0) {
-      await this.list(h, h);
+      await this.list(h, to);
       const hit = this.folds.get(h);
       if (hit !== undefined && hit.oid === this.oids.get(h)) {
         this.folds.delete(h);
@@ -231,17 +264,21 @@ export class GitRoomSource implements RoomSource {
         return structuredClone(hit.state);
       }
     }
-    const [{ read }] = await this.readSteps([h], null) as [{ read: BoardRead | BoardReadFailure }];
+    const reads = (await this.readSteps(range(h, to), null)).map((x) => x.read);
+    const read = reads[0]!;
     const oid = this.oids.get(h)!;
     if (isBoardReadFailure(read)) {
       if (read.malformed === 'missing') throw new BoardObjectMissingError(h, read.oid);
     } else {
       this.seed = { height: h, oid, seed: stepOf(read, null).seed };
+      // Kept for frames() only after a readable h: what frames reads from h + 1 has h's liveCode as its prevLive (a failure at h
+      // would give it none in this batch, and the readable draft below h in frames').
+      if (keep && (h === 0 || to > h)) this.ahead = { pin: pin.oid, from: h === 0 ? 0 : h + 1, prevLive: h === 0 ? null : read.liveCode, reads: h === 0 ? reads : reads.slice(1) };
     }
     if (h === 0) return initialFoldState(isBoardReadFailure(read) ? readProtocol(null) : read.protocol);
     const s = isBoardReadFailure(read) || read.checkpoint === null ? null : parseFold(read.checkpoint);
     if (s !== null && s.height === h) return s;
-    const below = await this.startAt(h - CHECKPOINT_EVERY);
+    const below = await this.startFrom(pin, h - CHECKPOINT_EVERY, h - CHECKPOINT_EVERY, false);
     let state = below;
     for await (const f of this.frames(below, h === CHECKPOINT_EVERY ? 0 : h - CHECKPOINT_EVERY + 1, h, ZERO_PEER)) state = f.after;
     this.folds.delete(h);
@@ -267,7 +304,7 @@ export class GitRoomSource implements RoomSource {
     for (let b = from; b <= to; b += READ_BATCH_MAX) {
       const e = Math.min(to, b + READ_BATCH_MAX - 1);
       const steps: Step[] = [];
-      for (const { read } of await this.readSteps(range(b, e), seed?.liveCode ?? null)) {
+      for (const read of await this.batchReads(b, e, seed?.liveCode ?? null)) {
         const s = stepOf(read, seed);
         steps.push(s);
         seed = s.seed;
@@ -318,6 +355,7 @@ export class GitRoomSource implements RoomSource {
   /** Pins p (null: none). keep: p extends the old pin's chain, so its oids by height stay valid; otherwise they are dropped. */
   private pin(p: { oid: Oid; height: number } | null, keep: boolean): TipInfo | null {
     if (p !== null && p.height < 0) p = null;
+    this.ahead = null;
     if (!keep) {
       this.oids = new Map();
       this.seed = null;
@@ -339,6 +377,20 @@ export class GitRoomSource implements RoomSource {
     const got = await this.git.chain(pin.oid, pin.height - top, top - bottom + 1);
     if (got.length !== top - bottom + 1) throw new Error(`GitRoomSource: the first-parent chain of the pinned tip is shorter than its count`);
     got.forEach((o, i) => this.oids.set(top - i, o));
+  }
+
+  /**
+   * The reads of heights b…e for frames() with `prevLive` (the liveCode of the draft at b − 1): startAt(h, upTo)'s reads when they
+   * start at b with the same prevLive on the same pin and cover e (taken once: they are the reads readSteps would give, item by
+   * item), else readSteps.
+   */
+  private async batchReads(b: number, e: number, prevLive: Oid | null): Promise<Array<BoardRead | BoardReadFailure>> {
+    const a = this.ahead;
+    if (a !== null && a.from === b && a.prevLive === prevLive && a.pin === this.pinned?.oid && e - b < a.reads.length) {
+      this.ahead = null;
+      return a.reads.slice(0, e - b + 1);
+    }
+    return (await this.readSteps(range(b, e), prevLive)).map((x) => x.read);
   }
 
   /**

@@ -165,7 +165,7 @@ test('T-VIZ-timeline-fixtures: a step-6 teamRegionSpec switch with no join flips
 });
 
 test('T-VIZ-version (unit): rows whose op is unfolded in Plan 2 make no event and count in unknown', () => {
-  const unfolded: Array<[string, number]> = [['claim', 4], ['release', 4], ['request', 6], ['request_status', 6], ['answer', 6], ['note', 6], ['presume_absent', 6], ['hold', 3]];
+  const unfolded: Array<[string, number]> = [['claim', 4], ['release', 4], ['request', 6], ['request_status', 6], ['answer', 6], ['note', 6], ['presume_absent', 6]];
   for (const [type, plan] of unfolded) {
     const name = `unfolded_${type}`;
     assert.equal(fx(name).plan, plan, `${name}: marked with the plan that folds it`);
@@ -174,6 +174,13 @@ test('T-VIZ-version (unit): rows whose op is unfolded in Plan 2 make no event an
     assert.deepEqual(tl(name).timeline.events.filter((e) => e.height === 2), [], name);
     assert.deepEqual(tl(name).unknown, [[2, 1]], name);
   }
+  // hold has folded since Plan 3 Task 3 (PLAN2_FOLDED_TYPES): the fixture's hold (a local_only stub: fixtures carry no held/
+  // subtree) is effective, yet it has no OP_SCENE_ROWS row until follow-up 3-V, so it still makes no event and counts in
+  // unknown (X-90, X-91; F-P3-5). The fixture keeps its name and golden until 3-V gives hold its rows.
+  assert.equal(fx('unfolded_hold').plan, 3, 'unfolded_hold: marked with the plan that folds it');
+  assert.deepEqual(fixtureFrames(fx('unfolded_hold'))[2]!.ops.map((o) => [o.type, o.verdict]), [['hold', 'effective']]);
+  assert.deepEqual(tl('unfolded_hold').timeline.events.filter((e) => e.height === 2), []);
+  assert.deepEqual(tl('unfolded_hold').unknown, [[2, 1]]);
   // An op of an unknown type (malformed) and a generic-invalid op (another peer's op id): rejected, no event, one unknown each.
   assert.deepEqual(fixtureFrames(fx('unknown_type'))[1]!.ops.map((o) => [o.type, o.verdict]), [['unknown', 'rejected']]);
   assert.deepEqual(tl('unknown_type').timeline.events.filter((e) => e.height === 1), []);
@@ -293,7 +300,8 @@ test('first touch: within one change-set paths are allocated sorted; across a fr
       { writer: 'A', cs: [{ human: 'A', n: 3, files: ['c/c.ts', 'a/z.ts'] }] },                                                       // h4
     ],
   }).timeline;
-  // Plan 2 ops name no desk-eligible path (claims, requests and holds are unfolded), so a frame's order is its trailer order.
+  // Plan 2 ops name no desk-eligible path (claims and requests are unfolded; holds have no row until 3-V), so a frame's order
+  // is its trailer order.
   assert.deepEqual(t.layout.desks.map((d) => [d.ordinal, d.key, d.first]),
     [[0, '\u{2302}', 0], [1, 'b/a.ts', 3], [2, 'm.ts', 3], [3, 'z/y.ts', 3], [4, 'a/z.ts', 3], [5, 'c/c.ts', 4]]);
 });
@@ -330,9 +338,12 @@ test('T-VIZ-start (relaxed): the first pose_relaxed of an actor comes 64 heights
 });
 
 test('the op → scene mapping table: every Plan 2 folded type has its rows; a type outside PLAN2_FOLDED_TYPES has none and its ops count in unknown', () => {
-  assert.deepEqual(new Set(OP_SCENE_ROWS.keys()), new Set(PLAN2_FOLDED_TYPES));
-  const outside: OpType[] = ['claim', 'release', 'request', 'request_status', 'answer', 'note', 'presume_absent', 'hold'];
-  for (const t of outside) assert.equal(OP_SCENE_ROWS.has(t), false, t);
+  // hold is in PLAN2_FOLDED_TYPES since Plan 3 Task 3, but its rows are follow-up 3-V's (X-90, X-91; F-P3-5): until then an
+  // effective hold op draws nothing and counts in unknown, like the forged claim below.
+  const rowless: ReadonlySet<OpType> = new Set<OpType>(['hold']);
+  assert.deepEqual(new Set(OP_SCENE_ROWS.keys()), new Set([...PLAN2_FOLDED_TYPES].filter((t) => !rowless.has(t))));
+  const noRow: OpType[] = ['claim', 'release', 'request', 'request_status', 'answer', 'note', 'presume_absent', 'hold'];
+  for (const t of noRow) assert.equal(OP_SCENE_ROWS.has(t), false, t);
   // An op of such a type that a later build's fold made effective, before that plan adds its row: no event, one unknown.
   const frames = fixtureFrames(fx('join_new'));
   const f1 = frames[1]!;

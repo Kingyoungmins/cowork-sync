@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { ABSENT, type Oid } from '../../src/git/oid.js';
+import { RebaseCache } from '../../src/holds/rebase.js';
 import { HoldRegistry, RegistryCasLostError, type NewRecord, type RegistryDeps } from '../../src/holds/registry.js';
 import { parseRecord, type HoldRecord } from '../../src/holds/record.js';
 import { RELEASE_NAMESPACE, refNames } from '../../src/engine/refs.js';
@@ -35,9 +36,11 @@ function setup(f: RepoFixture): Ctx {
   const logs: Ctx['logs'] = [];
   const trace: Trace = { emit: (ev) => events.push(ev) };
   const log: Log = { write: (level, code, params) => logs.push({ level, code, params: params ?? {} }) };
+  const rebase = new RebaseCache(f.repo, () => true);
   return {
     f, ref, clock, events, logs,
-    deps: (seed = 'registry') => ({ repo: f.repo, ref, random: seededRandom(seed), clock, peer: PEER, trace, log }),
+    // Plan 3 Task 1: every path LIVE, A empty (REBASE then converges only for a record's own original pair, r2 D-1), one REBASE cache.
+    deps: (seed = 'registry') => ({ repo: f.repo, ref, random: seededRandom(seed), clock, peer: PEER, trace, log, scopeOf: () => () => 'LIVE', A: () => new Map(), rebase }),
     blob: (text) => f.repo.hashBytes(Buffer.from(text, 'utf8'), true),
   };
 }
@@ -123,7 +126,9 @@ test('hold() writes one commit with records/<id>.json and blobs/<oid>, CAS with 
     assert.deepEqual([...blobs1.keys()].sort(), referenced([r1]));
     for (const [o, meta] of blobs1) assert.equal(meta, `100644 blob ${o}`, 'blobs/<oid> names the blob itself');
     assert.deepEqual(await reflog(f, c.ref), [`${c1} cowork-holds`], 'the CAS created a reflog');
-    assert.deepEqual(c.events.at(-1), { kind: 'hold', peer: PEER, id: id1, holdKind: 'PATCH', guard: 'eol-bom', paths: ['settings.ini'], residence: 'ON_DISK' });
+    assert.deepEqual(c.events.at(-1), {
+      kind: 'hold', peer: PEER, id: id1, holdKind: 'PATCH', guard: 'eol-bom', guards: ['eol-bom'], paths: ['settings.ini'], residence: 'ON_DISK', state: 'ACTIVE', rev: 1, localOnly: false,
+    });
 
     // A second record: a stage record with an ABSENT side; the tree holds both records and the union of their blobs.
     const id2 = await reg.hold(await k4(c, 'local\n', 'tip\n'));
@@ -165,16 +170,21 @@ test('hold() with the same kind, guard, paths and held side returns the existing
     const head = await f.repo.readRef(c.ref);
     assert.equal(await reg.hold(await eolBom(c)), id, 'same kind, guard, paths and h1');
     assert.equal(await f.repo.readRef(c.ref), head, 'a dedupe writes nothing');
-    assert.equal(await reg.hold({ ...(await eolBom(c)), blobs: { h0: { 'settings.ini': await c.blob('other base\n') }, h1: { 'settings.ini': await c.blob('key=1\r\n') } } }), id, 'h0 is not part of the key');
+    // Plan 3 (HLD-07, R3-14; final review r2 D-1): the key is the record's current H1'. With A at neither base (A is empty here) the
+    // record has no H1' (REBASE conflicts), so the same h1 over another base is another change; only the record's own pair dedupes.
+    assert.notEqual(await reg.hold({ ...(await eolBom(c)), blobs: { h0: { 'settings.ini': await c.blob('other base\n') }, h1: { 'settings.ini': await c.blob('key=1\r\n') } } }), id, 'h0 is part of the key through H1\'');
 
     const others = [
       { ...(await eolBom(c, 'settings.ini', 'key=2\r\n')) },                                  // another h1
-      { ...(await eolBom(c)), guard: 'restart' as const },                                    // another guard
       { ...(await eolBom(c)), kind: 'PIN' as const, guard: 'join' as const },                 // another kind
     ];
     const ids = new Set<string>([id]);
     for (const n of others) ids.add(await reg.hold(n));
-    assert.equal(ids.size, 4, 'kind, guard and h1 are each part of the key');
+    assert.equal(ids.size, 3, 'kind and h1 are each part of the key');
+    // Plan 3 (HLD-07, R3-14): the guard is not part of the key — the same change with another guard attaches that guard to
+    // the existing record (one change, one id) instead of creating a record.
+    assert.equal(await reg.hold({ ...(await eolBom(c)), guard: 'restart' }), id);
+    assert.deepEqual(reg.get(id)!.guards.map((g) => g.name), ['eol-bom', 'restart']);
     // Another path set (the same blob on another path).
     const two = await eolBom(c);
     two.paths = ['a.ini', 'settings.ini'];
@@ -195,9 +205,13 @@ test('hold() with the same kind, guard, paths and held side returns the existing
     assert.deepEqual((await f.repo.readCommit(after!)).parents, [before!], 'one commit for the stage update');
     assert.equal(await reg.hold(await k4(c, 'local\n', 'tip two\n', 'line two\n')), k);
     assert.equal(await f.repo.readRef(c.ref), after, 'identical stages: nothing written');
-    // The dedupe holds after the record moved OFF_DISK (the apply wrote TIP), and a different s2 is a new record.
+    // The dedupe holds after the record moved OFF_DISK (the apply wrote TIP), and a different s2 is a new record. Plan 3 (fix
+    // round 2): the ON_DISK call brings the record back ON_DISK for its write window, so the different s2 is asked after that
+    // write's R-02 follow-up (OFF_DISK again); while ON_DISK, HLD-07's K4 branch would transition the record instead.
     await reg.transition(k, { residence: 'OFF_DISK' });
     assert.equal(await reg.hold(await k4(c, 'local\n', 'tip two\n', 'line two\n')), k);
+    assert.equal(reg.get(k)!.residence, 'ON_DISK');
+    await reg.transition(k, { residence: 'OFF_DISK' });
     assert.notEqual(await reg.hold(await k4(c, 'local 2\n', 'tip two\n')), k);
 
     // A terminal record is never a dedupe target.

@@ -1,0 +1,2 @@
+// L-HUMAN-ONLY: a v2 verb in ACTING_VERBS (src/claude/wire/frames.ts).
+export const ACTING_VERBS = Object.freeze(['start', 'stop', 'save', 'done', 'override'] as const);

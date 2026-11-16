@@ -117,14 +117,16 @@ export function youOf(peerFile: PeerRef | null, s: StatusRead | null): PeerRef |
  * parsed fields is stale: nowMachineMono − heartbeat_mono_ms > 3 × loop_period_ms, or the heartbeat is ahead of this boot's
  * clock by more than one loop period (a daemon not restarted after a reboot: the machine-monotonic clock restarts at boot,
  * and on one boot no heartbeat is ahead of it — the margin absorbs either side's rounding; controller ruling, spec-edit
- * item 01 §3.16 / 12 §3.3.6) — never from an unreadable file, which keeps the previous values; the offline age
+ * item 01 §3.16 / 12 §3.3.6). An unreadable file keeps the previous values, so it neither makes nor clears down: down is
+ * computed from those kept parsed fields as from a readable file's (8a final review, VIZ-13 "keep the previous overlay"; it
+ * used to clear a stale room's down); the offline age
  * last_fetch_age_ms + max(0, nowMachineMono − heartbeat_mono_ms) in whole minutes while the state is 'offline'; the counts
  * from pending; version skew when plugin_version ≠ the viewer's. Before any parse the light is '?'.
  */
 export function overlayOf(s: StatusRead, nowMachineMono: number, viewerVersion: string, you: PeerRef | null): Overlay {
   const f = s.fields;
   const stale = f !== null && (nowMachineMono - f.heartbeat_mono_ms > 3 * f.loop_period_ms || f.heartbeat_mono_ms > nowMachineMono + f.loop_period_ms);
-  const down = !s.present || (!s.unreadable && f !== null && (f.state === 'down' || stale));
+  const down = !s.present || (f !== null && (f.state === 'down' || stale));
   const offlineMin = f !== null && f.state === 'offline' && f.last_fetch_age_ms !== null
     ? Math.floor((f.last_fetch_age_ms + Math.max(0, nowMachineMono - f.heartbeat_mono_ms)) / 60_000)
     : null;

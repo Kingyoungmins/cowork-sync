@@ -1,6 +1,7 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { isBuiltin } from 'node:module';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -19,7 +20,8 @@ interface Metafile {
   inputs: Record<string, { bytes: number; imports: MetaImport[] }>;
   outputs: Record<string, { bytes: number; entryPoint?: string; imports: MetaImport[]; inputs: Record<string, { bytesInOutput: number }> }>;
 }
-interface Built { dist: string; node: Metafile; client: Metafile; }
+/** Plan 5 Task 2 (A2-1, A2-5): hook.js is built by its own esbuild call, whose metafile is <--metafile>.hook.json. */
+interface Built { dist: string; node: Metafile; client: Metafile; hook: Metafile; }
 
 const tmp = mkdtempSync(path.join(tmpdir(), 'cowork-viz-bundle-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
@@ -37,6 +39,7 @@ function build(): Built {
     dist,
     node: JSON.parse(readFileSync(nodeMeta, 'utf8')) as Metafile,
     client: JSON.parse(readFileSync(clientMeta, 'utf8')) as Metafile,
+    hook: JSON.parse(readFileSync(`${nodeMeta}.hook.json`, 'utf8')) as Metafile,
   };
   return built;
 }
@@ -48,7 +51,7 @@ function output(m: Metafile, name: string): Metafile['outputs'][string] {
 }
 
 test('T-VIZ-lints: viz.js bundles the client, app.css and the demo log as text; node:http appears only in viz.js; cli.js contains src/viz/cli/** and no other src/viz module; no src/viz module in daemon, hook, core, mcp or worker; the client bundle contains no module importing src/board/fold.ts; dist/viz.js ≤ 1.5 MB', () => {
-  const { dist, node, client } = build();
+  const { dist, node, client, hook } = build();
   const viz = output(node, 'viz');
 
   // The client pass: one iife bundle of src/viz/client/main.ts, embedded byte for byte as viz-asset:app.js.
@@ -64,11 +67,14 @@ test('T-VIZ-lints: viz.js bundles the client, app.css and the demo log as text; 
   const vizText = readFileSync(path.join(dist, 'viz.js'), 'utf8');
   assert.ok(vizText.includes('cowork-viz-demo/1'), 'the bundled demo log is in viz.js');
 
-  // Every import of every bundle is an external Node built-in (R-V36); node:http only in viz.js (VIZ-01).
+  // Every import of every bundle is an external Node built-in (R-V36); node:http only in viz.js (VIZ-01). The region worker
+  // bundles web-tree-sitter (R4-09), whose dynamic import of fs/promises is a builtin without the node: prefix — the same
+  // exception build.test.ts's isBuiltin row grants worker.js.
   for (const [file, o] of Object.entries(node.outputs)) {
+    const isWorker = file.endsWith('/worker.js');
     for (const imp of o.imports) {
       assert.equal(imp.external, true, `${file} bundles ${imp.path}`);
-      assert.ok(imp.path.startsWith('node:'), `${file} imports ${imp.path}`);
+      assert.ok(imp.path.startsWith('node:') || (isWorker && isBuiltin(imp.path)), `${file} imports ${imp.path}`);
       if (o !== viz) assert.ok(imp.path !== 'node:http', `${file} imports node:http`);
     }
   }
@@ -87,7 +93,7 @@ test('T-VIZ-lints: viz.js bundles the client, app.css and the demo log as text; 
   assert.ok(cliInputs.includes('src/sec/sddl.ts'), 'cli.js bundles src/sec/sddl.ts');
   // daemon, hook, core, mcp and worker: nothing of src/viz.
   for (const name of OTHER_ENTRIES) {
-    for (const key of Object.keys(output(node, name).inputs)) assert.ok(!key.startsWith('src/viz/'), `${name}.js bundles ${key}`);
+    for (const key of Object.keys(output(name === 'hook' ? hook : node, name).inputs)) assert.ok(!key.startsWith('src/viz/'), `${name}.js bundles ${key}`);
   }
 
   // The page bundles no module that imports the fold (model/frame.ts, timeline.ts and start.ts are server only).

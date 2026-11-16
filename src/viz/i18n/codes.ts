@@ -13,7 +13,8 @@ const PH: readonly string[] = [
 ];
 const SS: readonly string[] = ['SS_FULL', 'SS_HOOK_ONLY', 'SS_NO_MCP', 'SS_NO_HOOKS', 'SS_DEGRADED', 'SS_PAUSED', 'SS_PULL_MODE'];
 
-/** Exactly the 12 section 3.11 table, plus the codes a ruling adds to it ahead of the spec text (R-V67: VIZ_LOG_DROPPED). */
+/** Exactly the 12 section 3.11 table (rev 2.5: F32's eight follow codes and FEAT-F32-11's UI_VIZ_FOLLOW_ENDED with Plan 8a Task 19,
+ *  which also landed R-V67's VIZ_LOG_DROPPED and the Task 14 ruling's UI_VIZ_CTRL_POSITION in the table's text). */
 export const VIZ_CODES: Readonly<Record<CodeGroup, readonly string[]>> = Object.freeze({
   cli: Object.freeze([
     'UI_VIZ_OPENED', 'UI_VIZ_URL', 'UI_VIZ_OPEN_FAILED', 'UI_VIZ_TERMINAL_ONLY',
@@ -31,6 +32,11 @@ export const VIZ_CODES: Readonly<Record<CodeGroup, readonly string[]>> = Object.
     'UI_VIZ_HOST_REFUSED', 'UI_VIZ_LABEL_UNVERIFIED', 'UI_VIZ_SCENE_SUMMARY', 'UI_VIZ_SIGN_BASE_MOVE', 'UI_VIZ_TAG_RESERVED',
     'UI_VIZ_TAG_LINES', 'UI_VIZ_TAG_CHECKS', 'UI_VIZ_CHIP_ASKED_AGAIN', 'UI_VIZ_BUBBLE_GO_FIRST', 'UI_VIZ_BADGE_VERSION',
     'UI_VIZ_BADGE_RULES', 'UI_VIZ_BADGE_CREDIT', 'UI_VIZ_BADGE_HEALTH',
+    // rev 2.5, F32 (12 section 3.8.1): the follow header and the now card's rows
+    'UI_VIZ_FOLLOWING', 'UI_VIZ_NOW_ASKS', 'UI_VIZ_NOW_ASKED_BY', 'UI_VIZ_NOW_LAST_SHARED', 'UI_VIZ_NOW_LAST_SHARED_TABLE', 'UI_VIZ_NOW_NOTHING',
+    'UI_VIZ_NOW_NOT_HERE',
+    // FEAT-F32-11 (Task 19 fix round 1): the follow end offered to the announcer
+    'UI_VIZ_FOLLOW_ENDED',
   ]),
   icon: Object.freeze([
     'UI_VIZ_ICON_QUEUED', 'UI_VIZ_ICON_ASKED', 'UI_VIZ_ICON_AWAITING_HUMAN', 'UI_VIZ_ICON_UNDELIVERABLE', 'UI_VIZ_ICON_ACCEPTED',
@@ -53,13 +59,14 @@ export const VIZ_CODES: Readonly<Record<CodeGroup, readonly string[]>> = Object.
     'UI_VIZ_CTRL_REDUCED_MOTION', 'UI_VIZ_CTRL_LANGUAGE', 'UI_VIZ_CTRL_ZOOM', 'UI_VIZ_CTRL_COARSE', 'UI_VIZ_CTRL_ANONYMIZE',
     'UI_VIZ_FILTER_ALL', 'UI_VIZ_FILTER_PERSON', 'UI_VIZ_FILTER_FILE', 'UI_VIZ_FILTER_CONVERSATION', 'UI_VIZ_FILTER_ACTIVITY',
     'UI_VIZ_FILTER_CONFLICTS', 'UI_VIZ_FILTER_SYSTEM',
+    // rev 2.5, F32: the follow toggle; the Task 14 ruling: the rewind slider's accessible name (12 section 3.9.1)
+    'UI_VIZ_CTRL_FOLLOW', 'UI_VIZ_CTRL_POSITION',
   ]),
   log: Object.freeze([
     'SEC_VIZ_BAD_HOST', 'SEC_VIZ_BAD_ORIGIN', 'SEC_VIZ_BAD_TOKEN', 'SEC_VIZ_LAUNCH_REUSED', 'SEC_VIZ_LAUNCH_EXPIRED', 'SEC_VIZ_METHOD',
     'SEC_VIZ_LIMIT', 'VIZ_EXIT_IDLE', 'VIZ_EXIT_LIFETIME', 'VIZ_EXIT_LAUNCH_UNUSED', 'VIZ_EXIT_LAUNCH_REUSED', 'VIZ_EXIT_PLUGIN_REMOVED',
     'VIZ_EXIT_SIGNAL',
-    // R-V67: the viewer log's own marker for lines dropped while a rotation was blocked (spec-edit list 12 §3.10.10 and the §3.11
-    // "Log only" row, not yet in the spec text).
+    // R-V67: the viewer log's own marker for lines dropped while a rotation was blocked (12 §3.10.10, the §3.11 "Log only" row).
     'VIZ_LOG_DROPPED',
   ]),
   reused: Object.freeze([

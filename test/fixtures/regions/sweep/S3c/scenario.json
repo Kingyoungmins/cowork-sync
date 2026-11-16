@@ -1,0 +1,37 @@
+{
+  "name": "S3c",
+  "files": {
+    "shell.py": {
+      "base": "import sys\n\n\nif sys.platform == \"win32\":\n    def default_shell():\n        return \"cmd.exe\"\nelse:\n    def default_shell():\n        return \"/bin/zsh\"\n\n\ndef run(command):\n    shell = default_shell()\n    return [shell, \"-c\", command]\n",
+      "ours": "import sys\n\n\nif sys.platform == \"win32\":\n    def default_shell():\n        return \"powershell.exe\"\nelse:\n    def default_shell():\n        return \"/bin/zsh\"\n\n\ndef run(command):\n    shell = default_shell()\n    return [shell, \"-c\", command]\n",
+      "theirs": "import sys\n\n\nif sys.platform == \"win32\":\n    def default_shell():\n        return \"cmd.exe\"\nelse:\n    def default_shell():\n        return \"/bin/bash\"\n\n\ndef run(command):\n    shell = default_shell()\n    return [shell, \"-c\", command]\n"
+    }
+  },
+  "claims": [
+    {
+      "holderSeat": "p1/seat-holder",
+      "path": "shell.py",
+      "ranges": [
+        [
+          8,
+          9
+        ]
+      ]
+    }
+  ],
+  "expect": "byte_identical",
+  "oracle": {
+    "shell.py": "import sys\n\n\nif sys.platform == \"win32\":\n    def default_shell():\n        return \"powershell.exe\"\nelse:\n    def default_shell():\n        return \"/bin/bash\"\n\n\ndef run(command):\n    shell = default_shell()\n    return [shell, \"-c\", command]\n"
+  },
+  "corrupting": true,
+  "corruptOut": {
+    "shell.py": "import sys\n\n\nif sys.platform == \"win32\":\n    def default_shell():\n        return \"powershell.exe\"\nelse:\n    def default_shell():\n        return \"/bin/zsh\"\n    def default_shell():\n        return \"/bin/bash\"\n\n\ndef run(command):\n    shell = default_shell()\n    return [shell, \"-c\", command]\n"
+  },
+  "hazard": {
+    "path": "shell.py",
+    "pattern": "def default_shell():",
+    "count": 3
+  },
+  "caughtBy": "tripwire_b",
+  "duplicatedKey": "function\u0000default_shell\u0000#1"
+}

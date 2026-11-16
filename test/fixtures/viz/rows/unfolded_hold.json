@@ -1,7 +1,7 @@
 {
  "row": "unfolded_hold",
  "plan": 3,
- "about": "hold is unfolded in Plan 2: no event, one unknown",
+ "about": "hold was unfolded in Plan 2; since Plan 3 the fold applies it (effective: a local_only stub, the fixture has no held/ subtree), but it has no scene row until follow-up 3-V: no event, one unknown",
  "frames": [
   {
    "writer": "A",
@@ -30,9 +30,26 @@
     {
      "type": "hold",
      "hold_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+     "rev": 1,
+     "prev_rev": null,
+     "kind": "PATCH",
+     "residence": "ON_DISK",
+     "state": "ACTIVE",
+     "offer": "none",
+     "guards": [
+      {
+       "name": "revert",
+       "class": "DECISION",
+       "owner": "HLD"
+      }
+     ],
      "paths": [
       "src/a.ts"
-     ]
+     ],
+     "origin": "human",
+     "cs_ids": [],
+     "peer_authors": [],
+     "local_only": true
     }
    ]
   }

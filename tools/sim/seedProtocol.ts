@@ -3,11 +3,12 @@
 // writes, the seed and prefix syntax, and the quoting of a rerun command.
 import type { MutantId } from '../../src/engine/deps.js';
 
-export type Profile = 'edits' | 'faults';
-export const PROFILES_ALL: readonly Profile[] = Object.freeze(['edits', 'faults']);
+export type Profile = 'edits' | 'faults' | 'holds';
+/** Plan 3 Task 16 adds `holds` (R3-47, R3-51). */
+export const PROFILES_ALL: readonly Profile[] = Object.freeze(['edits', 'faults', 'holds']);
 
-/** R-29's switches (src/engine/deps.ts MutantId); the check below fails to compile when the two lists differ. */
-export const MUTANT_IDS = Object.freeze(['M05', 'M06', 'M07', 'M12', 'M17', 'M18', 'M20'] as const) satisfies readonly MutantId[];
+/** R-29's switches plus Plan 3's (R3-50) (src/engine/deps.ts MutantId); the check below fails to compile when the two lists differ. */
+export const MUTANT_IDS = Object.freeze(['M05', 'M06', 'M07', 'M12', 'M17', 'M18', 'M19', 'M20', 'M25', 'M28', 'M33', 'M38', 'M39', 'M21', 'M22', 'M46_1', 'M46_2', 'M46_3', 'M46_4', 'M44', 'M40', 'M41'] as const) satisfies readonly MutantId[];
 type MissingMutant = Exclude<MutantId, (typeof MUTANT_IDS)[number]>;
 const everyMutantListed: [MissingMutant] extends [never] ? true : never = true;
 void everyMutantListed;
@@ -16,18 +17,24 @@ export function isMutantId(v: string): v is MutantId {
   return (MUTANT_IDS as readonly string[]).includes(v);
 }
 
-/** One seed's result, one JSON line on a shard's stdout. */
+/**
+ * One seed's result, one JSON line on a shard's stdout. Plan 3 Task 16: `peers` and `steps` (the seed tuple's peers and ops), `kills`
+ * (the op-log's `killed` rows: KilledAt ends of an engine step) and `kinds` (op-log rows per kind) — optional in this type only so a
+ * report written before them still reads; every line a shard prints carries them.
+ */
 export interface SeedLine {
   seed: string; profile: Profile; ok: boolean; oracle?: string; step?: number; message?: string; ms: number; artifacts?: string;
+  peers?: number; steps?: number; kills?: number; kinds?: Record<string, number>;
 }
 
 export function isSeedLine(x: unknown): x is SeedLine {
   const o = x as Partial<SeedLine> | null;
-  return typeof o === 'object' && o !== null && typeof o.seed === 'string' && (o.profile === 'edits' || o.profile === 'faults')
+  return typeof o === 'object' && o !== null && typeof o.seed === 'string' && (PROFILES_ALL as readonly unknown[]).includes(o.profile)
     && typeof o.ok === 'boolean' && typeof o.ms === 'number';
 }
 
-export interface SeedRef { seed: string; profile: Profile; }
+/** `steps` (Plan 3 Task 16): the seed's op budget — run-seeds' --steps, else PROFILES[profile].steps; absent = ShardInput.steps. */
+export interface SeedRef { seed: string; profile: Profile; steps?: number; }
 
 /** The input file of one shard (the seed list travels in a file, never on a command line). */
 export interface ShardInput {
@@ -39,10 +46,15 @@ export interface ShardInput {
 /** A seed the run could not report (its shard died or the run's deadline passed), with the command that runs it again. */
 export interface LostSeed extends SeedRef { reason: string; rerun: string; artifacts?: string; }
 
-/** The JSON report of run-seeds (rewritten after every seed; `complete` once the run ended). */
+/**
+ * The JSON report of run-seeds (rewritten after every seed; `complete` once the run ended). `steps` is the --steps value, or null when
+ * every group ran its profile's default (Plan 3 Task 16; each result line names its own steps). `wallMs` (Plan 3 Task 16): the run's
+ * wall time so far, which the ci.yml leg reports against the 20-minute SIM budget (11-testing §3.11).
+ */
 export interface SeedsReport {
   runs: Array<{ profile: Profile; seeds: string[] }>;
-  peers: number; steps: number; mutants: string[];
+  peers: number; steps: number | null; mutants: string[];
+  wallMs?: number;
   shards: string[][];
   results: SeedLine[];
   failures: number;
@@ -80,8 +92,8 @@ export function shellQuote(arg: string): string {
   return BARE.test(arg) ? arg : `"${arg}"`;
 }
 
-/** The command that runs one seed again with the run's settings. */
+/** The command that runs one seed again with the run's settings (the seed's own steps when it has them). */
 export function rerunCommand(s: SeedRef, a: { peers: number; steps: number; mutants: readonly string[] }): string {
-  const args = ['--profile', s.profile, '--seed', s.seed, '--peers', String(a.peers), '--steps', String(a.steps), ...a.mutants.flatMap((m) => ['--mutant', m])];
+  const args = ['--profile', s.profile, '--seed', s.seed, '--peers', String(a.peers), '--steps', String(s.steps ?? a.steps), ...a.mutants.flatMap((m) => ['--mutant', m])];
   return `npm run sim:seeds -- ${args.map(shellQuote).join(' ')}`;
 }

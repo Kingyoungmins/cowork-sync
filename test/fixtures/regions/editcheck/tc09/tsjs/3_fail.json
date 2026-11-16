@@ -1,0 +1,17 @@
+{
+  "name": "tc09/tsjs/3_fail",
+  "check": 3,
+  "lang": "javascript",
+  "expect": "fail",
+  "reason": "unresolved_import",
+  "line": 1,
+  "tipEqualsA": true,
+  "A": {
+    "pricing.js": "export function price(amount, qty) {\n  return Math.round(amount * qty * 100) / 100;\n}\n\nexport function discount(amount) {\n  return Math.round(amount * 90) / 100;\n}\n",
+    "checkout.js": "import { price, discount } from './pricing.js';\n\nexport function checkout(cart) {\n  let total = 0;\n  for (const line of cart) {\n    total += price(line.amount, line.qty);\n  }\n  return discount(total);\n}\n"
+  },
+  "R": {
+    "pricing.js": "export function price(amount, qty) {\n  return Math.round(amount * qty * 100) / 100;\n}\n",
+    "checkout.js": "import { price, discount } from './pricing.js';\n\nexport function checkout(cart) {\n  let total = 0;\n  for (const line of cart) {\n    total += price(line.amount, line.qty);\n  }\n  return discount(total);\n}\n"
+  }
+}

@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, renameSync, rmSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, renameSync, rmSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { realFs } from '../../../src/ports/fs.js';
 import { fsBoundedReader, realBoundedReader, type BoundedReader } from '../../../src/viz/source/boundedRead.js';
@@ -179,7 +179,8 @@ test('readStatus reads only after an mtime change, with one open-read-close, and
       const before3 = calls.length;
       r3 = await readStatus(gitdir, r2, { fs: realFs, reader: realBoundedReader });
       const changed = calls.slice(before3);
-      const opens = (cs: FsCall[]): number => cs.filter((c) => c.op.endsWith('open') && c.paths.some((p) => p.includes('status.json'))).length;
+      // An open is promises.open on POSIX and openSync where O_NOFOLLOW is undefined (Windows: one synchronous read, W3).
+      const opens = (cs: FsCall[]): number => cs.filter((c) => /(^|\.)open(Sync)?$/.test(c.op) && c.paths.some((p) => p.includes('status.json'))).length;
       const wholeReads = calls.filter((c) => /readFile/.test(c.op) && c.paths.some((p) => p.includes('status.json')));
       assert.equal(opens(calls.slice(0, afterFirst)), 1, 'the first read: one open');
       assert.equal(opens(unchanged), 0, 'an unchanged mtime: no open');
@@ -234,6 +235,69 @@ test('readStatus reads only after an mtime change, with one open-read-close, and
     });
     const raced = await readStatus(gitdir, before, deps);
     assert.deepEqual([raced.unreadable, raced.fields?.state], [false, 'incident']);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('W3 (Windows legs): a same-process writer renaming a temp file over status.json at every event-loop turn and every timer turn while realBoundedReader reads it 200 times sees zero rename failures, and every read is one whole file', {
+  skip: POSIX ? 'W3 is Windows only (a rename over an open file is legal on POSIX)' : false,
+}, async () => {
+  // The hosted T-VIZ-contention leg (viz-slow, windows-latest) saw 3 rename EPERM with a viewer in the writer's process: the
+  // read held its handle across the event-loop turns between an async open, stat, read and close, and the writer's timer ran
+  // inside them. Here a writer runs at every turn (setImmediate) and every timer turn (setTimeout 0) for the whole test, so a
+  // handle that spans any turn is hit within a few reads; a handle that lives only inside one synchronous call never is.
+  const { cowork, cleanup } = await coworkDir('viz-w3-interleave');
+  try {
+    const status = join(cowork, 'status.json');
+    const tmp = join(cowork, 'status.json.tmp');
+    writeFileSync(status, statusBytes());
+    // Positive control: this platform refuses a rename over a file held open (W3), so zero failures below cannot be vacuous.
+    const held = openSync(status, 'r');
+    writeFileSync(tmp, statusBytes());
+    try {
+      assert.throws(() => renameSync(tmp, status), (e: NodeJS.ErrnoException) => e.code === 'EPERM' || e.code === 'EACCES', 'a rename over a held file fails (W3)');
+    } finally {
+      closeSync(held);
+    }
+    const codes: string[] = [];
+    let renames = 0;
+    let stop = false;
+    const replace = (): void => {
+      writeFileSync(tmp, statusBytes({ heartbeat_mono_ms: 1_000_000 + renames }));
+      try {
+        renameSync(tmp, status);
+      } catch (e) {
+        codes.push((e as NodeJS.ErrnoException).code ?? '?');
+      }
+      renames++;
+    };
+    const spin = (): void => {
+      if (stop) return;
+      replace();
+      setImmediate(spin);
+    };
+    const tick = (): void => {
+      if (stop) return;
+      replace();
+      setTimeout(tick, 0);
+    };
+    setImmediate(spin);
+    setTimeout(tick, 0);
+    try {
+      for (let i = 0; i < 200; i++) {
+        const r = await within(WAIT_MS, realBoundedReader.read(status, STATUS_MAX_BYTES), `read ${i}`);
+        assert.ok(Buffer.isBuffer(r), `read ${i}: the bytes of status.json, got ${String(r)}`);
+        const v = JSON.parse(r.toString('utf8')) as Record<string, unknown>;
+        assert.deepEqual([v['v'], typeof v['heartbeat_mono_ms']], [1, 'number'], `read ${i}: one whole status.json`);
+        // One turn for the writer between reads, so it replaces the file around every read as well as during it.
+        await new Promise<void>((res) => setImmediate(res));
+      }
+    } finally {
+      stop = true;
+    }
+    assert.ok(renames >= 200, `the writer ran around the reads (${renames} renames)`);
+    assert.deepEqual(codes, [], `${codes.length} of ${renames} renames failed while the reads ran`);
   } finally {
     await cleanup();
   }

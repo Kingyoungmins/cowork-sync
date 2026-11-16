@@ -330,3 +330,18 @@ test('chmod is recorded in calls and takes rules (syscall chmod)', async () => {
   assert.equal(err.code, 'EPERM');
   assert.equal(err.syscall, 'chmod');
 });
+
+test('writeFileExclusive passes its optional mode through to the inner Fs (Plan 5 A3-2)', async () => {
+  const seen: Array<number | undefined> = [];
+  const inner = Object.assign(Object.create(null) as object, realFs, {
+    writeFileExclusive: (p: string, data: Buffer, mode?: number): Promise<void> => {
+      seen.push(mode);
+      return realFs.writeFileExclusive(p, data, mode);
+    },
+  }) as typeof realFs;
+  const ffs = new FaultFs(inner);
+  await ffs.writeFileExclusive(path.join(dir, 'mode-600.bin'), Buffer.from('k'), 0o600);
+  await ffs.writeFileExclusive(path.join(dir, 'mode-none.bin'), Buffer.from('k'));
+  assert.deepEqual(seen, [0o600, undefined]);
+  assert.deepEqual(ffs.calls, [`writeFileExclusive ${path.join(dir, 'mode-600.bin')}`, `writeFileExclusive ${path.join(dir, 'mode-none.bin')}`]);
+});

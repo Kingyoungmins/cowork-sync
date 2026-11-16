@@ -8,7 +8,7 @@ import { commitFiles } from '../helpers/commitFiles.js';
 import { hermeticRepo } from '../helpers/hermetic.js';
 import { makeRepoFixture } from '../helpers/repoFixture.js';
 
-const NONE: PathAttrs = { filter: null, merge: null, text: null, binary: false, eol: null, generated: false, coworkOff: false };
+const NONE: PathAttrs = { filter: null, merge: null, text: null, binary: false, eol: null, generated: false, coworkOff: false, workingTreeEncoding: null };
 
 const ATTRIBUTES = [
   '*.sec filter=crypt',

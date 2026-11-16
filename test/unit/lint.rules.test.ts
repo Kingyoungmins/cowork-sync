@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TOKEN_ENV } from '../../src/claude/client/mcp/doorbell.js';
 import { lintSource, lintCrashpoints, lintTestSource } from '../../tools/lint/rules.js';
 
 function rules(file: string, text: string): string[] {
@@ -84,9 +85,13 @@ test('L-PERMISSION flags permissionDecision "allow" and "ask"', () => {
   assert.deepEqual(rules(F, `interface Out { permissionDecision: 'deny' | 'ask'; }`), ['L-PERMISSION']);
 });
 
+// Plan 5 Task 2 (M26): in src/** the widened L-PERMISSION flags every mention of the field, so these should-pass rows moved to a file outside
+// src/, where Plan 1's "allow"/"ask" form still applies.
+const OUTSIDE_SRC = 'test/fixtures/lint/p5/permission.ts';
+
 test('L-PERMISSION passes for "deny" and for unrelated "allow" strings', () => {
-  assert.deepEqual(rules(F, `const out = { hookSpecificOutput: { permissionDecision: 'deny' } };`), []);
-  assert.deepEqual(rules(F, `interface Out { permissionDecision: 'deny'; }\nconst mode = 'allow';`), []);
+  assert.deepEqual(rules(OUTSIDE_SRC, `const out = { hookSpecificOutput: { permissionDecision: 'deny' } };`), []);
+  assert.deepEqual(rules(OUTSIDE_SRC, `interface Out { permissionDecision: 'deny'; }\nconst mode = 'allow';`), []);
 });
 
 test('L-REFS flags + refspecs, --force, deletion refspecs and refs/worktree/', () => {
@@ -120,9 +125,13 @@ test('L-MERGE-OPTS flags -X / --strategy-option, --union, merge=union and merge-
   assert.deepEqual(rules(F, 'await git.run([\'merge-tree\', \'--write-tree\', `--merge-base=${a}`, \'-Xtheirs\', p, tip], o);'), ['L-MERGE-OPTS']);
   assert.deepEqual(rules(F, `await git.run(['merge-tree', '--write-tree', '--merge-base', a, '--strategy-option=renormalize', p, tip], o);`), ['L-MERGE-OPTS']);
   assert.deepEqual(rules(F, `const extra = 'merge-tree -X ours';`), ['L-MERGE-OPTS']);
-  assert.deepEqual(rules(F, `await git.run(['merge-file', '-p', '--object-id', '--union', a, b, c], o);`), ['L-MERGE-OPTS']);
+  // L-HOLD-STORES names --union in a merge-file argv too (HLD-12; Plan 3 Task 8): both rules fire.
+  assert.deepEqual(rules(F, `await git.run(['merge-file', '-p', '--object-id', '--union', a, b, c], o);`), ['L-MERGE-OPTS', 'L-HOLD-STORES']);
   assert.deepEqual(rules(F, `const attrs = '*.lock merge=union';`), ['L-MERGE-OPTS']);
   assert.deepEqual(rules(F, `await git.run(['merge-file', '-p', cur, base, other], o);`), ['L-MERGE-OPTS']);
+  // Ruling G1-FILEFORM: only the executor src/git/merge.ts runs the file form; the same argv anywhere else (src/holds too) still fails.
+  assert.deepEqual(rules('src/git/merge.ts', `await repo.run(['merge-file', '-p', ...call.options, '-L', l1, '-L', l2, '-L', l3, f1, f2, f3], o);`), []);
+  assert.deepEqual(rules('src/holds/mask.ts', `await repo.run(['merge-file', '-p', '-L', l1, '-L', l2, '-L', l3, f1, f2, f3], o);`), ['L-MERGE-OPTS']);
 });
 
 test('L-MERGE-OPTS passes for merge-file --object-id, the MERGE_FLAGS table, command tables and lowercase -x', () => {
@@ -167,16 +176,19 @@ test('L-OBJ-WRITE fires on hash-object and add argv outside the allowed files', 
   assert.deepEqual(rules(F, `const flags = ['--add', 'hash-object'];`), []);
 });
 
-test('L-TOKEN flags CLAUDE_CODE_MESSAGING_TOKEN as identifier, key or literal outside src/entry/mcp.ts', () => {
-  assert.deepEqual(rules(F, `const t = process.env.CLAUDE_CODE_MESSAGING_TOKEN;`), ['L-TOKEN']);
-  assert.deepEqual(rules(F, `const t = process.env['CLAUDE_CODE_MESSAGING_TOKEN'];`), ['L-TOKEN']);
-  assert.deepEqual(rules(F, `const { CLAUDE_CODE_MESSAGING_TOKEN: tok } = process.env;`), ['L-TOKEN']);
-  assert.deepEqual(rules(F, 'const k = `${prefix}CLAUDE_CODE_MESSAGING_TOKEN`;'), ['L-TOKEN']);
-  assert.deepEqual(rules('src/git/env.ts', `const NEVER = ['CLAUDE_CODE_MESSAGING_TOKEN', 'NODE_OPTIONS'];`), ['L-TOKEN']);
+// Plan 5 Task 2 (A2-3, L-TOKEN over test/**): the token's name is composed from TOKEN_ENV, never spelled here.
+test(`L-TOKEN flags ${TOKEN_ENV} as identifier, key or literal outside src/entry/mcp.ts`, () => {
+  assert.deepEqual(rules(F, `const t = process.env.${TOKEN_ENV};`), ['L-TOKEN']);
+  assert.deepEqual(rules(F, `const t = process.env['${TOKEN_ENV}'];`), ['L-TOKEN']);
+  assert.deepEqual(rules(F, `const { ${TOKEN_ENV}: tok } = process.env;`), ['L-TOKEN']);
+  assert.deepEqual(rules(F, 'const k = `${prefix}' + TOKEN_ENV + '`;'), ['L-TOKEN']);
+  assert.deepEqual(rules('src/git/env.ts', `const NEVER = ['${TOKEN_ENV}', 'NODE_OPTIONS'];`), ['L-TOKEN']);
 });
 
-test('L-TOKEN passes in src/entry/mcp.ts, for the CLAUDE_ prefix list and for other CLAUDE_ names', () => {
-  assert.deepEqual(rules('src/entry/mcp.ts', `const t = process.env.CLAUDE_CODE_MESSAGING_TOKEN;`), []);
+test('L-TOKEN passes in src/claude/client/mcp/doorbell.ts, for the CLAUDE_ prefix list and for other CLAUDE_ names', () => {
+  assert.deepEqual(rules('src/claude/client/mcp/doorbell.ts', `const t = process.env.${TOKEN_ENV};`), []);
+  // Plan 5 A1-9: the doorbell is the one reader; src/entry/mcp.ts is no longer allowed.
+  assert.deepEqual(rules('src/entry/mcp.ts', `const t = process.env.${TOKEN_ENV};`), ['L-TOKEN']);
   assert.deepEqual(rules('src/git/env.ts', `const NEVER_PREFIXES = ['CLAUDE_', 'ELECTRON_', 'VSCODE_'];`), []);
   assert.deepEqual(rules(F, `const s = process.env.CLAUDE_CODE_MESSAGING_SOCKET;`), []);
 });
@@ -374,6 +386,68 @@ test('L-PUSH-ARGV, L-CLASSIFY-TEXT and L-MIRROR fire on planted sources and not 
   assert.ok(lintSource('src/engine/publish.ts', pushText).some((x) => x.rule === 'L-PUSH-ARGV'));
   const fetcherText = files.find(([f]) => f === 'src/engine/fetcher.ts')![1];
   assert.ok(lintSource('src/engine/apply.ts', fetcherText).some((x) => x.rule === 'L-MIRROR'));
+});
+
+// L-HOLD-STORES (Plan 3 Task 8; 05-holds HLD-12, HLD-18, U2 rev 2.5; glossary §29.3; X-09, F-P3-6): one holding store, -U0 hunks
+// only in src/holds/revert.ts's revertDetector and taintOnlyH1, no merge-file --union/--theirs, --ours only in revertCs.ts's
+// revertInverse(), no WIP state and no SNAPSHOT/TRANSFORM hold kinds.
+const holdStores = (file: string, text: string): string[] => rules(file, text).filter((r) => r === 'L-HOLD-STORES');
+
+test('L-HOLD-STORES fails on a planted source naming refs/cowork-held/, refs/worktree/cowork/, cowork/quarantine/ or cowork/conflicts/', () => {
+  assert.deepEqual(holdStores(F, `const r = 'refs/cowork-held/main';`), ['L-HOLD-STORES']);
+  assert.deepEqual(rules(F, 'const r = `refs/worktree/cowork/${b}`;'), ['L-REFS', 'L-HOLD-STORES']);
+  assert.deepEqual(holdStores(F, `const d = join(gitDir, 'cowork/quarantine/' + id);`), ['L-HOLD-STORES']);
+  assert.deepEqual(holdStores('src/holds/x.ts', 'const d = `${gitDir}/cowork/conflicts/${p}`;'), ['L-HOLD-STORES']);
+  assert.deepEqual(holdStores(F, `const r = 'refs/cowork-local/main/holds';\nconst q = 'quarantine';\nconst c = 'conflicts';`), [], 'the one store and plain words pass');
+});
+
+test('L-HOLD-STORES fails when a second module calls git with -U0 or --unified=0, and when src/holds/revert.ts calls diff or merge-file outside revertDetector and taintOnlyH1', () => {
+  // A planted second -U0 user fails the build (05 U2).
+  assert.deepEqual(holdStores('src/engine/x.ts', `await repo.run(['diff', '-U0', a, b]);`), ['L-HOLD-STORES']);
+  assert.deepEqual(holdStores('src/holds/mask.ts', `await repo.run(['diff', '--unified=0', '--no-color', a, b]);`), ['L-HOLD-STORES']);
+  assert.deepEqual(holdStores('src/engine/x.ts', `const cmd = 'diff -U0';`), ['L-HOLD-STORES']);
+  // Inside revertDetector and taintOnlyH1 (also from a nested closure) the -U0 diff is the allowed one.
+  const allowedHere = [
+    `export async function revertDetector(repo: GitRepo): Promise<void> {\n  const d = async (a: Oid, b: Oid) => repo.run(['diff', '-U0', '--no-color', a, b]);\n  await d(x, y);\n}`,
+    `export async function taintOnlyH1(repo: GitRepo): Promise<void> {\n  await repo.run(['diff', '-U0', '--no-color', '--no-ext-diff', a, b]);\n}`,
+  ].join('\n');
+  assert.deepEqual(holdStores('src/holds/revert.ts', allowedHere), []);
+  // Any other function of revert.ts calling diff or merge-file fails (HLD-18: taintOnlyH1 is the single applier).
+  assert.deepEqual(holdStores('src/holds/revert.ts', `async function helper(repo: GitRepo): Promise<void> {\n  await repo.run(['diff', '-U0', a, b]);\n}`), ['L-HOLD-STORES']);
+  assert.deepEqual(holdStores('src/holds/revert.ts', `async function helper(repo: GitRepo): Promise<void> {\n  await repo.run(['diff', '--no-color', a, b]);\n}`), ['L-HOLD-STORES']);
+  assert.deepEqual(holdStores('src/holds/revert.ts', `async function apply(repo: GitRepo): Promise<void> {\n  await repo.run(['merge-file', '-p', '--object-id', a, b, c]);\n}`), ['L-HOLD-STORES']);
+  assert.deepEqual(holdStores('src/holds/revert.ts', `export async function holdReverts(): Promise<void> {\n  await mergeFile(repo, a, b, c);\n}`), ['L-HOLD-STORES']);
+  assert.deepEqual(holdStores('src/holds/revert.ts', `await repo.run(['diff', '-U0', a, b]);`), ['L-HOLD-STORES'], 'at module level');
+  // Plain diffs elsewhere (no -U0) are not this rule's.
+  assert.deepEqual(holdStores('src/engine/apply.ts', `await repo.run(['diff-tree', '-r', '-z', '--name-only', p, c]);`), []);
+});
+
+test('L-HOLD-STORES fails on a merge-file argv with --union or --theirs anywhere and with --ours outside revertInverse() in src/holds/revertCs.ts, on the literal state=wip and on a hold kind \'SNAPSHOT\' or \'TRANSFORM\' in src/', () => {
+  assert.deepEqual(holdStores(F, `await git.run(['merge-file', '-p', '--object-id', '--theirs', a, b, c], o);`), ['L-HOLD-STORES']);
+  assert.deepEqual(holdStores('src/holds/revertCs.ts', `export async function revertInverse(): Promise<void> {\n  await repo.run(['merge-file', '-p', '--object-id', '--theirs', a, b, c]);\n}`), ['L-HOLD-STORES'], '--theirs even there');
+  // rev 2.5 (glossary §29.3, X-09): the one --ours caller is revertInverse() in src/holds/revertCs.ts.
+  const inverse = `export async function revertInverse(repo: GitRepo): Promise<void> {\n  const run = () => repo.run(['merge-file', '-p', '--object-id', '--ours', cur, base, other]);\n  await run();\n}`;
+  assert.deepEqual(holdStores('src/holds/revertCs.ts', inverse), []);
+  // A second injected --ours caller fails: another function of that file, or another module.
+  assert.deepEqual(holdStores('src/holds/revertCs.ts', `${inverse}\nexport async function other(repo: GitRepo): Promise<void> {\n  await repo.run(['merge-file', '-p', '--object-id', '--ours', a, b, c]);\n}`), ['L-HOLD-STORES']);
+  assert.deepEqual(holdStores('src/engine/x.ts', `export async function revertInverse(repo: GitRepo): Promise<void> {\n  await repo.run(['merge-file', '-p', '--object-id', '--ours', a, b, c]);\n}`), ['L-HOLD-STORES'], 'the exception is that file only');
+  assert.deepEqual(holdStores('src/git/merge.ts', `args.push('--ours');`), ['L-HOLD-STORES'], 'an argv built by push');
+  // HLD-12: no time-capped WIP publishing, no SNAPSHOT or TRANSFORM hold kinds.
+  assert.deepEqual(holdStores(F, 'const v = `${csId} state=wip seq=1`;'), ['L-HOLD-STORES']);
+  assert.deepEqual(holdStores('src/holds/record.ts', `export type HoldKind = 'PATCH' | 'PIN' | 'INCOMING' | 'SNAPSHOT';`), ['L-HOLD-STORES']);
+  assert.deepEqual(holdStores('src/holds/x.ts', `const k = { kind: 'TRANSFORM' };`), ['L-HOLD-STORES']);
+  assert.deepEqual(holdStores(F, `const s = 'state=checkpoint';\nconst k = 'PATCH';\nconst t = 'snapshot';`), []);
+});
+
+test('L-HOLD-STORES passes on the real src/ tree', () => {
+  const files = srcFiles();
+  const names = files.map(([f]) => f);
+  for (const must of ['src/holds/revert.ts', 'src/holds/provenance.ts', 'src/git/merge.ts', 'src/holds/mask.ts', 'src/holds/record.ts']) assert.ok(names.includes(must), must);
+  const hits = files.flatMap(([f, text]) => lintSource(f, text).filter((x) => x.rule === 'L-HOLD-STORES').map((x) => `${x.file}:${x.line} ${x.message}`));
+  assert.deepEqual(hits, []);
+  // …and revert.ts really holds the -U0 calls: moved to another file, the rule fires on it.
+  const revertText = files.find(([f]) => f === 'src/holds/revert.ts')![1];
+  assert.ok(lintSource('src/holds/mask.ts', revertText).some((x) => x.rule === 'L-HOLD-STORES'));
 });
 
 test('findings carry the 1-based line and a forward-slash file path', () => {

@@ -22,18 +22,21 @@
 // off the chain, re-anchored by its recover (recover.reanchor) — then the `faults` generator (partitions, transient
 // rejections, lease races, edits) runs on, and the R-32 quiescence ends the run.
 //
+// The driver and the prologue's segments live in test/sim/crashMatrix.ts (Plan 3 Task 16 extracted them, unchanged, so the `holds`
+// crash matrix shares them); this file supplies the faults setup and its schedules.
+//
 // Real git against a file:// bare remote; git is never mocked. Long: runs when COWORK_SIM_LONG=1 (sim-long.yml).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { KilledAt, setCrashHandler } from '../../src/ports/crashpoint.js';
 import { seededRandom } from '../../src/ports/random.js';
 import { GENESIS_YIELD, PLAN2_CRASHPOINTS } from '../helpers/plan2Crashpoints.js';
-import { dropArtifacts, editRowStep, recoverStep, rewindBoardStep, rounds, scripted, writeFileStep, type ScriptStep } from '../helpers/simOps.js';
+import { dropArtifacts, scripted, type ScriptStep } from '../helpers/simOps.js';
+import { currentOp, groupsLeadIn, joinLeadIn, k4LeadIn, reanchorLeadIn, rewindLeadIn, runCrashMatrix, then, type MatrixView } from '../sim/crashMatrix.js';
 import { realEngine } from '../sim/engineAdapter.js';
 import { editGenerator, PROFILES, seedFilesPlan2 } from '../sim/generators.js';
-import { DEFAULT_QUIESCENCE, runSim, type OpGenerator, type SimContext, type SimResult } from '../sim/harness.js';
+import { DEFAULT_QUIESCENCE, type SimContext } from '../sim/harness.js';
 import { exitOracles } from '../sim/oracles.js';
 
 const LONG = process.env['COWORK_SIM_LONG'] === '1';
@@ -47,8 +50,6 @@ const PEERS = 3;
 const ITERATION_POINTS: readonly string[] = Object.freeze([
   'apply.intent', 'apply.group.phase1', 'apply.group.phase2', 'apply.state', 'publish.out_built', 'publish.sent', 'publish.landed', 'snapshot.index_written',
 ]);
-/** The op-log kinds the engine adapter adds inside an op (never the op itself). */
-const ADAPTER_KINDS: ReadonlySet<string> = new Set(['start', 'start_refused', 'killed', 'crash_armed', 'crash_disarmed']);
 
 type Schedule = 'first' | 'faults-phase' | 'fault-active';
 const SEEDS: ReadonlyArray<{ seed: string; schedule: Schedule }> = Object.freeze([
@@ -57,65 +58,20 @@ const SEEDS: ReadonlyArray<{ seed: string; schedule: Schedule }> = Object.freeze
   { seed: 'crash-matrix-2', schedule: 'fault-active' },
 ]);
 
-const rows = (tag: string, n: number): string[] => Array.from({ length: n }, (_, i) => `${tag} row ${i}`);
-
-/** Every peer at the same board tip: rounds with nothing new to publish. */
-const settle = (n: number): ScriptStep[] => rounds(n, PEERS, 5_000);
-
-function prologue(start: (ctx: SimContext) => void): ScriptStep[] {
+/**
+ * Plan 2's prologue (the lead-in segments of test/sim/crashMatrix.ts in their Plan 2 order): the kill-arming op (step 0 — the driver
+ * arms the crash handler and the yield hook itself, so the op only names the yield point), genesis and two joins, the two change-sets
+ * one apply takes in two groups, the K4 same-line edit, the board rewind and recover, the re-anchor.
+ */
+function prologue(): ScriptStep[] {
   return [
-    { op: (ctx) => ({ peer: '*', kind: 'arm_kills', run: async (c) => { start(c); return GENESIS_YIELD; } }) },
-    // Genesis (killed before its push, then again from scratch) and two joins (the first killed after its first apply).
-    { iterate: 0 }, { iterate: 0 }, { iterate: 1 }, { iterate: 1 }, { iterate: 2 },
-    ...settle(6),
-    // A 2-path change-set on p0 and an independent one on p1; p2 applies both in one apply (two groups).
-    writeFileStep(0, 'own/cm-p0-a.txt', rows('p0 a', 4)),
-    writeFileStep(0, 'own/cm-p0-b.txt', rows('p0 b', 4)),
-    writeFileStep(1, 'own/cm-p1-a.txt', rows('p1 a', 4)),
-    { iterate: 0 }, { iterate: 1 }, { wait: 25_000 },
-    { iterate: 0 }, { wait: 6_000 }, { iterate: 0 },
-    ...Array.from({ length: 8 }, (): ScriptStep[] => [{ wait: 11_000 }, { iterate: 1 }]).flat(),
-    { wait: 11_000 }, { iterate: 2 }, { wait: 11_000 }, { iterate: 2 }, { wait: 11_000 }, { iterate: 2 },
-    ...settle(6),
-    // The same line of notes.txt on p0 and p1: the later one's apply displaces its row (K4, a hold record).
-    editRowStep(0, 'notes.txt', 4, 'note row 4 p0 crash-matrix'),
-    editRowStep(1, 'notes.txt', 4, 'note row 4 p1 crash-matrix'),
-    { iterate: 0 }, { iterate: 1 }, { wait: 25_000 },
-    { iterate: 0 }, { wait: 11_000 }, { iterate: 1 }, { wait: 11_000 }, { iterate: 1 },
-    ...settle(6),
-    // A rewound board: INCIDENT everywhere, a human recover on p0 (dies at recover.displaced, restarts, is re-run).
-    rewindBoardStep(1),
-    ...rounds(2, PEERS, 6_000),
-    recoverStep(0), recoverStep(0),
-    ...settle(6),
-    // Re-anchor (01-engine test 35): p1 alone publishes twice; the board is rewound below everyone's LA_B; p0 detects,
-    // pushes its displaced copy and restores its LA_B; p0 publishes on it; p1 wakes, detects and re-anchors.
-    writeFileStep(1, 'own/cm-p1-late-1.txt', rows('p1 late 1', 3)), { iterate: 1 }, { wait: 25_000 }, { iterate: 1 },
-    writeFileStep(1, 'own/cm-p1-late-2.txt', rows('p1 late 2', 3)), { iterate: 1 }, { wait: 25_000 }, { iterate: 1 },
-    rewindBoardStep(3),
-    { wait: 3_000 }, { iterate: 0 }, { wait: 6_000 }, { iterate: 0 }, { wait: 6_000 }, { iterate: 0 },
-    recoverStep(0),
-    { wait: 6_000 }, { iterate: 0 }, { iterate: 2 },
-    writeFileStep(0, 'own/cm-p0-after.txt', rows('p0 after', 3)), { iterate: 0 }, { wait: 25_000 }, { iterate: 0 },
-    { wait: 6_000 }, { iterate: 2 }, { iterate: 0 },
-    { wait: 3_000 }, { iterate: 1 }, { wait: 6_000 }, { iterate: 1 }, { wait: 6_000 }, { iterate: 1 },
-    recoverStep(1), recoverStep(1),
-    ...settle(4),
+    { op: () => ({ peer: '*', kind: 'arm_kills', run: async () => GENESIS_YIELD }) },
+    ...joinLeadIn(PEERS),
+    ...groupsLeadIn(PEERS),
+    ...k4LeadIn(PEERS),
+    ...rewindLeadIn(PEERS),
+    ...reanchorLeadIn(PEERS),
   ];
-}
-
-/** `first` for its steps, then `rest`. */
-function then(first: OpGenerator, steps: number, rest: OpGenerator): OpGenerator {
-  return { next: (ctx, step) => (step < steps ? first.next(ctx, step) : rest.next(ctx, step)) };
-}
-
-/** The op the harness is running now (the last op-log entry the adapter did not add) and its step. */
-function currentOp(ctx: SimContext): { step: number; kind: string } {
-  for (let i = ctx.opLog.length - 1; i >= 0; i--) {
-    const e = ctx.opLog[i]!;
-    if (!ADAPTER_KINDS.has(e.kind)) return { step: e.step, kind: e.kind };
-  }
-  return { step: -1, kind: '' };
 }
 
 /** A fault is active now: a race_push op is running, the remote is partitioned, or a transient rejection is pending. */
@@ -137,45 +93,44 @@ function faultActive(ctx: SimContext): string | null {
 
 interface Kill { name: string; step: number; phase: string; op: string; fault: string | null; }
 
+/**
+ * The faults setup of the driver (Plan 2's schedules, unchanged): the prologue, then the `faults` generator; every Plan 2 crashpoint
+ * and the genesis yield die once — at their first hit, or (crash-matrix-1, -2) an iteration point only once its schedule is due.
+ */
+function faultsRun(s: { seed: string; schedule: Schedule }, prologueSteps: number, script: readonly ScriptStep[]) {
+  return {
+    tuple: { seed: s.seed, peers: PEERS, ops: script.length + FAULT_STEPS },
+    factory: realEngine(),
+    oracles: exitOracles(),
+    options: {
+      generator: then(scripted(script), script.length, editGenerator(PROFILES.faults)),
+      quiescence: DEFAULT_QUIESCENCE, seedFiles: seedFilesPlan2(seededRandom(`${s.seed}/files`)),
+    },
+    kill(name: string, v: MatrixView): string | null {
+      if (name !== GENESIS_YIELD && !PLAN2_CRASHPOINTS.includes(name)) return null;
+      if (v.kills.some((k) => k.name === name)) return null;
+      const op = currentOp(v.ctx);
+      const fault = faultActive(v.ctx);
+      if (s.schedule !== 'first' && ITERATION_POINTS.includes(name)) {
+        const inFaults = v.ctx.phase === 'ops' && op.step >= prologueSteps;
+        const due = s.schedule === 'faults-phase' ? inFaults || v.ctx.phase !== 'ops' : (inFaults && fault !== null) || v.ctx.phase !== 'ops';
+        if (!due) return null;
+      }
+      return fault ?? '';
+    },
+  };
+}
+
 test('each of the 14 crashpoints killed once in each of 3 faults seeds, with restart, passes every exit oracle', { skip: !LONG && 'set COWORK_SIM_LONG=1 (sim-long.yml runs the crash matrix nightly)' }, async (t) => {
   assert.equal(PLAN2_CRASHPOINTS.length, 14);
   for (const { seed, schedule } of SEEDS) {
     await t.test(`${seed} (${schedule})`, { skip: ONLY !== null && !ONLY.includes(seed) && `COWORK_SIM_ONLY=${ONLY.join(',')}` }, async () => {
-      const kills: Kill[] = [];
-      let run: SimContext | null = null;
-      let prologueSteps = 0;
-      const kill = (name: string): void => {
-        const ctx = run;
-        if (ctx === null || kills.some((k) => k.name === name)) return;
-        const op = currentOp(ctx);
-        const fault = faultActive(ctx);
-        if (schedule !== 'first' && ITERATION_POINTS.includes(name)) {
-          const inFaults = ctx.phase === 'ops' && op.step >= prologueSteps;
-          const due = schedule === 'faults-phase' ? inFaults || ctx.phase !== 'ops' : (inFaults && fault !== null) || ctx.phase !== 'ops';
-          if (!due) return;
-        }
-        kills.push({ name, step: op.step, phase: ctx.phase, op: op.kind, fault });
-        throw new KilledAt(name);
-      };
-      const script = prologue((ctx) => {
-        run = ctx;
-        ctx.scheduler.onYield = (name) => {
-          if (name === GENESIS_YIELD) kill(name);
-        };
-      });
-      prologueSteps = script.length;
-      let r: SimResult;
-      setCrashHandler((name) => {
-        if (PLAN2_CRASHPOINTS.includes(name)) kill(name);
-      });
-      try {
-        r = await runSim({ seed, peers: PEERS, ops: script.length + FAULT_STEPS }, realEngine(), exitOracles(), {
-          generator: then(scripted(script), script.length, editGenerator(PROFILES.faults)),
-          quiescence: DEFAULT_QUIESCENCE, seedFiles: seedFilesPlan2(seededRandom(`${seed}/files`)),
-        });
-      } finally {
-        setCrashHandler(null);
-      }
+      const script = prologue();
+      const prologueSteps = script.length;
+      // crashMatrix.ts drives the run (Plan 3 Task 16: the driver extracted from this test, parameterised by this setup).
+      const [res] = await runCrashMatrix((s) => faultsRun(s, prologueSteps, script), [{ seed, schedule }]);
+      const r = res!.r;
+      const kills: Kill[] = res!.kills.map((k) => ({ name: k.name, step: k.step, phase: k.phase, op: k.op, fault: k.note === '' ? null : k.note }));
       const killed = kills.map((k) => k.name);
       const where = JSON.stringify(kills);
       // A failed run keeps its temp root (runSim): the message names it.
@@ -213,4 +168,54 @@ test('each of the 14 crashpoints killed once in each of 3 faults seeds, with res
       assert.equal(r.quiescence?.reached, true);
     });
   }
+});
+
+/**
+ * crash-matrix-0's whole prologue (204 steps) under the pre-extraction driver: recorded from f17c589's sim.crash.test.ts (a scratch copy of
+ * that commit whose test ran the prologue with its own crash handler, yield hook and runSim, five exit oracles, no quiescence; Plan 3
+ * Task 16 fix round 1, 296 s). Each kill [point, op-log step, op, killed peer]; each restart [step, peer, start mode]; each recover
+ * [step, peer, outcome]. The prologue kills 13 of the 15 points (apply.between_groups and recover.reanchor are not reached in it on this
+ * engine: the full test meets them later or fails there, as before the extraction).
+ */
+const PROLOGUE_F17C589 = Object.freeze({
+  steps: 204,
+  kills: [
+    [GENESIS_YIELD, 1, 'iterate', 'p0'], ['snapshot.index_written', 2, 'iterate', 'p0'], ['join.first_apply', 3, 'iterate', 'p1'],
+    ['publish.out_built', 9, 'iterate', 'p2'], ['publish.sent', 12, 'iterate', 'p1'], ['publish.landed', 17, 'iterate', 'p2'],
+    ['apply.intent', 40, 'iterate', 'p1'], ['apply.group.phase1', 44, 'iterate', 'p1'], ['apply.group.mid', 48, 'iterate', 'p1'],
+    ['apply.group.phase2', 52, 'iterate', 'p1'], ['apply.state', 56, 'iterate', 'p2'], ['registry.cas', 92, 'iterate', 'p1'],
+    ['recover.displaced', 169, 'recover', 'p0'],
+  ],
+  starts: [
+    [4, 'p1', 'restart'], [5, 'p2', 'join'], [7, 'p0', 'restart'], [13, 'p2', 'restart'], [16, 'p1', 'restart'], [21, 'p2', 'restart'],
+    [42, 'p1', 'restart'], [46, 'p1', 'restart'], [50, 'p1', 'restart'], [54, 'p1', 'restart'], [58, 'p2', 'restart'], [94, 'p1', 'restart'],
+    [171, 'p0', 'restart'],
+  ],
+  recovers: [
+    [128, 'p0', 'refused RECOVER_NOT_IN_INCIDENT'], [129, 'p0', 'refused RECOVER_NOT_IN_INCIDENT'], [169, 'p0', 'preview restore'],
+    [186, 'p1', 'preview restore done restore'], [187, 'p1', 'refused RECOVER_NOT_IN_INCIDENT'],
+  ],
+});
+
+// Plan 3 Task 16 (fix round 1: the whole prologue): the extraction kept the runs — the same seed through runCrashMatrix with this file's
+// faults setup kills the same points, at the same steps, in the same peers' engine calls, restarts and recovers them the same way as the
+// pre-extraction test did (PROLOGUE_F17C589), with five exit oracles after every op. The full three-seed test (each point once per seed,
+// the schedules, quiescence) is the COWORK_SIM_LONG run above (sim-long.yml).
+test('crashMatrix.ts drives Plan 2\'s sim.crash runs unchanged', { timeout: 40 * 60_000 }, async () => {
+  const src = readFileSync(new URL('./sim.crash.test.ts', import.meta.url), 'utf8');
+  assert.match(src, /import \{[^}]*runCrashMatrix[^}]*\} from '\.\.\/sim\/crashMatrix\.js';/, 'the matrix runs through the shared driver');
+  assert.doesNotMatch(src, /setCrashHandler\(|await runSim\(/, 'no crash handler and no runSim of its own');
+  const script = prologue();
+  assert.equal(script.length, PROLOGUE_F17C589.steps, 'Plan 2\'s prologue, unchanged');
+  const [res] = await runCrashMatrix((s) => {
+    const run = faultsRun(s, script.length, script);
+    return { ...run, tuple: { ...run.tuple, ops: script.length }, oracles: exitOracles().filter((o) => o.name !== 'INV-CONVERGE'), options: { ...run.options, quiescence: undefined } };
+  }, [{ seed: 'crash-matrix-0', schedule: 'first' as const }]);
+  const r = res!.r;
+  assert.ok(r.ok, JSON.stringify(r.failure));
+  await dropArtifacts(r);
+  assert.deepEqual(res!.kills.map((k) => [k.name, k.step, k.op, k.peer]), PROLOGUE_F17C589.kills, 'every kill: point, step, op and peer');
+  assert.deepEqual(r.opLog.filter((e) => e.kind === 'killed').map((e) => [e.step, e.peer, e.detail.split(' ')[0]]), PROLOGUE_F17C589.kills.map(([n, step, , peer]) => [step, peer, n]), 'one killed row per kill, in that peer');
+  assert.deepEqual(r.opLog.filter((e) => e.kind === 'start').map((e) => [e.step, e.peer, e.detail.split(' ')[0]]), PROLOGUE_F17C589.starts, 'every restart (and the join) at the same step');
+  assert.deepEqual(r.opLog.filter((e) => e.kind === 'recover').map((e) => [e.step, e.peer, e.detail.replace(/^dt=\d+ /, '')]), PROLOGUE_F17C589.recovers, 'every recover with the same outcome');
 });

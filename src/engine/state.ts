@@ -9,7 +9,8 @@
 //     intent.json      blob   the journaled intent (canonical JSON)
 //     t/<M|S|TIP|P>    tree   trees an intent references
 //     ready/<k>/{R,A}  tree   ready pairs, k = readyKey(cs_id)
-//     keep/<name>      tree   trees kept reachable; keep/fold/state.json = the fold state (PRO-25, R-14)
+//     keep/<name>      tree   trees kept reachable; keep/fold/state.json = the fold state (PRO-25, R-14);
+//                             keep/cs/table.json = the change-set table (Plan 3 Task 9, R3-40)
 //
 // so every object the state names is reachable for `git gc --prune=now`. Metadata trees are built with mktree
 // from existing objects, one call per directory level (R-15); the ref changes only by one CAS update-ref
@@ -18,13 +19,17 @@
 // whatever else that state holds (LIF-37, ruling P2-METAFIRST); it then checks the commit, the layout and every
 // named object, and anything missing or unparsable is a LostStateError carrying the unusable commit (ENG-54), which
 // rebuild() replaces by one CAS from that commit (ruling P2-REBUILD).
+//
+// Ready pairs (Plan 3 Task 9, R3-40, R3-68): journal/ready/ accepts human (`<peer_id>/human/<n>`) and seat
+// (`<seat_id>/<turn-seq>`) cs_ids once the change-set table is journaled, and a pair's order is the table's `orders`; while no
+// table is journaled only human pairs exist and Plan 2's order === n holds, on read and on commit.
 import { STATE_SUBJECT } from '../board/boardCommit.js';
 import { canonicalBytes, type Json } from '../board/canonicalJson.js';
 import { parseFold, serializeFold, type FoldState } from '../board/fold.js';
 import type { PeerId } from '../board/ids.js';
 import { ABSENT, isOid, parseOid, type Oid, type OidOrAbsent } from '../git/oid.js';
 import { GitCommandError, type GitRepo, type MktreeEntry } from '../git/repo.js';
-import { readyKey, type ReadyPair } from '../holds/changesets.js';
+import { humanCsN, parseCsTable, readyKey, serializeCsTable, type CsTable, type ReadyPair } from '../holds/changesets.js';
 import type { Trace } from '../ports/trace.js';
 import { validId, validPathSyntax } from '../sec/validators.js';
 import { MetaTooNewError, parseMeta, serializeMeta, type Meta } from './meta.js';
@@ -77,9 +82,11 @@ const BLOB_MODE = '100644';
 const JOURNAL_TREES: ReadonlySet<string> = new Set(Object.keys({ M: 1, S: 1, TIP: 1, P: 1 } satisfies Record<JournalTree, 1>));
 const FOLD_NAME = 'fold';
 const FOLD_FILE = 'state.json';
+/** journal/keep/cs/table.json: the change-set table (R3-40). */
+const CS_KEEP = 'cs';
+const CS_FILE = 'table.json';
 /** A keep/ name: one plain path component; 'fold' is the fold state's own entry. */
 const KEEP_NAME = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$/;
-const HUMAN_CS = /^[0-9a-f]{32}\/human\/([1-9][0-9]*)$/;
 
 type Obj = Record<string, unknown>;
 
@@ -182,12 +189,13 @@ function serializeIntent(i: Intent): Buffer {
   return buf;
 }
 
-/** n of `<peer>/human/<n>`: the ready pair's capture order (R-01); Plan 2 journals human CSs only. */
-function humanOrder(csId: string): number | null {
-  const m = HUMAN_CS.exec(csId);
-  if (m === null) return null;
-  const n = Number(m[1]);
-  return Number.isSafeInteger(n) ? n : null;
+/**
+ * The capture order of a journaled ready pair: the table's `orders[cs_id]` once a table is journaled (R3-40), else n of
+ * `<peer>/human/<n>` (R-01; only human pairs exist before the first table, R3-68). Null when neither names it.
+ */
+function pairOrder(csId: string, table: CsTable | null): number | null {
+  if (table === null) return humanCsN(csId);
+  return Object.prototype.hasOwnProperty.call(table.orders, csId) ? table.orders[csId]! : null;
 }
 
 /** The cs_id a journal/ready key names: readyKey's inverse, only for the key readyKey itself writes. */
@@ -267,6 +275,7 @@ function initial(init: StateInit): Resolved {
 
 export class StateStore {
   private readonly d: { repo: GitRepo; refs: RefNames; trace: Trace; peer: () => PeerId };
+  private tableMemo: { tree: Oid; table: CsTable } | null = null;
 
   constructor(d: { repo: GitRepo; refs: RefNames; trace: Trace; peer: () => PeerId }) {
     this.d = d;
@@ -343,16 +352,6 @@ export class StateStore {
       t.set(name as JournalTree, e.oid);
     }
 
-    const ready: ReadyPair[] = [];
-    for (const [k, e] of await lsTree(repo, journal.ready.oid)) {
-      check(isTree(e), `journal/ready/${k} is not a tree`);
-      const csId = csIdOfKey(k);
-      const order = humanOrder(csId);
-      check(order !== null, `journal/ready/${k} is not a human change-set`);
-      const pair = exact(await lsTree(repo, e.oid), { R: 'tree', A: 'tree' }, `journal/ready/${k}`);
-      ready.push({ csId, R: pair.R.oid, A: pair.A.oid, paths: await this.pairPaths(pair.R.oid, pair.A.oid), order: order! });
-    }
-
     const keep = new Map<string, Oid>();
     let fold: FoldState | null = null;
     for (const [name, e] of await lsTree(repo, journal.keep.oid)) {
@@ -366,6 +365,19 @@ export class StateStore {
         keep.set(name, e.oid);
       }
     }
+    // R3-40: the journaled change-set table names every ready pair's order.
+    const csTree = keep.get(CS_KEEP);
+    const table = csTree === undefined ? null : await this.tableOf(csTree);
+
+    const ready: ReadyPair[] = [];
+    for (const [k, e] of await lsTree(repo, journal.ready.oid)) {
+      check(isTree(e), `journal/ready/${k} is not a tree`);
+      const csId = csIdOfKey(k);
+      const order = pairOrder(csId, table);
+      check(order !== null, table === null ? `journal/ready/${k} is not a human change-set` : `journal/ready/${k}: the CS table names no order for ${csId}`);
+      const pair = exact(await lsTree(repo, e.oid), { R: 'tree', A: 'tree' }, `journal/ready/${k}`);
+      ready.push({ csId, R: pair.R.oid, A: pair.A.oid, paths: await this.pairPaths(pair.R.oid, pair.A.oid), order: order! });
+    }
 
     // Every named object the reads above did not open from the object store: the parents, base, snap, the
     // t/ and keep/ trees, and R and A (whose listings may come from GitRepo's tree cache).
@@ -376,6 +388,14 @@ export class StateStore {
     ]);
 
     return { commit, laC, laB, base: root.base.oid, snap: root.snap.oid, meta, intent, t, ready: sortReady(ready), keep, fold };
+  }
+
+  /** The CS table a journal/keep/cs tree holds (one table.json blob, canonical JSON); the last one read is kept by its tree oid. */
+  private async tableOf(tree: Oid): Promise<CsTable> {
+    if (this.tableMemo?.tree === tree) return this.tableMemo.table;
+    const table = await readTableTree(this.d.repo, tree);
+    this.tableMemo = { tree, table };
+    return table;
   }
 
   /** The union of R's and A's paths: the CS paths as the journal records them (R-01). */
@@ -401,11 +421,20 @@ export class StateStore {
       check(KEEP_NAME.test(name) && name !== FOLD_NAME, `${JSON.stringify(name)} is not a keep name`);
       parseOid(o);
     }
+    // R3-40 / R3-68: with a table every pair's order is the table's; without one only human pairs with order n (Plan 2).
+    const csTree = s.keep.get(CS_KEEP);
+    const table = csTree === undefined ? null : await this.tableOf(csTree);
     const seenKeys = new Set<string>();
     for (const p of s.ready) {
-      const order = humanOrder(p.csId);
-      check(order !== null, `ready pair ${JSON.stringify(p.csId)} is not a human change-set`);
-      check(p.order === order, `ready pair ${p.csId} has order ${p.order}, its cs_id says ${String(order)}`);
+      const order = pairOrder(p.csId, table);
+      if (table === null) {
+        check(order !== null, `ready pair ${JSON.stringify(p.csId)} is not a human change-set`);
+        check(p.order === order, `ready pair ${p.csId} has order ${p.order}, its cs_id says ${String(order)}`);
+      } else {
+        check(validId('cs', p.csId), `ready pair ${JSON.stringify(p.csId)} is not a change-set id`);
+        check(order !== null, `ready pair ${p.csId} has order ${p.order}, the CS table names no order for it`);
+        check(p.order === order, `ready pair ${p.csId} has order ${p.order}, the CS table says ${String(order)}`);
+      }
       const k = readyKey(p.csId);
       check(!seenKeys.has(k), `ready pair ${p.csId} is listed twice`);
       seenKeys.add(k);
@@ -446,6 +475,66 @@ export class StateStore {
       t: new Map(s.t), ready: sortReady(ready), keep: new Map(s.keep), fold: s.fold,
     };
   }
+}
+
+/** journal/keep/cs: exactly one table.json blob holding a valid table (a StateFormatError otherwise). */
+async function readTableTree(repo: GitRepo, tree: Oid): Promise<CsTable> {
+  const e = exact(await lsTree(repo, tree), { [CS_FILE]: 'blob' } as Record<typeof CS_FILE, 'blob'>, `journal/keep/${CS_KEEP}`);
+  try {
+    return parseCsTable(await repo.readBlob(e[CS_FILE].oid));
+  } catch (err) {
+    if (err instanceof TypeError) throw new StateFormatError(`journal/keep/${CS_KEEP}/${CS_FILE}: ${err.message}`);
+    throw err;
+  }
+}
+
+/** The journaled change-set table (journal/keep/cs/table.json, R3-40), or null while none is journaled (R3-68). */
+export async function readCsTable(repo: GitRepo, view: StateView): Promise<CsTable | null> {
+  const tree = view.keep.get(CS_KEEP);
+  return tree === undefined ? null : readTableTree(repo, tree);
+}
+
+/** ['cs', the tree holding table.json] for Transition.keep: the table as canonical JSON (R3-40). */
+export async function csTableKeep(repo: GitRepo, t: CsTable): Promise<readonly [string, Oid]> {
+  const blobOid = await repo.hashBytes(serializeCsTable(t), true);
+  return [CS_KEEP, await repo.mktree([blob(CS_FILE, blobOid)])];
+}
+
+/**
+ * journal/keep/op_snap/paths.json (EF2 fix round 1, F3; R-01 as ruled for EF2): per path, the entry (blob oid, or ABSENT for a
+ * deletion) an R3-60 snap-only operator transition — the park family, `--discard` — set in state:snap and that state:snap still holds.
+ * The restart's re-form tells these writes (attributed, never a human delta) from a human change taken into snap by an apply. Written
+ * by holdOps.parkWritten in its own snap transition; every other transition that moves snap drops the entries the new snap no longer
+ * holds (core.commit), and a capture's state update drops the entries of the paths its pairs name — a captured human change (EF2 fix
+ * round 2, csStep's dropCapturedOpSnap). Canonical JSON {path: oid | "ABSENT"}; an unreadable one reads as empty (a later re-form only
+ * hands more over).
+ */
+export const OP_SNAP_KEEP = 'op_snap';
+const OP_SNAP_FILE = 'paths.json';
+
+/** The journaled operator-written snap entries (OP_SNAP_KEEP); empty when none is journaled or it cannot be read. */
+export async function readOpSnap(repo: GitRepo, view: StateView): Promise<Map<string, OidOrAbsent>> {
+  const out = new Map<string, OidOrAbsent>();
+  const tree = view.keep.get(OP_SNAP_KEEP);
+  if (tree === undefined) return out;
+  try {
+    const e = (await lsTree(repo, tree)).get(OP_SNAP_FILE);
+    if (e === undefined || !isBlob(e)) return out;
+    const v: unknown = JSON.parse((await repo.readBlob(e.oid)).toString('utf8'));
+    if (!isObj(v)) return out;
+    for (const [p, o] of Object.entries(v)) if (typeof o === 'string' && oidOrAbsent(o) && validPathSyntax(p)) out.set(p, o as OidOrAbsent);
+  } catch (err) {
+    if (!(err instanceof SyntaxError) && !(err instanceof GitCommandError) && !(err instanceof StateFormatError)) throw err;
+  }
+  return out;
+}
+
+/** [OP_SNAP_KEEP, the tree holding paths.json] for Transition.keep (canonical JSON, paths sorted). */
+export async function opSnapKeep(repo: GitRepo, m: ReadonlyMap<string, OidOrAbsent>): Promise<readonly [string, Oid]> {
+  const obj: Record<string, Json> = {};
+  for (const p of [...m.keys()].sort()) obj[p] = m.get(p)!;
+  const blobOid = await repo.hashBytes(canonicalBytes(obj), true);
+  return [OP_SNAP_KEEP, await repo.mktree([blob(OP_SNAP_FILE, blobOid)])];
 }
 
 /** Capture order (newest last), the order "newest capture wins" reads them in. */

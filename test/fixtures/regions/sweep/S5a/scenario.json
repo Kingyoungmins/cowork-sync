@@ -1,0 +1,31 @@
+{
+  "name": "S5a",
+  "files": {
+    "routes.py": {
+      "base": "from functools import lru_cache\n\nfrom web import app, load_order\n\n\ndef helper_after_routes(order):\n    return {\"id\": order.id, \"total\": order.total}\n\n\n# Look up one order by id.\n@app.route(\"/orders/<id>\")\ndef get_order(order_id):\n    order = load_order(order_id)\n    return helper_after_routes(order)\n",
+      "ours": "from functools import lru_cache\n\nfrom web import app, load_order\n\n\ndef helper_after_routes(order):\n    return {\"id\": order.id, \"total\": order.total}\n\n\n# Look up one order by id.\n@app.route(\"/orders/<order_id>\")\ndef get_order(order_id):\n    order = load_order(order_id)\n    return helper_after_routes(order)\n",
+      "theirs": "from functools import lru_cache\n\nfrom web import app, load_order\n\n\ndef helper_after_routes(order):\n    return {\"id\": order.id, \"total\": order.total}\n\n\n# Look up one order by id.\n@app.route(\"/orders/<int:id>\")\n@lru_cache(maxsize=128)\ndef get_order(order_id):\n    order = load_order(order_id)\n    return helper_after_routes(order)\n"
+    }
+  },
+  "claims": [
+    {
+      "holderSeat": "p1/seat-holder",
+      "path": "routes.py",
+      "claimUnit": "get_order"
+    }
+  ],
+  "expect": "held",
+  "oracle": {
+    "routes.py": "from functools import lru_cache\n\nfrom web import app, load_order\n\n\ndef helper_after_routes(order):\n    return {\"id\": order.id, \"total\": order.total}\n\n\n# Look up one order by id.\n@app.route(\"/orders/<int:id>\")\n@lru_cache(maxsize=128)\ndef get_order(order_id):\n    order = load_order(order_id)\n    return helper_after_routes(order)\n"
+  },
+  "corrupting": true,
+  "corruptOut": {
+    "routes.py": "from functools import lru_cache\n\nfrom web import app, load_order\n\n\ndef helper_after_routes(order):\n    return {\"id\": order.id, \"total\": order.total}\n\n\n# Look up one order by id.\n@app.route(\"/orders/<int:id>\")\n@lru_cache(maxsize=128)\n@app.route(\"/orders/<int:id>\")\n@lru_cache(maxsize=128)\ndef get_order(order_id):\n    order = load_order(order_id)\n    return helper_after_routes(order)\n"
+  },
+  "hazard": {
+    "path": "routes.py",
+    "pattern": "@app.route(\"/orders/<int:id>\")",
+    "count": 2
+  },
+  "caughtBy": "b1"
+}

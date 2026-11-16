@@ -1,11 +1,15 @@
 // Per-op verdicts of the fold (Plan 8a Task 2; 12 §3.3.3, §9.7 items 1 and 6; rulings R-V03, R-V04).
 // foldCommit reports, for every ops.jsonl line of the draft, what the fold decided: effective, unfolded (a type
 // this build folds as a no-op after generic validity, PLAN2_FOLDED_TYPES) or rejected (malformed, generic, type).
+// `hold` is in PLAN2_FOLDED_TYPES since Plan 3 Task 3: its rows here were flipped from unfolded to effective by the merge
+// that brought this file and Plan 3 together (X-90, F-P3-5), and a hold op is effective iff applyHold accepts it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { WriterId } from '../../../src/board/boardCommit.js';
 import { canonicalJson, MAX_JSON_DEPTH, type Json } from '../../../src/board/canonicalJson.js';
-import { foldCommit, initialFoldState, serializeFold, type FoldState, type OpVerdict } from '../../../src/board/fold.js';
+import {
+  foldCommit, initialFoldState, serializeFold, type FoldState, type FoldStepResult, type OpVerdict, type OwnRejectionReason,
+} from '../../../src/board/fold.js';
 import { eventCid, OPS_MAX_BYTES, OPS_MAX_LINES, parseOpLine, PLAN2_FOLDED_TYPES, type OpType } from '../../../src/board/ops.js';
 import { ZERO_PEER } from '../../../src/viz/model/frame.js';
 import { generateBoard } from '../../helpers/foldBoard.js';
@@ -41,8 +45,20 @@ const eventL = (peer: string, epoch: string, seq: number, kind = 'freeze', cid?:
 };
 const saveL = (peer: string, epoch: string, seq: number): string =>
   L({ id: id(peer, epoch, seq), type: 'save', save_commit: OID40, saved_live: OID40, chain_base: OID40, released_claim_ids: [] });
+/**
+ * A `hold` op with every glossary §7 field (PRO-21): by default the creating op (rev 1, prev_rev null) of an ACTIVE revert
+ * PATCH ULID on src/a.ts, not local_only — so its commit must carry held/<ULID>/ (heldIds [ULID]) for applyHold to accept it.
+ */
+const holdL = (i: string, o: Record<string, Json> = {}): string => L({
+  id: i, type: 'hold', hold_id: ULID, rev: 1, prev_rev: null, kind: 'PATCH', residence: 'ON_DISK', state: 'ACTIVE', offer: 'none',
+  guards: [{ name: 'revert', class: 'DECISION', owner: 'HLD' }], paths: ['src/a.ts'], origin: 'human', cs_ids: [], peer_authors: [], local_only: false,
+  ...o,
+});
 
-/** A generic-valid op of every type outside the Plan 2 fold's effects (opaque in Plan 2: only SEC-35 fields are checked). */
+/**
+ * A generic-valid op of every type outside this build's fold effects (opaque: only SEC-35 fields are checked). `hold` left
+ * this list when it joined PLAN2_FOLDED_TYPES (Plan 3 Task 3): the opaque-shaped hold line it had here is malformed now.
+ */
 const UNFOLDED_SAMPLES: Readonly<Record<string, (i: string) => string>> = {
   claim: (i) => L({ id: i, type: 'claim', path: 'src/a.ts', claim_id: 'abcdefghijklmnop' }),
   release: (i) => L({ id: i, type: 'release', claim_id: 'abcdefghijklmnop' }),
@@ -51,7 +67,6 @@ const UNFOLDED_SAMPLES: Readonly<Record<string, (i: string) => string>> = {
   answer: (i) => L({ id: i, type: 'answer', req_id: ULID, text: 'ok' }),
   note: (i) => L({ id: i, type: 'note', target: null, text: 'hi' }),
   presume_absent: (i) => L({ id: i, type: 'presume_absent', peer: B }),
-  hold: (i) => L({ id: i, type: 'hold', hold_id: ULID, paths: ['src/a.ts'] }),
 };
 
 /** Every OpType, so a new type fails the typecheck here until the tripwire below knows it. */
@@ -99,10 +114,10 @@ test('opVerdicts has one entry per ops.jsonl line, in order', () => {
   assert.deepEqual(bad, [v(0, null, 'unknown', 'rejected', 'generic')]);
 });
 
-test('effective for join, leave, caps, seat_start, seat_end, event and save; unfolded for claim, release, request, request_status, answer, note, presume_absent and hold; rejected with malformed, generic or type', () => {
+test('effective for join, leave, caps, seat_start, seat_end, event, save and hold; unfolded for claim, release, request, request_status, answer, note and presume_absent; rejected with malformed, generic or type', () => {
   const s0 = genesis();
 
-  // Every type once, generic-valid, in one commit of A (leave last: it ends A's activity).
+  // Every type once, generic-valid, in one commit of A (leave last: it ends A's activity); the commit carries held/<ULID>/.
   const kinds: Array<[OpType, (i: string) => string]> = [
     ['join', (i) => joinL(A, EA, Number(i.split('/')[2]))],
     ['caps', (i) => capsL(A, EA, Number(i.split('/')[2]))],
@@ -110,12 +125,16 @@ test('effective for join, leave, caps, seat_start, seat_end, event and save; unf
     ['seat_end', (i) => seatEndL(A, EA, Number(i.split('/')[2]))],
     ['event', (i) => eventL(A, EA, Number(i.split('/')[2]))],
     ['save', (i) => saveL(A, EA, Number(i.split('/')[2]))],
+    ['hold', (i) => holdL(i)],
     ...Object.entries(UNFOLDED_SAMPLES).map(([t, f]) => [t as OpType, f] as [OpType, (i: string) => string]),
     ['leave', (i) => leaveL(A, EA, Number(i.split('/')[2]))],
   ];
   const lines = kinds.map(([, f], k) => f(id(A, EA, 4 + k)));
-  const r = foldCommit(s0, draft({ writer: W(A, EA, 4 + kinds.length), opsLines: lines }), A);
+  const r = foldCommit(s0, draft({ writer: W(A, EA, 4 + kinds.length), opsLines: lines, heldIds: [ULID] }), A);
   assert.deepEqual(r.opVerdicts, kinds.map(([t], k) => v(k, id(A, EA, 4 + k), t, PLAN2_FOLDED_TYPES.has(t) ? 'effective' : 'unfolded')));
+  assert.ok(PLAN2_FOLDED_TYPES.has('hold'));
+  assert.equal(r.opVerdicts.find((x) => x.type === 'hold')!.verdict, 'effective');
+  assert.equal(r.state.holds[ULID]!.rev, 1);
   assert.equal(r.state.peers[A]!.status, 'left');
 
   // malformed: bad JSON, nesting past MAX_JSON_DEPTH, an id parseOpId refuses, an unknown type.
@@ -184,6 +203,49 @@ test('effective for join, leave, caps, seat_start, seat_end, event and save; unf
   assert.deepEqual(live.opVerdicts, [v(0, id(A, EA, 4), 'seat_start', 'effective'), v(1, id(A, EA, 5), 'event', 'effective')]);
   const again = foldCommit(live.state, draft({ writer: W(A, EA, 9), opsLines: [seatStartL(A, EA, 7), eventL(A, EA, 8, 'K1', cid)] }), A);
   assert.deepEqual(again.opVerdicts, [v(0, id(A, EA, 7), 'seat_start', 'rejected', 'type'), v(1, id(A, EA, 8), 'event', 'rejected', 'type')]);
+});
+
+test('a hold op is effective iff applyHold accepts it, now that hold is in PLAN2_FOLDED_TYPES; its step 3c rejections read type, a step 3b one generic, a line failing the hold validators malformed (X-90)', () => {
+  const s0 = genesis();
+  // Folded as its writer sees it, so the own rejection (with Plan 3's precise reason) sits beside the verdict.
+  const fold = (s: FoldState, w: WriterId, lines: string[], heldIds: string[] = []): FoldStepResult =>
+    foldCommit(s, draft({ writer: w, opsLines: lines, heldIds }), w.peer);
+
+  // Accepted: a creating op with its held/ subtree, and a local_only stub without one.
+  const c1 = fold(s0, W(A, EA, 5), [holdL(id(A, EA, 4))], [ULID]);
+  assert.deepEqual(c1.opVerdicts, [v(0, id(A, EA, 4), 'hold', 'effective')]);
+  assert.deepEqual([c1.landedOwnOpIds, c1.ownRejections], [[id(A, EA, 4)], []]);
+  const stub = fold(s0, W(A, EA, 5), [holdL(id(A, EA, 4), { local_only: true })]);
+  assert.deepEqual(stub.opVerdicts, [v(0, id(A, EA, 4), 'hold', 'effective')]);
+  assert.equal(stub.state.holds[ULID]!.local_only, true);
+  const s1 = c1.state;
+  const discard = fold(s1, W(A, EA, 7), [holdL(id(A, EA, 6), { rev: 2, prev_rev: 1, state: 'RESOLVED_DISCARD', residence: null })]);
+  assert.deepEqual(discard.opVerdicts, [v(0, id(A, EA, 6), 'hold', 'effective')]);
+  const withB = foldCommit(s1, draft({ writer: W(B, EB, 2), opsLines: [joinL(B, EB, 1)] }), B).state;
+
+  // Step 3c: every applyHold reason is the verdict reason 'type'.
+  const refused: Array<[string, FoldStepResult, string, OwnRejectionReason]> = [
+    ['no held/ subtree', fold(s0, W(A, EA, 5), [holdL(id(A, EA, 4))]), id(A, EA, 4), 'held_subtree'],
+    ['a local_only stub with a held/ subtree', fold(s0, W(A, EA, 5), [holdL(id(A, EA, 4), { local_only: true })], [ULID]), id(A, EA, 4), 'local_only_stub'],
+    ['a second creating op', fold(s1, W(A, EA, 7), [holdL(id(A, EA, 6))], [ULID]), id(A, EA, 6), 'prev_rev'],
+    ['a stale prev_rev', fold(s1, W(A, EA, 7), [holdL(id(A, EA, 6), { rev: 3, prev_rev: 2 })], [ULID]), id(A, EA, 6), 'prev_rev'],
+    ['a writer other than the owner', fold(withB, W(B, EB, 4), [holdL(id(B, EB, 3), { rev: 2, prev_rev: 1 })], [ULID]), id(B, EB, 3), 'type'],
+    ['a terminal record back to ACTIVE', fold(discard.state, W(A, EA, 9), [holdL(id(A, EA, 8), { rev: 3, prev_rev: 2 })], [ULID]), id(A, EA, 8), 'type'],
+  ];
+  for (const [what, r, opId, reason] of refused) {
+    assert.deepEqual(r.opVerdicts, [v(0, opId, 'hold', 'rejected', 'type')], what);
+    assert.deepEqual(r.ownRejections.map((x) => [x.opId, x.reason]), [[opId, reason]], what);
+  }
+
+  // Step 3b: a seq at or below last_seq is generic, for a hold op as for any other.
+  const g = fold(s1, W(A, EA, 7), [holdL(id(A, EA, 5), { rev: 2, prev_rev: 1 })], [ULID]);
+  assert.deepEqual(g.opVerdicts, [v(0, id(A, EA, 5), 'hold', 'rejected', 'generic')]);
+  assert.deepEqual(g.ownRejections.map((x) => x.reason), ['generic']);
+
+  // Step 3a: the opaque-shaped hold line this file used to call unfolded fails the hold validators — malformed (own: validator).
+  const m = fold(s1, W(A, EA, 7), [L({ id: id(A, EA, 6), type: 'hold', hold_id: ULID, paths: ['src/a.ts'] })]);
+  assert.deepEqual(m.opVerdicts, [v(0, null, 'unknown', 'rejected', 'malformed')]);
+  assert.deepEqual(m.ownRejections, [{ opId: id(A, EA, 6), type: 'hold', reason: 'validator', holdId: ULID, foldedRev: 1 }]);
 });
 
 test('state and opVerdicts do not depend on self', () => {

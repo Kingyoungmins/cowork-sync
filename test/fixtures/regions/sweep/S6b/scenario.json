@@ -1,0 +1,32 @@
+{
+  "name": "S6b",
+  "files": {
+    "Svc.cs": {
+      "base": "namespace N\n{\n    public partial class Svc\n    {\n        public void Reset()\n        {\n            Log(\"reset\");\n        }\n\n        private int _calls;\n\n        public int Calc(int x)\n        {\n            return x * 2;\n        }\n\n        public double Calc(double x)\n        {\n            return x * 2.0;\n        }\n\n        public string Describe()\n        {\n            _calls++;\n            var kind = \"svc\";\n            var text = kind + \":\" + _calls;\n            return text;\n        }\n\n        private static void Log(string message)\n        {\n            System.Console.WriteLine(message);\n        }\n    }\n}\n",
+      "ours": "namespace N\n{\n    public partial class Svc\n    {\n        public void Reset()\n        {\n            Log(\"reset\");\n        }\n\n        private int _calls;\n\n        public int Calc(int x)\n        {\n            return x * 2;\n        }\n\n        public double Calc(double x)\n        {\n            return x * 2.0;\n        }\n\n        public string Describe()\n        {\n            _calls++;\n            var kind = \"svc\";\n            var text = kind + \":\" + _calls;\n            return text;\n        }\n\n        public decimal Calc(decimal x)\n        {\n            return x * 2m;\n        }\n\n        private static void Log(string message)\n        {\n            System.Console.WriteLine(message);\n        }\n    }\n}\n",
+      "theirs": "namespace N\n{\n    public partial class Svc\n    {\n        public void Reset()\n        {\n            Log(\"reset\");\n        }\n\n        private int _calls;\n\n        public int Calc(int x)\n        {\n            return checked(x * 2);\n        }\n\n        public double Calc(double x)\n        {\n            return x * 2.0;\n        }\n\n        public string Describe()\n        {\n            _calls++;\n            var kind = \"svc\";\n            var text = kind + \":\" + _calls;\n            return text;\n        }\n\n        private static void Log(string message)\n        {\n            System.Console.WriteLine(message);\n        }\n    }\n}\n"
+    }
+  },
+  "claims": [
+    {
+      "holderSeat": "p1/seat-holder",
+      "path": "Svc.cs",
+      "claimUnit": "N.Svc.Calc#(int)"
+    }
+  ],
+  "expect": "held",
+  "oracle": {
+    "Svc.cs": "namespace N\n{\n    public partial class Svc\n    {\n        public void Reset()\n        {\n            Log(\"reset\");\n        }\n\n        private int _calls;\n\n        public int Calc(int x)\n        {\n            return checked(x * 2);\n        }\n\n        public double Calc(double x)\n        {\n            return x * 2.0;\n        }\n\n        public string Describe()\n        {\n            _calls++;\n            var kind = \"svc\";\n            var text = kind + \":\" + _calls;\n            return text;\n        }\n\n        private static void Log(string message)\n        {\n            System.Console.WriteLine(message);\n        }\n    }\n}\n"
+  },
+  "corrupting": true,
+  "corruptOut": {
+    "Svc.cs": "namespace N\n{\n    public partial class Svc\n    {\n        public void Reset()\n        {\n            Log(\"reset\");\n        }\n\n        private int _calls;\n\n        public int Calc(int x)\n        {\n            return checked(x * 2);\n        }\n\n        public double Calc(double x)\n        {\n            return x * 2.0;\n        }\n\n        public string Describe()\n        {\n            _calls++;\n            var kind = \"svc\";\n            var text = kind + \":\" + _calls;\n            return text;\n        }\n\n        public double Calc(double x)\n        {\n            return x * 2.0;\n        }\n\n        private static void Log(string message)\n        {\n            System.Console.WriteLine(message);\n        }\n    }\n}\n"
+  },
+  "hazard": {
+    "path": "Svc.cs",
+    "pattern": "public double Calc(double x)",
+    "count": 2
+  },
+  "caughtBy": "tripwire_b",
+  "duplicatedKey": "method\u0000N.Svc.Calc\u0000(double)"
+}

@@ -1,0 +1,32 @@
+{
+  "name": "S3b",
+  "files": {
+    "account.js": {
+      "base": "'use strict';\n\nclass Account {\n  constructor() { this._balance = 0; this._audit = []; }\n\n  set balance(value) {\n    if (value < 0) throw new RangeError('negative balance');\n    this._balance = value;\n  }\n\n  deposit(amount) {\n    this.balance = this._balance + amount;\n  }\n}\n\nmodule.exports = { Account };\n",
+      "ours": "'use strict';\n\nclass Account {\n  constructor() { this._balance = 0; this._audit = []; }\n\n  get balance() {\n    return this._balance;\n  }\n  set balance(value) {\n    if (value < 0) throw new RangeError('negative balance');\n    this._balance = value;\n  }\n\n  deposit(amount) {\n    this.balance = this._balance + amount;\n  }\n}\n\nmodule.exports = { Account };\n",
+      "theirs": "'use strict';\n\nclass Account {\n  constructor() { this._balance = 0; this._audit = []; }\n\n  set balance(value) {\n    if (value < 0) throw new RangeError('negative balance');\n    this._balance = Math.round(value * 100) / 100;\n  }\n\n  deposit(amount) {\n    this.balance = this._balance + amount;\n  }\n}\n\nmodule.exports = { Account };\n"
+    }
+  },
+  "claims": [
+    {
+      "holderSeat": "p1/seat-holder",
+      "path": "account.js",
+      "claimUnit": "Account.balance#set"
+    }
+  ],
+  "expect": "byte_identical",
+  "oracle": {
+    "account.js": "'use strict';\n\nclass Account {\n  constructor() { this._balance = 0; this._audit = []; }\n\n  get balance() {\n    return this._balance;\n  }\n  set balance(value) {\n    if (value < 0) throw new RangeError('negative balance');\n    this._balance = Math.round(value * 100) / 100;\n  }\n\n  deposit(amount) {\n    this.balance = this._balance + amount;\n  }\n}\n\nmodule.exports = { Account };\n"
+  },
+  "corrupting": true,
+  "corruptOut": {
+    "account.js": "'use strict';\n\nclass Account {\n  constructor() { this._balance = 0; this._audit = []; }\n\n  set balance(value) {\n    if (value < 0) throw new RangeError('negative balance');\n    this._balance = Math.round(value * 100) / 100;\n  }\n  set balance(value) {\n    if (value < 0) throw new RangeError('negative balance');\n    this._balance = Math.round(value * 100) / 100;\n  }\n\n  deposit(amount) {\n    this.balance = this._balance + amount;\n  }\n}\n\nmodule.exports = { Account };\n"
+  },
+  "hazard": {
+    "path": "account.js",
+    "pattern": "set balance(",
+    "count": 2
+  },
+  "caughtBy": "tripwire_b",
+  "duplicatedKey": "method\u0000Account.balance\u0000set"
+}

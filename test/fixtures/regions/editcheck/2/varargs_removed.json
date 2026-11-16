@@ -1,0 +1,17 @@
+{
+  "name": "2/varargs_removed",
+  "check": 2,
+  "lang": "python",
+  "expect": "fail",
+  "reason": "incompatible_caller",
+  "line": 5,
+  "tipEqualsA": true,
+  "A": {
+    "logs.py": "def log(*parts):\n    return \" \".join(str(p) for p in parts)\n",
+    "trace.py": "from logs import log\n\n\ndef trace(a, b):\n    return log(a, b)\n"
+  },
+  "R": {
+    "logs.py": "def log(part):\n    return str(part)\n",
+    "trace.py": "from logs import log\n\n\ndef trace(a, b):\n    return log(a, b)\n"
+  }
+}

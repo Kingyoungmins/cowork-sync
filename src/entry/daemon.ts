@@ -1,8 +1,11 @@
 // Entry point for dist/daemon.js (glossary §6): the daemon (Plan 2 Task 17; src/daemon/run.ts), in a terminal or started in
 // the background by `cowork start`; `run` also stops on <gitdir>/cowork/stop-request (`cowork stop`).
 //   node dist/daemon.js run --repo <path> --branch <b> [--publish=all|none] [--name <display>] [--remote <name>]
+//       [--data-dir <p> --plugin-root <p> --spawned]   (Plan 5 A5-1: the IPC daemon the plugin spawns; --spawned and
+//       --plugin-root need --data-dir — the spawner passes all three, R5-19)
 //   node dist/daemon.js recover --repo <path> --branch <b> [--confirm=<id>]
 //   node dist/daemon.js resume --repo <path> --branch <b>
+//   node dist/daemon.js resolve --repo <path> --branch <b> --id <hold_id> --publish|--discard|--park|--restore (Plan 3 Task 11, R3-02)
 //   node dist/daemon.js --version
 // No arguments at all is a no-op with the usage on stderr (Plan 1's bundle check runs every entry point without any).
 import { DAEMON_USAGE, parseDaemonArgs, runDaemon, type DaemonIo } from '../daemon/run.js';

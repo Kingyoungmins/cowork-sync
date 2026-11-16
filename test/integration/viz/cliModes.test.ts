@@ -256,7 +256,7 @@ test('T-VIZ-lints (UX-01): every string runView passes to out() and err() is a r
     add('tty open failure', view(f, ['--demo'], { opens: false }), 0, ['UI_VIZ_URL']);
     add('UNC repo', view(f, ['--repo', '\\\\server\\share']), 1, ['RF_VIZ_REPO_NOT_LIVE']);
     add('device demo', view(f, ['--demo=\\\\.\\pipe\\x']), 1, ['RF_VIZ_DEMO_INVALID']);
-    add('no data dir', view(f, ['--demo'], { env: {}, over: { home: 'relative home' } }), 1, ['RF_VIZ_START_FAILED']);
+    add('no data dir', view(f, ['--demo'], { env: { CLAUDE_PLUGIN_ROOT: '/home/me/.claude/plugins/cache/test-market/cowork-sync/0.6.0' }, over: { home: 'relative home' } }), 1, ['RF_VIZ_START_FAILED']);
     const failing: OwnerProbe = { posix: async () => null, euid: () => null, windows: async () => null };
     add('data dir fails', view(f, ['--demo'], { over: { ownerProbe: failing } }), 1, ['RF_VIZ_START_FAILED']);
     add('no git', view(f, ['--repo', f.root], { env: { CLAUDE_PLUGIN_DATA: f.dataDir, PATH: join(f.root, 'empty') } }), 1, ['START_TOOL_VERSION']);

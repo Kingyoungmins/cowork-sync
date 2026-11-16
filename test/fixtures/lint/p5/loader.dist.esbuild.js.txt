@@ -1,0 +1,3 @@
+// CCI-03 (8): a loader bundle that imports a package.
+import { build } from "esbuild";
+void build;

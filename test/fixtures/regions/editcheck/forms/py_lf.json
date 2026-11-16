@@ -1,0 +1,13 @@
+{
+  "name": "forms/py_lf",
+  "check": null,
+  "lang": "python",
+  "expect": "pass",
+  "tipEqualsA": true,
+  "A": {
+    "lib.py": "def foo(a, b):\n    \"\"\"Price of a line.\"\"\"\n    return a * b\n\n\ndef helper(x):\n    return round(x, 2)\n"
+  },
+  "R": {
+    "lib.py": "def foo(a, b):\n    \"\"\"Price of a line.\"\"\"\n    return a * b * 1.0\n\n\ndef helper(x):\n    return round(x, 2)\n"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "session_id": "f1x7u4e0-0000-4000-8000-000000000011",
+  "transcript_path": "/home/dev/.claude/projects/repo/f1x7u4e0.jsonl",
+  "cwd": "/repo",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "/repo/src/orders.py",
+    "content": "def compute_total(items):\n    total = 0\n    for item in items:\n        total += item.price * item.quantity\n    total = round(total, 2)\n    return total\n\n\ndef compute_tax(total, rate):\n    total = total * rate\n    return round(total, 2)\n"
+  }
+}

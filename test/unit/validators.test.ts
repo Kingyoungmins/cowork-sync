@@ -12,6 +12,11 @@ test("validPathSyntax accepts repo-relative NFC paths and rejects '..', a leadin
     ['a/../b', 'dotdot segment'],
     ['../a', 'leading dotdot'],
     ['a/..', 'trailing dotdot'],
+    // final review F14: a '.' component defeats the quarantine classifier (join() collapses it) and git trees cannot carry it.
+    ['.', 'dot'],
+    ['./a', 'leading dot'],
+    ['a/./b', 'dot segment'],
+    ['a/.', 'trailing dot'],
     ['/a', 'leading slash'],
     ['a//b', 'empty component'],
     ['a/', 'trailing slash'],

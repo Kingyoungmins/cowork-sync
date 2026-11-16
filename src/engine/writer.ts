@@ -88,7 +88,15 @@ export type Remerge = (entry: WriteEntry, found: TreeEntry) => Promise<TreeEntry
  * .old, which a restart's rollbackIntent restores — until `strandedPaths()` is empty after a `sweepRing()`, then
  * clears it; meanwhile it journals no new intent (no apply, no push).
  */
-export interface GroupResult { n: number; outcome: 'written' | 'deferred'; reason: DeferReason | null; written: TreeEntry[]; deleted: string[]; phantoms: string[]; stranded: boolean; }
+export interface GroupResult {
+  n: number; outcome: 'written' | 'deferred'; reason: DeferReason | null; written: TreeEntry[]; deleted: string[]; phantoms: string[]; stranded: boolean;
+  /**
+   * Plan 3 Task 6 (additive, controller ruling): a deferred group's path whose own step deferred it — the refusal of a carried,
+   * irregular or unsafe path, or a P1 (pre-image check, rename to .old) or P2 (link) failure at that path, e.g. the file another
+   * program holds open; absent when no single path caused it (P0's smudge or temp writes). INCOMING_WAITING names it (HLD-53).
+   */
+  path?: string;
+}
 export type WriteLocalResult =                                   // ENG-37, verbatim
   | { kind: 'WRITTEN' } | { kind: 'MISMATCH'; found: OidOrAbsent } | { kind: 'LOCKED' } | { kind: 'COLLISION' }
   | { kind: 'FROZEN' } | { kind: 'DEFERRED'; reason: DeferReason } | { kind: 'PHANTOM' };
@@ -111,6 +119,13 @@ export interface WriterDeps {
   frozen: () => boolean;
   onPhantom: (path: string, target: TreeEntry) => Promise<void>;  // PHANTOM PIN, guard 'phantom' (ENG-34)
   onLateWrite: (path: string, stageCopy: string) => Promise<void>;// ring late write → PATCH (ENG-35)
+  /**
+   * Plan 5 Task 8 (X5-01, T-P5-writer-recheck; 01-engine §3.11 P1): the P1 re-check of one apply group — a fence or
+   * TXN opened after the intent was journaled defers the whole group before P1 touches anything. Called once per
+   * group, immediately before P1; a hit defers the group with that reason and nothing of it is written. Absent (the
+   * Plan 2/3 default): no re-check.
+   */
+  recheck?: (paths: readonly string[]) => ReadonlyMap<string, DeferReason>;
 }
 export interface RollbackReport { complete: number[]; rolledBack: number[]; leftoverOld: Array<{ path: string; file: string }>; }
 
@@ -271,11 +286,15 @@ interface PathRun {
   createdDirs: string[];
 }
 
-interface GroupRun { readonly n: number; readonly paths: PathRun[]; readonly local: boolean; }
+interface GroupRun {
+  readonly n: number; readonly paths: PathRun[]; readonly local: boolean;
+  /** The path whose P1 or P2 step is running (unset between phases): a deferral raised there names it (GroupResult.path). */
+  at?: string;
+}
 
 type RunOutcome =
   | { ok: true; written: TreeEntry[]; deleted: string[]; phantoms: string[] }
-  | { ok: false; defer: DeferGroup; stranded: boolean };
+  | { ok: false; defer: DeferGroup; stranded: boolean; path?: string };
 
 /** relink's outcome; a failure carries the deferral it stands for (ENOSPC disk_low, beneath a link unmaterializable, else locked). */
 type Relink = { kind: 'ok' } | { kind: 'exists' } | { kind: 'failed'; reason: DeferReason };
@@ -442,11 +461,11 @@ export class Writer {
    * A group the writer must not touch at all (deferred 'unmaterializable' before P0): a carried or dotgit-alias path
    * (never looked at), a symlink or gitlink entry, or a path beneath a symlink, a junction or a file (P2-NOFOLLOW).
    */
-  private async refused(run: GroupRun): Promise<boolean> {
-    if (run.paths.some((p) => this.carried(p.e.path))) return true;
-    if (run.paths.some((p) => !isRegular(p.e.target) || !isRegular(p.e.sRaw) || !isRegular(p.e.sDisk) || !isRegular(p.pre))) return true;
-    for (const p of run.paths) if (!(await this.ancestorsSafe(p.e.path))) return true;
-    return false;
+  private async refused(run: GroupRun): Promise<string | null> {
+    for (const p of run.paths) if (this.carried(p.e.path)) return p.e.path;
+    for (const p of run.paths) if (!isRegular(p.e.target) || !isRegular(p.e.sRaw) || !isRegular(p.e.sDisk) || !isRegular(p.pre)) return p.e.path;
+    for (const p of run.paths) if (!(await this.ancestorsSafe(p.e.path))) return p.e.path;
+    return null;
   }
 
   /**
@@ -496,7 +515,10 @@ export class Writer {
           } else {
             for (const e of g.entries) this.pendingPaths.add(e.path);
             this.d.log.write('info', 'WRITE_GROUP_DEFERRED', { n: g.n, reason: out.defer.reason, paths: g.entries.length, stranded: out.stranded });
-            results.push({ n: g.n, outcome: 'deferred', reason: out.defer.reason, written: [], deleted: [], phantoms: [], stranded: out.stranded });
+            results.push({
+              n: g.n, outcome: 'deferred', reason: out.defer.reason, written: [], deleted: [], phantoms: [], stranded: out.stranded,
+              ...(out.path !== undefined ? { path: out.path } : {}),
+            });
           }
         }
       } finally {
@@ -549,12 +571,23 @@ export class Writer {
    */
   private async runGroup(run: GroupRun, remerge: Remerge | null, f: Flight): Promise<RunOutcome> {
     try {
-      if (await this.refused(run)) return { ok: false, defer: new DeferGroup('unmaterializable'), stranded: false };
+      const refusedAt = await this.refused(run);
+      if (refusedAt !== null) return { ok: false, defer: new DeferGroup('unmaterializable'), stranded: false, path: refusedAt };
       let failed = false;
       let failure: unknown;
       try {
         await this.prepare(run);
         f.window = true;
+        // Plan 5 Task 8 (X5-01; T-P5-writer-recheck; 01-engine §3.11 P1): the P1 re-check — once per apply group,
+        // immediately before P1; a fence or TXN opened after the intent was journaled defers the whole group with
+        // that reason (the throw takes the rollback below, which has nothing to undo yet: no link has happened).
+        // A local write is not an apply group and is not re-checked.
+        if (!run.local && this.d.recheck !== undefined) {
+          const paths = run.paths.map((p) => p.e.path);
+          const hit = this.d.recheck(paths);
+          const why = paths.map((p) => hit.get(p)).find((r) => r !== undefined);
+          if (why !== undefined) throw new DeferGroup(why);
+        }
         await this.phase1(run, remerge);
         crashpoint('apply.group.phase1');
         await this.d.scheduler.yieldPoint('apply.beforePhase2');
@@ -565,12 +598,13 @@ export class Writer {
         failure = e;
       }
       if (failed) {
+        const at = run.at;
         const defer = failure instanceof DeferGroup ? failure : asDefer(failure);
         const rb = await this.rollback(run);
         if (rb.failed > 0) this.d.log.write('error', 'WRITE_ROLLBACK_PARTIAL', { n: run.n, failed: rb.failed, stranded: rb.stranded });
         if (defer === null) throw failure;
         if (!(failure instanceof DeferGroup)) this.d.log.write('error', 'WRITE_GROUP_ERROR', { n: run.n, code: errorCode(failure), reason: defer.reason });
-        return { ok: false, defer, stranded: rb.stranded > 0 };
+        return { ok: false, defer, stranded: rb.stranded > 0, ...(at !== undefined ? { path: at } : {}) };
       }
       // P2 is done: every .old enters the ring now, so nothing that happens in RT can leave one outside it (ENG-35).
       for (const p of run.paths) if (p.renamed) await this.toRing(p);
@@ -636,9 +670,11 @@ export class Writer {
 
   private async phase1(run: GroupRun, remerge: Remerge | null): Promise<void> {
     for (const p of run.paths) {
+      run.at = p.e.path;
       if (p.pre === null) await this.checkCreate(p);
       else await this.checkPreimage(run, p, remerge);
     }
+    delete run.at;
   }
 
   /**
@@ -802,8 +838,10 @@ export class Writer {
     const writes = run.paths.filter((p) => p.target !== null);
     for (const [i, p] of writes.entries()) {
       if (i > 0) crashpoint('apply.group.mid');
+      run.at = p.e.path;
       await this.place(p);
     }
+    delete run.at;
     for (const p of run.paths) if (p.target === null && p.renamed) await this.removeEmptyParents(p.abs);
   }
 

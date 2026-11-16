@@ -1,0 +1,15 @@
+{
+  "name": "3/removed_name_called",
+  "check": 3,
+  "lang": "python",
+  "expect": "fail",
+  "reason": "removed_name_called",
+  "line": 7,
+  "tipEqualsA": true,
+  "A": {
+    "lib.py": "def foo(a, b):\n    \"\"\"Price of a line.\"\"\"\n    return a * b\n\n\ndef helper(x):\n    return round(x, 2)\n\n\ndef total(x):\n    return helper(x) * 2\n"
+  },
+  "R": {
+    "lib.py": "def foo(a, b):\n    \"\"\"Price of a line.\"\"\"\n    return a * b\n\n\ndef total(x):\n    return helper(x) * 2\n"
+  }
+}

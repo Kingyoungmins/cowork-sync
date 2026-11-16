@@ -1,0 +1,17 @@
+{
+  "name": "2/param_renamed",
+  "check": 2,
+  "lang": "python",
+  "expect": "fail",
+  "reason": "incompatible_caller",
+  "line": 5,
+  "tipEqualsA": true,
+  "A": {
+    "mail.py": "def send(to, subject):\n    return f\"{to}: {subject}\"\n",
+    "notify.py": "from mail import send\n\n\ndef notify(user):\n    return send(user, subject=\"totals\")\n"
+  },
+  "R": {
+    "mail.py": "def send(to, title):\n    return f\"{to}: {title}\"\n",
+    "notify.py": "from mail import send\n\n\ndef notify(user):\n    return send(user, subject=\"totals\")\n"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "tc09/cs/4_fail",
+  "check": 4,
+  "lang": "c_sharp",
+  "expect": "fail",
+  "reason": "label_count",
+  "tipEqualsA": false,
+  "A": {
+    "Pricing.cs": "namespace Shop\n{\n    public static class Pricing\n    {\n        public static decimal Price(decimal amount)\n        {\n            return amount;\n        }\n\n        public static decimal Price(decimal amount, int qty)\n        {\n            return amount * qty;\n        }\n\n        public static decimal Discount(decimal amount)\n        {\n            return amount * 0.9m;\n        }\n    }\n}\n",
+    "Checkout.cs": "namespace Shop\n{\n    public static class Checkout\n    {\n        public static decimal Run(decimal[] amounts, int[] qtys)\n        {\n            decimal total = 0;\n            for (var i = 0; i < amounts.Length; i++)\n            {\n                total += Pricing.Price(amounts[i], qtys[i]);\n            }\n            return Pricing.Discount(total);\n        }\n    }\n}\n"
+  },
+  "R": {
+    "Pricing.cs": "namespace Shop\n{\n    public static class Pricing\n    {\n        public static decimal Price(decimal amount)\n        {\n            return amount;\n        }\n\n        public static decimal Price(decimal amount, int qty)\n        {\n            return amount * qty;\n        }\n\n        public static decimal Discount(decimal amount)\n        {\n            return amount * 0.9m;\n        }\n\n        public static decimal Round(decimal amount)\n        {\n            return decimal.Round(amount, 2);\n        }\n    }\n}\n",
+    "Checkout.cs": "namespace Shop\n{\n    public static class Checkout\n    {\n        public static decimal Run(decimal[] amounts, int[] qtys)\n        {\n            decimal total = 0;\n            for (var i = 0; i < amounts.Length; i++)\n            {\n                total += Pricing.Price(amounts[i], qtys[i]);\n            }\n            return Pricing.Discount(total);\n        }\n    }\n}\n"
+  },
+  "TIP": {
+    "Pricing.cs": "namespace Shop\n{\n    public static class Pricing\n    {\n        public static decimal Price(decimal amount)\n        {\n            return amount;\n        }\n\n        public static decimal Round(decimal amount)\n        {\n            return decimal.Round(amount, 3);\n        }\n\n        public static decimal Price(decimal amount, int qty)\n        {\n            return amount * qty;\n        }\n\n        public static decimal Discount(decimal amount)\n        {\n            return amount * 0.9m;\n        }\n    }\n}\n",
+    "Checkout.cs": "namespace Shop\n{\n    public static class Checkout\n    {\n        public static decimal Run(decimal[] amounts, int[] qtys)\n        {\n            decimal total = 0;\n            for (var i = 0; i < amounts.Length; i++)\n            {\n                total += Pricing.Price(amounts[i], qtys[i]);\n            }\n            return Pricing.Discount(total);\n        }\n    }\n}\n"
+  }
+}

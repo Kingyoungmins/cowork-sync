@@ -1,0 +1,22 @@
+{
+  "name": "S10b",
+  "files": {
+    "orders.py": {
+      "base": "from typing import overload\n\n\ndef normalise(items):\n    return [item for item in items if item.quantity > 0]\n\n\n# Sum the line items of an order, rounded to cents.\ndef compute_total(items):\n    total = 0\n    for item in items:\n        price = item.price * item.quantity\n        if item.discount:\n            price -= item.discount\n        total += price\n    return round(total, 2)\n\n\ndef compute_tax(total, rate):\n    total = total * rate\n    return round(total, 2)\n",
+      "ours": "from typing import overload\n\n\ndef normalise(items):\n    return [item for item in items if item.quantity > 0]\n\n\ndef compute_fee(total):\n    return round(total * 0.01, 2)\n\n\n# Sum the line items of an order, rounded to cents.\ndef compute_total(items):\n    total = 0\n    for item in items:\n        price = item.price * item.quantity\n        if item.discount:\n            price -= item.discount\n        total += price\n    return round(total, 2)\n",
+      "theirs": "from typing import overload\n\n\ndef normalise(items):\n    return [item for item in items if item.quantity > 0]\n\n\n# Sum the line items of an order, rounded to cents.\ndef compute_total(items):\n    total = 0\n    for item in sorted(items, key=lambda i: i.name):\n        price = item.price * item.quantity\n        if item.discount:\n            price -= item.discount\n        total += price\n    return round(total, 2)\n\n\ndef compute_tax(total, rate):\n    total = total * rate\n    return round(total, 2)\n"
+    }
+  },
+  "claims": [
+    {
+      "holderSeat": "p1/seat-holder",
+      "path": "orders.py",
+      "claimUnit": "compute_total"
+    }
+  ],
+  "expect": "byte_identical",
+  "oracle": {
+    "orders.py": "from typing import overload\n\n\ndef normalise(items):\n    return [item for item in items if item.quantity > 0]\n\n\ndef compute_fee(total):\n    return round(total * 0.01, 2)\n\n\n# Sum the line items of an order, rounded to cents.\ndef compute_total(items):\n    total = 0\n    for item in sorted(items, key=lambda i: i.name):\n        price = item.price * item.quantity\n        if item.discount:\n            price -= item.discount\n        total += price\n    return round(total, 2)\n"
+  },
+  "corrupting": false
+}

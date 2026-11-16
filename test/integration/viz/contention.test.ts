@@ -3,8 +3,11 @@
 // 2 phases × 3,000 writes × 100 ms, and 1,476 s measured on a loaded PC; the timeout is 35 min), where a rename over a file another process holds
 // open fails: a daemon fixture replaces <gitdir>/cowork/status.json by temp + rename every 100 ms (3,000 writes) and fetches the
 // board ref 1,000 times (each fetch moves it one commit forward), first with no viewer (the control), then while a viewer polls
-// the room on the real clock with a page's stream open. The viewer holds no handle (a stat, one open-read-close, a cat-file process per batch), so the
-// daemon sees no more rename or ref-update failures with it than without it.
+// the room on the real clock with a page's stream open. The viewer runs in the writer's process (startTestViewer) and holds a handle on
+// status.json only inside one synchronous lstat-open-read-close (realBoundedReader where O_NOFOLLOW is undefined, R-V30), which no
+// event-loop turn — the writer's 100 ms timer included — can interleave; else a stat and a cat-file process per batch. So the daemon
+// sees no more rename or ref-update failures with it than without it. (The hosted run of the async reader saw 3 rename EPERM against
+// a control of 0; the fast regression is boundedRead.test.ts's W3 interleave test.)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';

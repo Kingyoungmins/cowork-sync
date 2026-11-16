@@ -1,6 +1,11 @@
 // Test helper (Plan 2 Task 6): a seeded generator of long board op streams, their fold from genesis, and
 // a git fast-import writer that turns one stream into a real board chain in a single git process (a
 // 600-commit board built through buildBoardCommit would cost ~2,400 git calls).
+//
+// Plan 3 Task 3: with `holds: true` the generator also emits `hold` ops (valid chains, stale prev_rev, races, non-owner
+// writes, terminal → terminal ops, revival attempts, local_only stub and held/ subtree violations, malformed lines) and
+// tracks which held/<id>/ subtrees each commit's tree carries (GenCommit.heldIds), which importBoard writes. Hold
+// decisions draw from their own seeded stream, so a board generated without them is the Plan 2 board, byte for byte.
 import type { BoardDraft, WriterId } from '../../src/board/boardCommit.js';
 import { BOARD_SUBJECT, boardTrailers, CODE_SUBJECT } from '../../src/board/boardCommit.js';
 import { canonicalJson, type Json } from '../../src/board/canonicalJson.js';
@@ -13,9 +18,15 @@ import type { GitRepo } from '../../src/git/repo.js';
 import { formatMessage, type Trailer } from '../../src/git/trailers.js';
 import { randomHex, randomInt, seededRandom, type Random } from '../../src/ports/random.js';
 
-export interface GenCommit { writer: WriterId | null; lines: string[]; }
-/** b0SeatKey: the seat key B0 starts and ends at height 0 (compaction drops it at 512). */
-export interface GenBoard { protocol: ProtocolJson; peers: string[]; commits: GenCommit[]; b0SeatKey: string; }
+/** heldIds: the held/<id>/ subtrees this commit's tree carries (absent: none, the Plan 2 boards). */
+export interface GenCommit { writer: WriterId | null; lines: string[]; heldIds?: string[]; }
+/**
+ * b0SeatKey: the seat key B0 starts and ends at height 0 (compaction drops it at 512). b0HoldId (holds only): the hold B0
+ * creates and ends at height 0, so compaction at 512 drops it too (its held/ subtree is removed by the commit at 512).
+ */
+export interface GenBoard { protocol: ProtocolJson; peers: string[]; commits: GenCommit[]; b0SeatKey: string; b0HoldId?: string; }
+/** holds: also emit `hold` ops (Plan 3); peers: how many peers (default 4; peer index 3 is silent for heights 100–449). */
+export interface GenOptions { holds?: boolean; peers?: number; }
 
 const KINDS: readonly EventKind[] = ['K1', 'K2', 'K3', 'K4', 'K5', 'K6', 'K7', 'breach', 'freeze', 'unfreeze', 'incident', 'nonretryable', 'health'];
 const CONFLICT: ReadonlySet<EventKind> = new Set(['K1', 'K2', 'K3', 'K4', 'K5', 'K6', 'K7', 'breach']);
@@ -57,36 +68,180 @@ function randomOp(r: Random, p: SimPeer, seq: number): string {
   return L({ id: `${p.id}/${p.epoch}/${Math.max(1, seq - 3)}`, type: 'leave' });   // a stale seq: a generic no-op
 }
 
+const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+const TERMINAL_STATES = ['SUBSUMED', 'GONE', 'RESOLVED_PUBLISH', 'RESOLVED_DISCARD'] as const;
+const LIVE_STATES = ['ACTIVE', 'CONFLICTED', 'PARKED'] as const;
+const OFFERS = ['none', 'pending_leftover', 'offered', 'accepted', 'returned'] as const;
+const PATH_POOL = ['README.md', 'docs/guide.md', 'src/a.ts', 'src/b.ts', 'src/deep/c.ts', 'test/a.test.ts'] as const;
+const REVERT = { name: 'revert', class: 'DECISION', owner: 'HLD' };
+const HOST_REJECT = { name: 'host-reject', class: 'DECISION', owner: 'ENG' };
+
+/** A record as the generator intends the fold to hold it (only ops meant to be valid change it). */
+interface GenHold { id: string; owner: string; rev: number; terminal: boolean; localOnly: boolean; pathless: boolean; paths: string[]; }
+
 /**
- * A board of n commits from a seed: 4 peers; peer 3 is silent for heights 100–449 (a ghost from 300 on);
+ * The hold half of a generated board: one op line per call, each either meant to fold valid (and then applied to the
+ * model) or a deliberate no-op of one PRO-21/PRO-24 kind. `held` is the set of held/<id>/ subtrees the next commit's
+ * tree carries (puts are carried until removed, as buildBoardCommit carries them).
+ */
+class HoldGen {
+  readonly holds: GenHold[] = [];
+  readonly held = new Set<string>();
+  constructor(private readonly r: Random) {}
+
+  newId(): string {
+    let s = String(randomInt(this.r, 8));
+    for (let i = 0; i < 25; i++) s += CROCKFORD[randomInt(this.r, 32)];
+    return s;
+  }
+
+  private line(opId: string, h: GenHold, rev: number, prevRev: number | null, state: string, o: { paths?: string[]; localOnly?: boolean } = {}): string {
+    const terminal = (TERMINAL_STATES as readonly string[]).includes(state);
+    const owner = h.owner;
+    return L({
+      id: opId, type: 'hold', hold_id: h.id, rev, prev_rev: prevRev, kind: h.pathless ? 'PIN' : (['PATCH', 'PIN', 'INCOMING'] as const)[randomInt(this.r, 3)]!,
+      residence: terminal ? null : state === 'PARKED' ? 'OFF_DISK' : 'ON_DISK', state, offer: OFFERS[randomInt(this.r, OFFERS.length)]!,
+      guards: h.pathless ? [HOST_REJECT] : [REVERT], paths: o.paths ?? h.paths, origin: h.pathless ? 'daemon' : 'human',
+      cs_ids: h.pathless ? [] : [`${owner}/human/${1 + randomInt(this.r, 9)}`], peer_authors: [], local_only: o.localOnly ?? h.localOnly,
+    });
+  }
+
+  private pick<T>(xs: readonly T[]): T | undefined {
+    return xs.length === 0 ? undefined : xs[randomInt(this.r, xs.length)];
+  }
+
+  private someState(terminalPct: number): string {
+    return randomInt(this.r, 100) < terminalPct ? TERMINAL_STATES[randomInt(this.r, TERMINAL_STATES.length)]! : LIVE_STATES[randomInt(this.r, LIVE_STATES.length)]!;
+  }
+
+  private somePaths(): string[] {
+    const out = PATH_POOL.filter(() => randomInt(this.r, 3) === 0);
+    return out.length > 0 ? [...out] : [PATH_POOL[randomInt(this.r, PATH_POOL.length)]!];
+  }
+
+  /** Subtrees to remove once the current commit is generated (its own ops may still need them). */
+  private readonly dropAfter = new Set<string>();
+
+  /**
+   * A record created valid by `owner`: 20 % local_only stubs, 5 % pathless host-reject PINs, else mirrored with its held/
+   * subtree put in this commit (o.mirrored forces the last kind).
+   */
+  create(owner: string, opId: string, o: { state?: string; mirrored?: boolean } = {}): string {
+    const roll = o.mirrored === true ? 99 : randomInt(this.r, 100);
+    const pathless = roll < 5;
+    const h: GenHold = { id: this.newId(), owner, rev: 1, terminal: false, localOnly: !pathless && roll < 25, pathless, paths: pathless ? [] : this.somePaths() };
+    const state = o.state ?? this.someState(10);
+    h.terminal = (TERMINAL_STATES as readonly string[]).includes(state);
+    if (!h.localOnly && !h.pathless) this.held.add(h.id);
+    this.holds.push(h);
+    return this.line(opId, h, 1, null, state);
+  }
+
+  /**
+   * A valid next rev of a record (rev gaps allowed): a terminal record (or o.terminal) moves to a terminal state, never back.
+   * Half of the records that end here have their subtree removed from the next commit on (o.keepHeld: never).
+   */
+  update(h: GenHold, opId: string, o: { terminal?: boolean; keepHeld?: boolean } = {}): string {
+    const rev = h.rev + 1 + randomInt(this.r, 2);
+    const state = h.terminal || o.terminal === true ? TERMINAL_STATES[randomInt(this.r, TERMINAL_STATES.length)]! : this.someState(25);
+    const out = this.line(opId, h, rev, h.rev, state);
+    h.rev = rev;
+    if ((TERMINAL_STATES as readonly string[]).includes(state)) {
+      h.terminal = true;
+      if (o.keepHeld !== true && randomInt(this.r, 2) === 0) this.dropAfter.add(h.id);
+    }
+    return out;
+  }
+
+  /** The held/ subtrees of the commit just generated, sorted; removals queued during it apply from the next commit on. */
+  commitHeld(): string[] {
+    const out = [...this.held].sort();
+    for (const id of this.dropAfter) this.held.delete(id);
+    this.dropAfter.clear();
+    return out;
+  }
+
+  /** 0–2 hold op lines of peer `owner`, each from `nextId()`. */
+  ops(owner: string, nextId: () => string): string[] {
+    const lines: string[] = [];
+    const n = randomInt(this.r, 3);
+    for (let i = 0; i < n; i++) {
+      const mine = this.holds.filter((h) => h.owner === owner);
+      const live = mine.filter((h) => !h.terminal);
+      const dead = mine.filter((h) => h.terminal);
+      const roll = randomInt(this.r, 100);
+      const target = roll < 30 ? undefined : roll < 55 ? this.pick(live) : roll < 72 ? this.pick(dead.length > 0 ? dead : live) : this.pick(mine);
+      if (target === undefined || roll < 30) {
+        lines.push(this.create(owner, nextId()));
+      } else if (roll < 60) {
+        lines.push(this.update(target, nextId()));                                                       // valid (terminal → terminal on a dead one)
+      } else if (roll < 66 && target.terminal) {
+        lines.push(this.line(nextId(), target, target.rev + 1, target.rev, LIVE_STATES[randomInt(this.r, 3)]!));   // revival: 'type'
+      } else if (roll < 72) {
+        lines.push(this.line(nextId(), target, target.rev + 1, target.rev > 1 ? target.rev - 1 : null, 'ACTIVE'));  // stale: 'prev_rev'
+      } else if (roll < 79 && !target.terminal) {
+        const prev = target.rev;
+        lines.push(this.update(target, nextId()));                                                       // a race: the first applies,
+        lines.push(this.line(nextId(), target, prev + 5, prev, 'CONFLICTED'));                            // the second is 'prev_rev'
+      } else if (roll < 86) {
+        const theirs = this.pick(this.holds.filter((h) => h.owner !== owner));
+        if (theirs !== undefined) lines.push(this.line(nextId(), theirs, theirs.rev + 1, theirs.rev, 'ACTIVE'));   // non-owner: 'type'
+      } else if (roll < 91) {
+        const id = this.newId();
+        this.held.add(id);                                                                                // local_only with held/: stub rule
+        lines.push(this.line(nextId(), { id, owner, rev: 1, terminal: false, localOnly: true, pathless: false, paths: this.somePaths() }, 1, null, 'ACTIVE'));
+      } else if (roll < 96) {
+        const ghost: GenHold = { id: this.newId(), owner, rev: 1, terminal: false, localOnly: false, pathless: false, paths: this.somePaths() };
+        lines.push(this.line(nextId(), ghost, 1, null, 'ACTIVE'));                                        // mirrored without held/: held_subtree
+      } else {
+        const bad: GenHold = { id: this.newId(), owner, rev: 1, terminal: false, localOnly: false, pathless: false, paths: ['docs/12:30-notes.md'] };
+        lines.push(this.line(nextId(), bad, 1, null, 'ACTIVE'));                                          // a path SEC-35 refuses: 'validator'
+      }
+    }
+    return lines;
+  }
+}
+
+/**
+ * A board of n commits from a seed: 4 peers (opts.peers); peer 3 is silent for heights 100–449 (a ghost from 300 on);
  * peers leave, rejoin, start new epochs and re-announce regionSpecs; ~1 % of commits carry no writer.
  * B0 also creates a height-0 event and an ended seat with a dedicated id (b0SeatKey), so compaction at 512
- * has both kinds of terminal record to drop.
+ * has both kinds of terminal record to drop; with opts.holds it also creates and ends a hold (b0HoldId).
  */
-export function generateBoard(seed: string, n: number): GenBoard {
+export function generateBoard(seed: string, n: number, opts: GenOptions = {}): GenBoard {
   const r = seededRandom(seed);
+  const hg = opts.holds === true ? new HoldGen(seededRandom(`${seed}/holds`)) : null;
+  const heldNow = (): string[] | undefined => (hg === null ? undefined : hg.commitHeld());
   const protocol = genesisProtocol(12, 'rs-1');
-  const peers: SimPeer[] = Array.from({ length: 4 }, () => ({
+  const peers: SimPeer[] = Array.from({ length: opts.peers ?? 4 }, () => ({
     id: newPeerId(r), epoch: newEpoch(r), seq: 0, status: 'none' as const, seats: [randomHex(r, 16), randomHex(r, 16), randomHex(r, 16)], regionSpec: 'rs-1',
   }));
   const commits: GenCommit[] = [];
   const g = peers[0]!;
   const gid = (s: number): string => `${g.id}/${g.epoch}/${s}`;
-  commits.push({
-    writer: { peer: g.id, epoch: g.epoch, seq: 6 },
-    lines: [
-      join(g, 1, 'Genesis'),
-      L({ id: gid(2), type: 'caps', custom_refs: true, lease: true, delete: true, push_options: false, two_parent_ok: true }),
-      L({ id: gid(3), type: 'seat_start', seat_id: B0_SEAT, permission_mode: 'default' }),
-      L({ id: gid(4), type: 'event', cid: eventCid(gid(4), 'freeze'), kind: 'freeze', refs: [], reason_code: 'EPOCH_CHANGED' }),
-      L({ id: gid(5), type: 'seat_end', seat_id: B0_SEAT, permission_mode: 'default' }),
-    ],
-  });
-  g.seq = 6;
+  const b0Lines = [
+    join(g, 1, 'Genesis'),
+    L({ id: gid(2), type: 'caps', custom_refs: true, lease: true, delete: true, push_options: false, two_parent_ok: true }),
+    L({ id: gid(3), type: 'seat_start', seat_id: B0_SEAT, permission_mode: 'default' }),
+    L({ id: gid(4), type: 'event', cid: eventCid(gid(4), 'freeze'), kind: 'freeze', refs: [], reason_code: 'EPOCH_CHANGED' }),
+    L({ id: gid(5), type: 'seat_end', seat_id: B0_SEAT, permission_mode: 'default' }),
+  ];
+  g.seq = 5;
+  let b0HoldId: string | undefined;
+  if (hg !== null) {
+    // A mirrored hold created and ended at height 0: terminal_height 0, so compaction at 512 drops it.
+    b0Lines.push(hg.create(g.id, gid(++g.seq), { state: 'ACTIVE', mirrored: true }));
+    const b0Hold = hg.holds[0]!;
+    b0HoldId = b0Hold.id;
+    b0Lines.push(hg.update(b0Hold, gid(++g.seq), { terminal: true, keepHeld: true }));
+  }
+  commits.push({ writer: { peer: g.id, epoch: g.epoch, seq: ++g.seq }, lines: b0Lines, heldIds: heldNow() });
   g.status = 'active';
   for (let h = 1; h < n; h++) {
+    // PRO-27 writer side: the commit at 512 removes the subtree of the B0 hold, which compaction drops there.
+    if (hg !== null && h === 2 * CHECKPOINT_EVERY && b0HoldId !== undefined) hg.held.delete(b0HoldId);
     if (randomInt(r, 100) === 0) {
-      commits.push({ writer: null, lines: [L({ id: gid(1), type: 'leave' })] });
+      commits.push({ writer: null, lines: [L({ id: gid(1), type: 'leave' })], heldIds: heldNow() });
       continue;
     }
     const eligible = peers.filter((_, i) => !(i === 3 && h >= 100 && h < 450));
@@ -114,15 +269,17 @@ export function generateBoard(seed: string, n: number): GenBoard {
       } else {
         const k = randomInt(r, 5);
         for (let i = 0; i < k; i++) lines.push(randomOp(r, p, ++p.seq));
+        if (hg !== null) lines.push(...hg.ops(p.id, () => `${p.id}/${p.epoch}/${++p.seq}`));
       }
     }
-    commits.push({ writer: { peer: p.id, epoch: p.epoch, seq: ++p.seq }, lines });
+    commits.push({ writer: { peer: p.id, epoch: p.epoch, seq: ++p.seq }, lines, heldIds: heldNow() });
   }
-  return { protocol, peers: peers.map((p) => p.id), commits, b0SeatKey: `${g.id}/${commits[0]!.writer!.epoch}/${B0_SEAT}` };
+  const b0SeatKey = `${g.id}/${commits[0]!.writer!.epoch}/${B0_SEAT}`;
+  return b0HoldId === undefined ? { protocol, peers: peers.map((p) => p.id), commits, b0SeatKey } : { protocol, peers: peers.map((p) => p.id), commits, b0SeatKey, b0HoldId };
 }
 
 export function genDraft(gen: GenBoard, c: GenCommit, liveCode: Oid, checkpoint: Buffer | null = null): BoardDraft {
-  return { liveCode, writer: c.writer, cs: [], protocol: gen.protocol, opsLines: [...c.lines], checkpoint, heldIds: [] };
+  return { liveCode, writer: c.writer, cs: [], protocol: gen.protocol, opsLines: [...c.lines], checkpoint, heldIds: [...(c.heldIds ?? [])] };
 }
 
 /** The fold from genesis: states[h] after folding commit h. */
@@ -155,11 +312,13 @@ function dataBlock(bytes: Buffer): Buffer[] {
  * Writes the board into `<prefix>/live` (L0) and `<prefix>/board` with one `git fast-import`: B0 = [L0]
  * with ops.jsonl, protocol.json and checkpoint/state.json; every later commit [previous, L0] replaces
  * ops.jsonl and, at checkpoint heights, checkpoint/state.json (protocol.json and the checkpoint carried).
- * Returns L0 and the board oids by height.
+ * A commit's heldIds become held/<id>/h1/held.txt entries: a new id is put, an id the previous commit carried and this
+ * one does not is removed, the rest are carried. Returns L0 and the board oids by height.
  */
 export async function importBoard(repo: GitRepo, prefix: string, gen: GenBoard, checkpoints: ReadonlyMap<number, Buffer>): Promise<{ L0: Oid; oids: Oid[] }> {
   const parts: Buffer[] = [];
   const text = (s: string): void => { parts.push(Buffer.from(s, 'utf8')); };
+  let carried = new Set<string>();
   text(`commit ${prefix}/live\nmark :1\nauthor Fixture <fixture@cowork.invalid> ${DATE}\ncommitter Fixture <fixture@cowork.invalid> ${DATE}\n`);
   parts.push(...dataBlock(formatMessage(CODE_SUBJECT, [{ key: 'skip-checks', value: 'true' }, { key: 'Cowork-Proto', value: '1' }])));
   text('M 100644 inline README.md\n');
@@ -186,6 +345,14 @@ export async function importBoard(repo: GitRepo, prefix: string, gen: GenBoard, 
     } else if (h === 0) {
       throw new Error('importBoard: B0 needs its checkpoint');
     }
+    const now = new Set(c.heldIds ?? []);
+    for (const id of carried) if (!now.has(id)) text(`D held/${id}\n`);
+    for (const id of now) {
+      if (carried.has(id)) continue;
+      text(`M 100644 inline held/${id}/h1/held.txt\n`);
+      parts.push(...dataBlock(Buffer.from(`${id}\n`, 'utf8')));
+    }
+    carried = now;
   });
   text('done\n');
   await repo.run(['fast-import', '--quiet', '--done'], { stdin: Buffer.concat(parts) });

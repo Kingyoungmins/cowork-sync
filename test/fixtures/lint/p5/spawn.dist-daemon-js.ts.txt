@@ -1,0 +1,5 @@
+// CCI-03 (12): a daemon spawn outside spawnDaemon() (a 'dist/daemon.js' literal passed to a call).
+import { join } from 'node:path';
+export function start(root: string, go: (exe: string, argv: string[]) => void): void {
+  go(process.execPath, [join(root, 'dist/daemon.js'), 'run']);
+}

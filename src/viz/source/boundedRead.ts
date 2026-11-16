@@ -1,8 +1,9 @@
 // Bounded one-shot reads (12 §3.3.2, §3.9.3, VIZ-27; Plan 8a ruling R-V30; S16): the three files the viewer reads outside
 // git — <gitdir>/cowork/status.json (≤ 1 MiB), <gitdir>/cowork/peer (≤ 4 KiB) and a --demo file (≤ 4 MiB) — each one
-// open-read-close that never holds a handle past the call (glossary §26.1 W3), never follows a symlink, never blocks on a
-// FIFO or a device and never reads more than max + 1 bytes. The second file of src/viz/** allowed node:fs (R-V34).
-import { constants, promises as fsp } from 'node:fs';
+// open-read-close that never holds a handle past the call and, where O_NOFOLLOW is undefined (Windows), never across an
+// event-loop turn (glossary §26.1 W3), never follows a symlink, never blocks on a FIFO or a device and never reads more than
+// max + 1 bytes. The second file of src/viz/** allowed node:fs (R-V34).
+import { closeSync, constants, fstatSync, lstatSync, openSync, promises as fsp, readSync } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import type { Fs } from '../../ports/fs.js';
 
@@ -22,33 +23,68 @@ function checkMax(max: number): void {
   if (!Number.isSafeInteger(max) || max < 0) throw new RangeError(`BoundedReader: max must be a non-negative integer, got ${String(max)}`);
 }
 
+/** The open's errors: ENOENT/ENOTDIR → null; ELOOP/EMLINK (a symlink under O_NOFOLLOW) and EISDIR → 'not_file'; else rethrown. */
+function openRefusal(e: unknown): 'not_file' | null {
+  const code = codeOf(e);
+  if (code === 'ENOENT' || code === 'ENOTDIR') return null;
+  if (code === 'ELOOP' || code === 'EMLINK' || code === 'EISDIR') return 'not_file';
+  throw e;
+}
+
+/**
+ * Where O_NOFOLLOW is undefined (Windows): lstat, open, fstat, read and close as ONE synchronous sequence, the buffer allocated
+ * before the open, so the handle lives only inside these calls and no event-loop turn — a timer of this process, a page's
+ * request — runs while it is open (glossary §26.1 W3: there a rename over a file fails while any handle on it is open, even a
+ * share-all one, so the daemon's temp + rename of status.json must never meet a handle held across a turn). The lstat is
+ * synchronous too: an async one can open a handle of its own on the thread pool while this process's turns run (measured with
+ * Node 20's libuv 1.46), and no turn may sit between the symlink check and the open.
+ */
+function readOnceSync(path: string, max: number): Buffer | 'not_file' | 'too_large' | null {
+  let l;
+  try {
+    l = lstatSync(path);
+  } catch (e) {
+    if (codeOf(e) === 'ENOENT' || codeOf(e) === 'ENOTDIR') return null;
+    throw e;
+  }
+  if (l.isSymbolicLink() || !l.isFile()) return 'not_file';
+  const buf = Buffer.allocUnsafe(max + 1);
+  let fd: number;
+  try {
+    fd = openSync(path, OPEN_FLAGS);
+  } catch (e) {
+    return openRefusal(e);
+  }
+  let n = 0;
+  try {
+    if (!fstatSync(fd).isFile()) return 'not_file';
+    while (n < buf.length) {
+      const bytesRead = readSync(fd, buf, n, buf.length - n, null);
+      if (bytesRead === 0) break;
+      n += bytesRead;
+    }
+  } finally {
+    closeSync(fd);
+  }
+  if (n > max) return 'too_large';
+  return Buffer.from(buf.subarray(0, n));
+}
+
 /**
  * open(O_RDONLY | O_NOFOLLOW | O_NONBLOCK where defined; where O_NOFOLLOW is not, as on Windows, an lstat just before the
- * open must not report a symlink or a directory), fstat().isFile() else 'not_file', read ≤ max + 1 bytes ('too_large' when
- * the extra byte arrives), close in finally. ENOENT/ENOTDIR → null; ELOOP/EMLINK (a symlink under O_NOFOLLOW) and EISDIR →
- * 'not_file'; EPERM, EACCES, EBUSY and every other error propagate.
+ * open must not report a symlink or a directory, and the whole read is one synchronous sequence, readOnceSync), fstat().isFile()
+ * else 'not_file', read ≤ max + 1 bytes ('too_large' when the extra byte arrives), close in finally. ENOENT/ENOTDIR → null;
+ * ELOOP/EMLINK (a symlink under O_NOFOLLOW) and EISDIR → 'not_file'; EPERM, EACCES, EBUSY and every other error propagate.
  */
 export const realBoundedReader: BoundedReader = {
   async read(path: string, max: number): Promise<Buffer | 'not_file' | 'too_large' | null> {
     checkMax(max);
-    if (NOFOLLOW === undefined) {
-      let l;
-      try {
-        l = await fsp.lstat(path);
-      } catch (e) {
-        if (codeOf(e) === 'ENOENT' || codeOf(e) === 'ENOTDIR') return null;
-        throw e;
-      }
-      if (l.isSymbolicLink() || !l.isFile()) return 'not_file';
-    }
+    if (NOFOLLOW === undefined) return readOnceSync(path, max);
     let h: FileHandle;
     try {
       h = await fsp.open(path, OPEN_FLAGS);
     } catch (e) {
-      const code = codeOf(e);
-      if (code === 'ENOENT' || code === 'ENOTDIR') return null;
-      if (code === 'ELOOP' || code === 'EMLINK' || code === 'EISDIR') return 'not_file';
-      throw e;
+      return openRefusal(e);
     }
     try {
       if (!(await h.stat()).isFile()) return 'not_file';

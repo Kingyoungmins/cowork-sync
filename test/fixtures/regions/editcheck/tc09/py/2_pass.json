@@ -1,0 +1,15 @@
+{
+  "name": "tc09/py/2_pass",
+  "check": null,
+  "lang": "python",
+  "expect": "pass",
+  "tipEqualsA": true,
+  "A": {
+    "pricing.py": "def price(amount, qty):\n    return round(amount * qty, 2)\n\n\ndef discount(amount):\n    return round(amount * 0.9, 2)\n",
+    "checkout.py": "import pricing\n\n\ndef checkout(cart):\n    total = 0\n    for line in cart:\n        total += pricing.price(line.amount, line.qty)\n    return pricing.discount(total)\n"
+  },
+  "R": {
+    "pricing.py": "def price(amount, qty, tax):\n    return round(amount * qty, 2)\n\n\ndef discount(amount):\n    return round(amount * 0.9, 2)\n",
+    "checkout.py": "import pricing\n\n\ndef checkout(cart):\n    total = 0\n    for line in cart:\n        total += pricing.price(line.amount, line.qty, line.tax)\n    return pricing.discount(total)\n"
+  }
+}

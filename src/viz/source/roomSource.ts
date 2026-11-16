@@ -23,8 +23,12 @@ export interface RoomSource {
   changed(): Promise<boolean>;
   /** Re-resolves and compares with the last folded tip (R-V31); pins the new tip. */
   advance(last: TipInfo): Promise<Advance>;
-  /** initialFoldState(protocol of B0) at 0; parseFold(checkpoint at h) for h % 256 === 0 (git), or the demo's own fold state at h. */
-  startAt(h: number): Promise<FoldState>;
+  /**
+   * initialFoldState(protocol of B0) at 0; parseFold(checkpoint at h) for h % 256 === 0 (git), or the demo's own fold state at h.
+   * upTo (optional; the store's first window): the next frames() call folds up to upTo, so a source may read those heights with h's
+   * (the git source: one --batch-check/--batch pair for the whole window; viz-hosted-perf). Never changes what is returned or folded.
+   */
+  startAt(h: number, upTo?: number): Promise<FoldState>;
   /** Frames of heights from…to (inclusive, oldest first) of the pinned tip, folded from `start` (the state at from − 1), batches ≤ 1,280. */
   frames(start: FoldState, from: number, to: number, self: PeerId): AsyncIterable<Frame>;
 }

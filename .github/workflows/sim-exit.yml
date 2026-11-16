@@ -1,9 +1,16 @@
 name: sim-exit
 
-# Roadmap row 2's exit criterion (rulings R-31, R-33): 1,000 `edits` seeds per OS with the real engine and the six exit
-# oracles (INV-FF, INV-OID, INV-FIRSTPARENT, INV-BASE, INV-PUSHED-IS-MERGE, INV-CONVERGE), in 10 shards of 100, and one
-# verdict per OS. This workflow holds nothing else: the long SIM tests and the real-remote rehearsal are sim-long.yml, so
-# a run of this one is the exit artifact alone. Manual dispatch and nightly only: never part of the per-push ci.yml.
+# The exit runs, one verdict per OS each (manual dispatch and nightly only: never part of the per-push ci.yml):
+# - roadmap row 2 (rulings R-31, R-33): 1,000 `edits` seeds per OS with the real engine in 10 shards of 100;
+# - roadmap row 3 (Plan 3 Task 16; rulings R3-49, R3-51, R3-55, R3-58): `npm run test:sim` once per OS (every multi-seed SIM
+#   test with all its seeds, TEST_SIM_FULL=1) and 1,000 `holds` seeds per OS in shards of s seeds, s sized from the p95
+#   per-seed time (R3-55: s = min(100, ⌊0.8 × 120 min × 4 ÷ p95⌋));
+# - Ruling R3-51/55-A (Plan 3 Task 16 fix round 1): R3-51's 100-seed per-PR set per OS and Node leg (pr-set), moved here
+#   from ci.yml, whose PR legs run a 10-seed sample.
+# Every seed of every profile asserts exitOracles(ns, {holds: {markers}}): Plan 2's six exit oracles (INV-FF, INV-OID,
+# INV-FIRSTPARENT, INV-BASE, INV-PUSHED-IS-MERGE, INV-CONVERGE) and Plan 3's ten (INV-MASK, INV-GROUP, INV-NOLOSS and the
+# 05 oracle rows). The long Plan 2 SIM tests and the real-remote rehearsal are sim-long.yml, so a run of this workflow is the
+# exit artifact alone.
 on:
   workflow_dispatch:
   schedule:
@@ -17,6 +24,91 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test-sim:
+    name: ${{ matrix.os }} / npm run test:sim
+    runs-on: ${{ matrix.os }}
+    # Hosted jobs end at 360 min. The controller ruling (Task 16): the step gets 330 min — the holds 20-seed TEST_SIM_FULL
+    # loop alone measured 8,025 s on the reference PC (EF2), Task 15's full forms carry 180/150-min timeouts, and the files
+    # run side by side. A whole local `npm run test:sim` took 123.6 min on the reference PC (32 logical CPUs beside other CIs;
+    # Task 16 fix round 1) — a 3–4-core hosted runner runs fewer files at a time, so the 330 stays: re-derive this from the
+    # first hosted run (R3-58).
+    timeout-minutes: 345
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      # Windows uses the Git for Windows checkout profile (11-testing TST-13); set it before checkout.
+      - name: core.autocrlf=true (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: npm
+      - name: Tool versions
+        run: |
+          git --version
+          node --version
+      - run: npm ci
+      - name: npm test with TEST_SIM_FULL=1 (R3-55)
+        timeout-minutes: 330
+        run: npm run test:sim
+
+  pr-set:
+    name: ${{ matrix.os }} / node ${{ matrix.node }} / the 100-seed PR set
+    runs-on: ${{ matrix.os }}
+    # Ruling R3-51/55-A (c), Plan 3 Task 16 fix round 1: R3-51's per-PR set (the X-113 rule: 100 per leg, every merged non-edits
+    # profile at its fixed count — faults 15, holds 15 — edits the remainder, 70; Node 20 legs from 0, Node 24 legs from 100: 200
+    # seeds per OS) runs here, with the exit run, since every seed asserts all sixteen oracles after every op (the PR legs run a
+    # sample in ci.yml). One run-seeds call in 4 contiguous slices of 25; the slowest is faults 5-14 + holds 0-14, estimated from
+    # Plan 2's measured legs (about 283 s per edits/faults seed) and Task 16's 100-seed local holds measurement (loaded PC: p50
+    # 420 s, mean 582 s, p95 1,697 s) at 10 x 283 + 15 x 582 s = 193 min (provisional: re-derive from the first hosted run,
+    # R3-58). The run's deadline (270 min) ends it before the step's (280) and the job's (300; hosted jobs end at 360).
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        node: ['20.x', '24.x']
+        include:
+          - node: '20.x'
+            from: 0
+          - node: '24.x'
+            from: 100
+    steps:
+      # Windows uses the Git for Windows checkout profile (11-testing TST-13); set it before checkout.
+      - name: core.autocrlf=true (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Tool versions
+        run: |
+          git --version
+          node --version
+      - run: npm ci
+      - name: SIM seeds (real engine, 70 edits + 15 faults + 15 holds)
+        timeout-minutes: 280
+        run: npm run sim:seeds -- --profile edits --seeds 70 --from ${{ matrix.from }} --profile faults --seeds 15 --from ${{ matrix.from }} --profile holds --seeds 15 --from ${{ matrix.from }} --parallel 4 --timeout-min 270 --seed-timeout-min 30 --keep-dir sim-kept --report sim-seeds.json
+      - name: SIM report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-pr-set-${{ matrix.os }}-node${{ matrix.node }}
+          path: |
+            sim-seeds.json
+            sim-kept/
+          if-no-files-found: ignore
+      # R3-51: the leg's SIM minutes against 11-testing §3.11's 20-minute budget, a warning when over — never a failure.
+      - name: SIM minutes against the 20-minute leg budget
+        if: ${{ !cancelled() }}
+        run: npx tsx tools/sim/leg-budget.ts --report sim-seeds.json
+
   shard:
     name: ${{ matrix.os }} / edits seeds shard ${{ matrix.shard }}
     runs-on: ${{ matrix.os }}
@@ -59,6 +151,60 @@ jobs:
             sim-kept/
           if-no-files-found: error
 
+  holds:
+    name: ${{ matrix.os }} / holds seeds shard ${{ matrix.shard }}
+    runs-on: ${{ matrix.os }}
+    # R3-55: 120 min per shard; the runner's deadline (100 min) ends the run before the step's (110) and the job's, so its
+    # report and every lost seed's rerun command survive; a seed still running after 30 min fails as TIMEOUT.
+    timeout-minutes: 120
+    # s = HOLDS_SHARD_SEEDS seeds per shard, shards k = 0 … ⌈1,000 / s⌉ − 1 (the list below), shard k running
+    # exit-holds-<k·s> … exit-holds-<min(1,000, k·s + s) − 1>: seeds 0 … 999 each exactly once.
+    # R3-58 (provisional): one local Windows measurement sizes s for every OS — re-derive it per OS from the p95 per-seed time of
+    # the first green hosted run (the dev repository's Actions are blocked; controller ruling, R3-58 amended):
+    # every OS: p50 420 s, p95 1697 s per holds seed (reference PC, Windows 11, Node 24: run-seeds --profile holds, 100 seeds
+    # meas-holds-0 … 99 at --parallel 4 on a loaded machine, the three 30-min TIMEOUTs counted at 1,800 s; Plan 3 Task 16 report),
+    # so s = min(100, ⌊0.8 × 120 min × 4 ÷ 1,697 s⌋) = 13: 77 shards per OS, 231 holds jobs (a matrix runs at most 256).
+    env:
+      HOLDS_SHARD_SEEDS: 13
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76]
+    steps:
+      # Windows uses the Git for Windows checkout profile (11-testing TST-13); set it before checkout.
+      - name: core.autocrlf=true (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: npm
+      - name: Tool versions
+        run: |
+          git --version
+          node --version
+      - run: npm ci
+      # Shard k: from = k·s, n = min(s, 1,000 − from).
+      - name: holds seeds
+        shell: bash
+        timeout-minutes: 110
+        run: |
+          from=$(( ${{ matrix.shard }} * HOLDS_SHARD_SEEDS ))
+          n=$(( 1000 - from ))
+          if [ "$n" -gt "$HOLDS_SHARD_SEEDS" ]; then n=$HOLDS_SHARD_SEEDS; fi
+          npm run sim:seeds -- --profile holds --seeds "$n" --from "$from" --prefix exit- --parallel 4 --timeout-min 100 --seed-timeout-min 30 --keep-dir sim-kept --report sim-exit-holds-${{ matrix.os }}-${{ matrix.shard }}.json
+      - name: Report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-exit-holds-${{ matrix.os }}-${{ matrix.shard }}
+          path: |
+            sim-exit-holds-*.json
+            sim-kept/
+          if-no-files-found: error
+
   summary:
     name: ${{ matrix.os }} / 1,000 edits seeds
     needs: shard
@@ -85,3 +231,30 @@ jobs:
       # the run URL and this line's per-OS seed and failure counts). Tested as a script: test/unit/exit-verdict.test.ts.
       - name: Seeds and failures
         run: npx tsx tools/sim/exit-verdict.ts --reports reports --profile edits --from 0 --seeds 1000 --label ${{ matrix.os }}
+
+  holds-summary:
+    name: ${{ matrix.os }} / 1,000 holds seeds
+    needs: holds
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sim-exit-holds-${{ matrix.os }}-*
+          merge-multiple: true
+          path: reports
+      # Roadmap row 3: exactly exit-holds-0 … exit-holds-999, each once, every one passed (INV-NOLOSS, INV-MASK, INV-GROUP
+      # and every other exit oracle), nothing lost.
+      - name: Seeds and failures
+        run: npx tsx tools/sim/exit-verdict.ts --reports reports --profile holds --prefix exit- --from 0 --seeds 1000 --label ${{ matrix.os }}

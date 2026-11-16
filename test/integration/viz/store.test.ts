@@ -97,10 +97,14 @@ test('tick(): 3 new commits → one timeline delta with their events, cards and 
     const seen = (h: number): number | null => (h <= t0 ? null : h <= t0 + 3 ? at1 : at2);
     assert.deepEqual(s.cards, ref2.timeline.cards.slice(-200).map((card) => ({ card, foldedAt: seen(card.at.height) })), 'its last 200 cards');
     assert.equal(s.cards.length, 200);
-    assert.deepEqual(s.ticks, ticksOf(ref2.timeline.events), 'the ticks of the whole window');
+    // B1 (8a final review): the snapshot carries the ticks of the newly folded heights only (the page appends them); the window's
+    // own ticks stay whole in the room snapshot the world serves.
+    assert.deepEqual(s.ticks, ticksOf(eventsIn(ref2.timeline.events, t0 + 4, t0 + 68)), 'the ticks of the newly folded heights only');
+    assert.ok(s.ticks.length > 0 && s.ticks.every((k) => k.h > t0 + 3));
     assert.deepEqual(s.layout, delta(ref1.timeline.layout, ref2.timeline.layout));
     const m = r.store.snapshot();
-    assert.deepEqual([m.window, m.scene, m.cards, m.ticks, m.layout], [s.window, s.scene, s.cards, s.ticks, ref2.timeline.layout]);
+    assert.deepEqual([m.window, m.scene, m.cards, m.layout], [s.window, s.scene, s.cards, ref2.timeline.layout]);
+    assert.deepEqual(m.ticks, ticksOf(ref2.timeline.events), 'the world keeps the ticks of the whole window');
     clock.advance(2_500);
     assert.deepEqual(await r.store.tick(), NO_TICK, 'an idle tick');
   } finally {

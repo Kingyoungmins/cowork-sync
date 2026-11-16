@@ -56,7 +56,7 @@ export function spySource(inner: RoomSource): { source: RoomSource; spy: SourceS
     tip: () => { spy.tip++; return inner.tip(); },
     changed: () => { spy.changed++; return inner.changed(); },
     advance: (last) => { spy.advance++; return inner.advance(last); },
-    startAt: (h) => { spy.startAt.push(h); return inner.startAt(h); },
+    startAt: (h, upTo) => { spy.startAt.push(h); return inner.startAt(h, upTo); },
     async *frames(start, from, to, self) {
       spy.frames.push({ from, to, start: start.height, self });
       for await (const f of inner.frames(start, from, to, self)) {

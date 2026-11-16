@@ -27,6 +27,8 @@ function base(over: Partial<StatusInputs> = {}): StatusInputs {
     counts: { csReady: 1, csOpen: 2, holdsActive: 3, holdsLocalOnly: 4, incoming: 5 },
     branch: 'main', peerId: 'a'.repeat(32), pluginVersion: '0.0.0',
     heartbeatMs: 1234.5, loopPeriodMs: 2_500, lastFetchAgeMs: 10, lastPushAgeMs: null,
+    diverged: null, noChecksConfigured: false,   // Plan 3 Task 12a (contract addition 4): no hold divergence, checks configured
+    holdCode: null,                              // Plan 3 Task 12a fix round 1 (R3-61): no hold code in the degraded rung's slot
     ...over,
   };
 }

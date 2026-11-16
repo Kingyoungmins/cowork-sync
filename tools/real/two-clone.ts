@@ -34,7 +34,8 @@ import { fileURLToPath } from 'node:url';
 import { RemoteContentError } from '../../src/board/boardCommit.js';
 import { sanitizeUrl } from '../../src/daemon/run.js';
 import { liveCodeOf } from '../../src/engine/core.js';
-import { humanOnlyAttribution, PLAN2_REGION_SPEC, type EngineDeps } from '../../src/engine/deps.js';
+import { humanOnlyAttribution, noClaude, PLAN2_REGION_SPEC, type EngineDeps } from '../../src/engine/deps.js';
+import { plan3Ports } from '../../src/holds/ports.js';
 import { fpOk } from '../../src/engine/incident.js';
 import { DaemonLock, Engine, runLoop, type EngineInspection, type LoopHandle } from '../../src/engine/loop.js';
 import { testNamespace } from '../../src/engine/refs.js';
@@ -58,6 +59,7 @@ import type { Trace, TraceEvent } from '../../src/ports/trace.js';
 import { userinfoKind } from '../../src/sec/redact.js';
 import { PLUGIN_VERSION } from '../../src/version.js';
 import { makeTempRoot } from '../../test/helpers/tmp.js';
+import { testRegionDeps } from '../../test/helpers/regionDeps.js';
 
 export interface TwoCloneReport { runId: string; branch: string; scenarios: Array<{ name: string; ok: boolean; detail: string }>; converged: boolean; ffHistory: boolean; pushes: number; k4Records: number; elapsedS: number; }
 export interface TwoCloneOptions {
@@ -576,12 +578,14 @@ export async function twoCloneRun(opts: TwoCloneOptions): Promise<TwoCloneReport
       };
       const deps: EngineDeps = {
         ports: { clock: realClock, random: realRandom, scheduler: realScheduler(realClock), fs: realFs, git: harnessRunner(join(coworkDir, 'empty-hooks'), env) },
-        trace, log: fileLog(realFs, realClock, join(coworkDir, 'log', 'daemon-0.jsonl')), lease: alwaysLeased, attribution: humanOnlyAttribution,
+        trace, log: fileLog(realFs, realClock, join(coworkDir, 'log', 'daemon-0.jsonl')), lease: alwaysLeased, attribution: humanOnlyAttribution, claude: noClaude,
         heartbeatMs: machineMonoMs,
         paths: { workTree: p.dir, gitDir: join(p.dir, '.git'), coworkDir },
         branch, namespace: ns, url, display: `two-clone ${p.name}`,
         pluginVersion: PLUGIN_VERSION, pluginSha: createHash('sha256').update(`cowork-sync two-clone ${PLUGIN_VERSION}`, 'utf8').digest('hex'),
         regionSpec: PLAN2_REGION_SPEC, platform: process.platform, testBuild: true, testMutants: new Set(),
+        ...plan3Ports(),   // Plan 3 Task 10 (R3-03, R3-04, R3-07)
+        regions: await testRegionDeps({ clock: realClock }),   // Plan 4 Task 5 (R4-36): the test region module (real clock)
       };
       p.engine = await Engine.create(deps);
     }

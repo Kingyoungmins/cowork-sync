@@ -1,0 +1,16 @@
+{
+  "name": "tc09/cs/1_fail",
+  "check": 1,
+  "lang": "c_sharp",
+  "expect": "fail",
+  "reason": "new_error_node",
+  "tipEqualsA": true,
+  "A": {
+    "Pricing.cs": "namespace Shop\n{\n    public static class Pricing\n    {\n        public static decimal Price(decimal amount)\n        {\n            return amount;\n        }\n\n        public static decimal Price(decimal amount, int qty)\n        {\n            return amount * qty;\n        }\n\n        public static decimal Discount(decimal amount)\n        {\n            return amount * 0.9m;\n        }\n    }\n}\n",
+    "Checkout.cs": "namespace Shop\n{\n    public static class Checkout\n    {\n        public static decimal Run(decimal[] amounts, int[] qtys)\n        {\n            decimal total = 0;\n            for (var i = 0; i < amounts.Length; i++)\n            {\n                total += Pricing.Price(amounts[i], qtys[i]);\n            }\n            return Pricing.Discount(total);\n        }\n    }\n}\n"
+  },
+  "R": {
+    "Pricing.cs": "namespace Shop\n{\n    public static class Pricing\n    {\n        public static decimal Price(decimal amount)\n        {\n            return amount;\n        }\n\n        public static decimal Price(decimal amount, int qty)\n        {\n            if (amount > \n            return amount * qty;\n        }\n\n        public static decimal Discount(decimal amount)\n        {\n            return amount * 0.9m;\n        }\n    }\n}\n",
+    "Checkout.cs": "namespace Shop\n{\n    public static class Checkout\n    {\n        public static decimal Run(decimal[] amounts, int[] qtys)\n        {\n            decimal total = 0;\n            for (var i = 0; i < amounts.Length; i++)\n            {\n                total += Pricing.Price(amounts[i], qtys[i]);\n            }\n            return Pricing.Discount(total);\n        }\n    }\n}\n"
+  }
+}

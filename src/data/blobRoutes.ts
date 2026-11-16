@@ -4,6 +4,8 @@
 // root (glossary §25 F12) and never with a work tree (ENG-08). Route (c) hashes bytes that are already
 // stored form (canon, concat and restore output; metadata blobs) with --no-filters. `write` is false at
 // detection ticks (ids only) and true only at ready-pair capture, publish, apply and hold-record creation.
+// A8-7 adds the hook path's stdin variant of route (b): the bytes are hashed from stdin (never a file),
+// so a short read stores no object and never stages a copy.
 import { OidError, parseOid, type Oid } from '../git/oid.js';
 import type { GitRepo, RunOpts } from '../git/repo.js';
 
@@ -48,4 +50,23 @@ export function hashRouteC(repo: GitRepo, bytes: Buffer, write: boolean): Promis
 /** DAT-07: a new path in a call of its own, route (b) with -c core.autocrlf=input (EPOCH_BASE text/eol attributes still decide). */
 export function hashNewPath(repo: GitRepo, path: string, stageFile: string, write: boolean): Promise<Oid | FilterFailure> {
   return hashPath(repo, path, stageFile, write, { config: { 'core.autocrlf': 'input' } });
+}
+
+/** A8-7 (X5-43): route (b) from stdin — hash-object [-w] --path=<path> --stdin, or (no path) hash-object [-w]
+ *  --no-filters --stdin: a pathless stdin hash applies no filter at all (no attributes could decide), so the raw
+ *  bytes' oid stays deterministic (L-HASH-STDIN). */
+export function hashRouteBStdin(repo: GitRepo, bytes: Buffer, path: string | null, write: boolean): Promise<Oid | FilterFailure> {
+  if (path !== null) checkPath(path);
+  const args = path !== null
+    ? ['hash-object', ...(write ? ['-w'] : []), `--path=${path}`, '--stdin']
+    : ['hash-object', ...(write ? ['-w'] : []), '--no-filters', '--stdin'];
+  const r = repo.run(args, { class: 'attr', stdin: bytes, okCodes: [0, 128] });
+  return r.then((res) => {
+    if (res.code === 128) return { failed: 'filter', path: path ?? '' } as FilterFailure;
+    try {
+      return parseOid(res.stdout.toString('utf8'));
+    } catch {
+      throw new OidError(`git hash-object printed no object id (exit ${res.code})`);
+    }
+  });
 }

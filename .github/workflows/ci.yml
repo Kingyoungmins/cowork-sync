@@ -15,14 +15,20 @@ concurrency:
 # Two jobs per os x node leg, side by side on two runners (no `needs:`), together exactly the gates of `npm run ci` in
 # its order: `test` runs lint … sim:smoke, `sim` runs the real-engine seeds (R-33 amendment, Task 19 fix round 1: the
 # budgets were measured on the reference PC, the Task 19 report records them, and the timeouts below carry a 1.5x
-# margin; the seeds no longer share one job with npm test).
+# margin; the seeds no longer share one job with npm test). Plan 3 Task 16 (R3-51, R3-55; Ruling R3-51/55-A, fix round 1):
+# every seed of every profile asserts all sixteen exit oracles after every op, so R3-51's 100 seeds per leg never fit a PR
+# leg: the test job holds npm test within 90 min, the sim job a SIM sample within R3-51's 45 min (6 edits + 2 faults +
+# 2 holds per leg, 20 per OS per PR), and the 100-seed X-113 set runs in sim-exit.yml's pr-set job (exit evidence). Each
+# job writes its minutes to its job summary: the test job npm test's, the sim job (its last step) SIM's against 11-testing
+# §3.11's 20-minute leg budget (a `::warning::` when over; reported, never failed).
 jobs:
   test:
     name: ${{ matrix.os }} / node ${{ matrix.node }}
     runs-on: ${{ matrix.os }}
     # npm test sets per-test timeouts up to 60 min (the 200-apply BOM+CRLF test, Task 17's carry), and every one must end
-    # before the job does: 1.5 x 60 min. Measured on the reference PC under load: npm test 15.0 min (that BOM+CRLF test
-    # is its longest, 14.9 min), so the job's measured gates take far less than 90 min.
+    # before the job does: 1.5 x 60 min. Ruling R3-51/55-A (a): npm test must end within these 90 min on a 4-core hosted
+    # runner, so its SIM forms are trimmed (the heavy forms run in sim-exit.yml's test-sim job, R3-55) to keep
+    # npm test within 60 min on the reference PC; the measurement is in the Plan 3 Task 16 report (fix round 1).
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -49,7 +55,15 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run build
+      # R3-55: npm test's minutes go to the job summary (the leg's SIM minutes are the sim job's last step).
+      - name: npm test start
+        shell: bash
+        run: echo "NPM_TEST_START=$(date +%s)" >> "$GITHUB_ENV"
       - run: npm test
+      - name: npm test minutes
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: npx tsx tools/sim/leg-budget.ts --npm-test-since "$NPM_TEST_START"
       # Plan 1 budget (11-testing §3.11): 10 fixed seeds x 3 peers x 20 ops with the NaiveEngine.
       - name: SIM smoke (NaiveEngine, 10 seeds)
         run: npm run sim:smoke
@@ -57,25 +71,28 @@ jobs:
   sim:
     name: ${{ matrix.os }} / node ${{ matrix.node }} / SIM seeds
     runs-on: ${{ matrix.os }}
-    # Measured on the reference PC (Task 19 fix round 1, under heavy load from other worktrees), one leg = one run-seeds
-    # call cut into 4 slices of 25 seeds: Node 20 legs 104.9 min, Node 24 legs 117.9 min (the slowest slice, from the
-    # per-seed times of the ranges edits 0-79: 67.7 min, faults 80-99: 24.1 min, edits 100-179: 74.0 min, faults
-    # 180-199: 28.0 min, each at --parallel 4). The run's deadline is 1.5 x 117.9 = 177 -> 180 min, then the step's, then
-    # the job's (checkout, npm ci and the report upload around it).
-    timeout-minutes: 200
+    # R3-51's 45-minute job (Ruling R3-51/55-A (b)): one run-seeds call of 10 seeds cut into 4 contiguous slices (3, 3, 2, 2):
+    # edits 0-2, edits 3-5, faults 0-1, holds 0-1 (from the leg's offset). The slowest slice is the two holds seeds. The
+    # per-seed basis (reference PC, Windows 11, Node 24, this exact command at --parallel 4 beside other CIs; Plan 3 Task 16
+    # report, fix round 1): the Node 20 leg's 10 seeds took 19.1 min (edits 347-403 s, faults 395-409 s, holds 238-749 s), the
+    # Node 24 leg's 19.4 min (edits 347-440 s, faults 370-376 s, holds-100 past the 18-min seed timeout); a less loaded run of
+    # 10 other seeds 10.6 min (edits 123-298 s, holds 302-333 s). Each holds seed gets 19 min, so the holds slice ends inside
+    # the run's deadline (39 min), which ends the run before the step's (40) and the job's (45, setup included); its report
+    # and every lost seed's rerun command survive.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
         node: ['20.x', '24.x']
-        # R-33: distinct seed ranges per Node leg (Node 20: 0-99, Node 24: 100-199), so each OS runs 200 seeds per PR.
+        # R-33 as amended by X-113 (rev 2.5): distinct seed ranges per Node leg — every profile from 0 on Node 20 legs and
+        # from 100 on Node 24 legs — so each OS runs 20 seeds per PR (Ruling R3-51/55-A; the 200 of glossary §20's CI row
+        # and TST-13 are sim-exit.yml's pr-set job).
         include:
           - node: '20.x'
-            edits_from: 0
-            faults_from: 80
+            from: 0
           - node: '24.x'
-            edits_from: 100
-            faults_from: 180
+            from: 100
     steps:
       # Windows legs use the Git for Windows checkout profile (11-testing TST-13); set it before checkout.
       - name: core.autocrlf=true (Windows)
@@ -91,14 +108,14 @@ jobs:
           git --version
           node --version
       - run: npm ci
-      # Plan 2 (R-31, R-33): the real engine with the six exit oracles, both profiles in one call, so a red edits group
-      # never hides the faults results. The runner's own deadline (1.5 x the measured leg) ends it before this step's and
-      # the job's, so its report and every lost seed's rerun command survive; a seed still running after 20 min (over
-      # twice the slowest measured seed, 545 s) fails as TIMEOUT with its partial op-log and trace; failed seeds'
-      # artifacts are copied to sim-kept/ for the upload.
-      - name: SIM seeds (real engine, 80 edits + 20 faults)
-        timeout-minutes: 190
-        run: npm run sim:seeds -- --profile edits --seeds 80 --from ${{ matrix.edits_from }} --profile faults --seeds 20 --from ${{ matrix.faults_from }} --parallel 4 --timeout-min 180 --seed-timeout-min 20 --keep-dir sim-kept --report sim-seeds.json
+      # Plan 2 (R-31, R-33) and Plan 3 (R3-49, R3-51, Ruling R3-51/55-A): the real engine with every exit oracle (Plan 2's
+      # six and Plan 3's ten), the three profiles in one call, so a red group never hides another. The runner's own deadline
+      # ends it before this step's and the job's, so its report and every lost seed's rerun command survive; a seed still
+      # running after its seed timeout fails as TIMEOUT with its partial op-log and trace; failed seeds' artifacts are copied
+      # to sim-kept/ for the upload.
+      - name: SIM seeds (real engine, 6 edits + 2 faults + 2 holds)
+        timeout-minutes: 40
+        run: npm run sim:seeds -- --profile edits --seeds 6 --from ${{ matrix.from }} --profile faults --seeds 2 --from ${{ matrix.from }} --profile holds --seeds 2 --from ${{ matrix.from }} --parallel 4 --timeout-min 39 --seed-timeout-min 19 --keep-dir sim-kept --report sim-seeds.json
       - name: SIM report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -108,3 +125,8 @@ jobs:
             sim-seeds.json
             sim-kept/
           if-no-files-found: ignore
+      # R3-51: the leg's SIM minutes against 11-testing §3.11's 20-minute budget (run-seeds' wall time), a warning when
+      # over — never a failure.
+      - name: SIM minutes against the 20-minute leg budget
+        if: ${{ !cancelled() }}
+        run: npx tsx tools/sim/leg-budget.ts --report sim-seeds.json

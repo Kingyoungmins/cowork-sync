@@ -7,13 +7,15 @@ import assert from 'node:assert/strict';
 import { unlink } from 'node:fs/promises';
 import { prepareIteration, tickInputOf, type IterationCtx } from '../../src/engine/core.js';
 import type { MutantId } from '../../src/engine/deps.js';
+import { csTableKeep, readCsTable } from '../../src/engine/state.js';
 import type { Oid } from '../../src/git/oid.js';
-import type { TreeMap } from '../../src/git/repo.js';
+import type { TreeEntry, TreeMap } from '../../src/git/repo.js';
 import type { GitCallOptions } from '../../src/git/flags.js';
 import type { GitResult } from '../../src/git/runner.js';
 import type { ReadyPair } from '../../src/holds/changesets.js';
 import type { Log, LogLevel, LogParam } from '../../src/ports/log.js';
 import { gitCallsOf, makeCores, workPath, writeWork, type CoreFixture, type PeerFixture } from './coreFixture.js';
+import { testRunner } from './tmp.js';
 
 export const buf = (s: string): Buffer => Buffer.from(s, 'utf8');
 export const lines = (n: number, f: (i: number) => string = (i) => `line ${i}`): string => Array.from({ length: n }, (_, i) => `${f(i + 1)}\n`).join('');
@@ -27,13 +29,20 @@ export async function prep(p: PeerFixture, materialize: boolean | 'auto' = false
   return r.it;
 }
 
-/** HLD-40 at the close of the open human CS: materialize when the iteration has not, capture, journal the pair. */
+/**
+ * HLD-40 at the close of the open human CS: materialize when the iteration has not, capture (Plan 2's call shape), journal the pair.
+ * Plan 3 Task 9 (R3-40): once a CS table is journaled (readCsTable non-null) the update also carries csTableKeep(core.cs.table()) in
+ * view.keep with only the 'cs' entry replaced, as captureStep does, so these tests may mix it with captureStep; without one it
+ * writes no table (R3-68).
+ */
 export async function captureReady(p: PeerFixture, it: IterationCtx): Promise<ReadyPair> {
   const core = p.core;
   if (it.mat === null) it.mat = await core.snapshot.materialize(tickInputOf(core, it));
   const r = await core.cs.capture(core.repo, it.mat.sDiskMap, it.A, core.scratch('r'));
   assert.ok(r !== null && r.pair !== null, 'a ready-pair capture was due');
-  await core.commit({ ready: core.cs.ready(), meta: { ...core.view!.meta, cs_human_next: r.nextN } });
+  const view = core.view!;
+  const table = (await readCsTable(core.repo, view)) !== null ? { keep: new Map([...view.keep, await csTableKeep(core.repo, core.cs.table())]) } : {};
+  await core.commit({ ready: core.cs.ready(), meta: { ...view.meta, cs_human_next: r.nextN }, ...table });
   return r.pair;
 }
 
@@ -87,6 +96,16 @@ export async function remoteCode(fx: CoreFixture, p: PeerFixture): Promise<strin
   return (await fx.remote.refs())[p.core.refs.remoteCode];
 }
 
+/** The live code of the remote board tip (the board commit's last parent; the code mirror ref trails it by one publish). */
+export async function remoteLiveCode(fx: CoreFixture, p: PeerFixture): Promise<Oid> {
+  const board = (await fx.remote.refs())[p.core.refs.remoteBoard];
+  assert.ok(board !== undefined, 'a remote board');
+  const r = await testRunner().run(['show', '-s', '--format=%P', board], { class: 'local', cwd: fx.remote.dir });
+  assert.equal(r.code, 0, r.stderr.toString('utf8'));
+  const parents = r.stdout.toString('utf8').trim().split(' ');
+  return parents[parents.length - 1] as Oid;
+}
+
 export async function treeOf(p: PeerFixture, commit: Oid): Promise<TreeMap> {
   return p.core.repo.readTreeMap((await p.core.repo.readCommit(commit)).tree);
 }
@@ -104,6 +123,25 @@ export async function stateA(p: PeerFixture): Promise<TreeMap> {
 
 export function setMutants(p: PeerFixture, m: MutantId[]): void {
   p.deps.testMutants = new Set(m);
+}
+
+/**
+ * Test seam of the publish tests (Plan 2 Task 14; made asynchronous by Plan 3 Task 2, whose composeP mask returns a Promise of a
+ * MaskResult): composeP as built, then `edit` on P, with MASK bypassed when `unmasked` (the callback returns X as it is). publishStep
+ * still computes ENG-41 (i)'s `masked` itself (Plan 3 contract, PrePushInput.masked). Returns the restore function.
+ */
+export function stubCompose(p: PeerFixture, unmasked: boolean, edit: (P: Map<string, TreeEntry>) => void = () => {}): () => void {
+  const cs = p.core.cs;
+  Reflect.deleteProperty(cs, 'composeP');
+  const orig = cs.composeP.bind(cs);
+  cs.composeP = async (repo, A, mask, pinned) => {
+    const c = await orig(repo, A, unmasked ? async (X) => ({ entries: new Map(X), withheld: new Set(), partial: new Set(), conflicted: [] }) : mask, pinned);
+    edit(c.P);
+    return c;
+  };
+  return () => {
+    Reflect.deleteProperty(cs, 'composeP');
+  };
 }
 
 export class LogRecorder implements Log {

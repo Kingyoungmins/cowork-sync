@@ -1,19 +1,37 @@
 name: viz-slow
 
 # The viewer's slow suites (Plan 8a Global Constraints, "CI wall time"; 12-visualizer §7): T-VIZ-perf (≈ 3 min, Windows and Linux),
-# T-VIZ-golden-board (and T-VIZ-golden-sim once Plan 8a Task 18 lands it), and T-VIZ-contention (Windows). Each reports SKIPPED in
-# `npm test` unless COWORK_VIZ_SLOW=1, which this workflow sets. Every pull request that touches the viewer, the board or their tools
-# and tests runs it; its green run (both jobs, every leg) is part of the 8a exit (roadmap row 8).
+# T-VIZ-golden-board, the git source checked at every height, T-VIZ-golden-sim (six SIM runs of the real engine), the browser
+# smoke's page budgets and the demo end to end in Chrome (Linux) and T-VIZ-contention (Windows). Each reports SKIPPED (or runs
+# sampled) in `npm test` unless COWORK_VIZ_SLOW=1, which this workflow sets. Every pull request that touches the viewer, the board,
+# what they build on (engine, git, text, i18n, data, ports, sec), their tools, tests and helpers, the dependencies or this file runs
+# it; its green run (every job, every leg) is part of the 8a exit (roadmap row 8).
 # T-VIZ-contention has a floor of 2 phases x 3,000 writes x 100 ms = 10 min of writer sleep before any fetch is counted (1,476 s
 # measured on a loaded PC), so it runs in a Windows job of its own (Task 15 fix round 1 ruling) beside the three perf legs: it never
-# loads a runner while T-VIZ-perf measures time and CPU, and neither shares the other's budget.
+# loads a runner while T-VIZ-perf measures time and CPU, and neither shares the other's budget. T-VIZ-golden-sim (≈ 7 min on a
+# Windows PC; Plan 8a Task 18 step B1) runs in a three-leg job of its own for the same two reasons.
 on:
   pull_request:
     paths:
       - 'src/viz/**'
       - 'src/board/**'
+      - 'src/engine/**'
+      - 'src/git/**'
+      - 'src/text/**'
+      - 'src/i18n/**'
+      - 'src/data/**'
+      - 'src/ports/**'
+      - 'src/sec/**'
+      - 'src/version.ts'
       - 'tools/viz/**'
+      - 'tools/sim/**'
+      - 'tools/build/**'
       - 'test/**/viz/**'
+      - 'test/sim/**'
+      - 'test/helpers/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/viz-slow.yml'
   workflow_dispatch:
 
 permissions:
@@ -48,10 +66,60 @@ jobs:
           node --version
       - run: npm ci
       # One file at a time. T-VIZ-perf builds its own dist/viz.js into a temp folder (buildDistOnce), so no build step runs here.
-      - name: Viewer slow suites (perf, golden board)
+      # gitSource.test.ts compares the git source with the per-oid reference at every height under COWORK_VIZ_SLOW=1.
+      - name: Viewer slow suites (perf, golden board, git source at every height)
         env:
           COWORK_VIZ_SLOW: '1'
-        run: npx tsx --test --test-concurrency=1 test/integration/viz/perf.test.ts test/integration/viz/golden.board.test.ts
+        run: npx tsx --test --test-concurrency=1 test/integration/viz/perf.test.ts test/integration/viz/golden.board.test.ts test/integration/viz/gitSource.test.ts
+      # The browser smoke with its page budgets (R-V41: "the browser smoke on one" leg asserts page JS heap <= 150 MB and page CPU
+      # while animating <= 20 %; Plan 8a Task 17 review ruling) and the demo end to end in Chrome: the Linux leg only, after the
+      # perf suites, so it never loads the runner while T-VIZ-perf measures; also when they failed (a red perf step must not hide
+      # the page budgets). The 60 s budget measurement is gated behind COWORK_VIZ_SLOW=1; COWORK_VIZ_REQUIRE_BROWSER=1 makes both
+      # files fail, not skip, when the runner has no Chrome (or COWORK_CHROME names none).
+      - name: Viewer browser smoke, page budgets and the demo in Chrome (Linux leg)
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        env:
+          COWORK_VIZ_SLOW: '1'
+          COWORK_VIZ_REQUIRE_BROWSER: '1'
+        run: npx tsx --test --test-concurrency=1 test/integration/viz/browserSmoke.test.ts test/integration/viz/demoE2E.test.ts
+
+  golden-sim:
+    name: ${{ matrix.os }} / viewer slow suite (golden SIM)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      # Windows legs use the Git for Windows checkout profile (11-testing TST-13); set it before checkout.
+      - name: core.autocrlf=true (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: npm
+      - name: Tool versions
+        run: |
+          git --version
+          node --version
+      - run: npm ci
+      # Three SIM seeds, each run twice; the goldens are compared on the Linux leg only (12 §7, until TST-03 promises identical
+      # boards across OSes); the other legs check the git/demo equality and the second run.
+      - name: Viewer slow suite (golden SIM)
+        env:
+          COWORK_VIZ_SLOW: '1'
+        run: npx tsx --test test/integration/viz/golden.sim.test.ts
+      # The test keeps each timeline it computed (exactly what `npm run viz:golden -- --update` writes) in
+      # test-results/viz-golden-sim/; uploaded also when it fails, so a leg's text can be compared or taken as the golden.
+      - name: Upload the computed SIM timelines
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: viz-golden-sim-${{ matrix.os }}
+          path: test-results/viz-golden-sim/
 
   contention:
     name: windows-latest / viewer slow suite (contention)

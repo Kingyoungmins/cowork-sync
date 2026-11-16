@@ -154,3 +154,30 @@ test('startAt over unparseable checkpoints: at most FOLD_CACHE_MAX folded states
     await fx.cleanup();
   }
 });
+
+test('startAt(h0, upTo), the store\'s first window (viz-hosted-perf), over an unparseable checkpoint at h0: the window is read once with h0, folded up from genesis below it, and its frames equal those of a source that reads h0 alone', async () => {
+  const fx = await makeRepoFixture('viz-gitsrc-skew-window');
+  try {
+    const b = await skewBoard(fx, 1_024);   // heights 256…1,279: the window of the tip 1,279 starts at 256, whose checkpoint does not parse
+    const { src: ref } = sourceOf(fx, b.w.ref);
+    assert.deepEqual(await ref.tip(), { height: 1_279, key: b.tip });
+    const all = await collect(ref.frames(await ref.startAt(0), 0, 1_279, ZERO_PEER));
+    const { src, sg } = sourceOf(fx, b.w.ref);
+    await src.tip();
+    const n = sg.calls.length;
+    const start = await src.startAt(256, 1_279);
+    assert.deepEqual(start, all[256]!.after);
+    const window = await collect(src.frames(start, 257, 1_279, ZERO_PEER));
+    // The window 256…1,279 in one batch, then 0 alone (genesis parses) and 0…256 folded up; frames() reads nothing more.
+    assert.deepEqual(batchItems(sg, n), [1_024, 1, 257]);
+    const strip = (f: Frame): unknown => ({ ...f, before: null, after: null });
+    assert.deepEqual(window.map(strip), all.slice(257).map(strip));
+    assert.deepEqual(window.at(-1)!.after, all[1_279]!.after);
+    // The reads are taken once: the same window folded again reads its seed at 256 and the window again.
+    const m = sg.calls.length;
+    assert.equal((await collect(src.frames(start, 257, 1_279, ZERO_PEER))).length, 1_023);
+    assert.deepEqual(batchItems(sg, m), [1, 1_023]);
+  } finally {
+    await fx.cleanup();
+  }
+});

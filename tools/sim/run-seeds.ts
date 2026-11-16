@@ -1,17 +1,20 @@
-// The SIM seed runner (Plan 2 Task 19; 11-testing §3.11, rulings R-31…R-33). One call runs one or more profile groups:
-// each `--profile` starts a group whose seeds are `${prefix}${profile}-${i}` for i in [from, from + N) (`--seeds N
-// --from I`) or its `--seed` list. All the seeds, group after group, are cut into J contiguous slices; each slice is
-// run by one tools/sim/run-shard.ts child process (the real engine, the profile's generator, the R-32 quiescence, the
-// six exit oracles), whose seed list travels in a JSON file (never on a command line: Windows caps its length). Every
-// child prints one JSON line per seed; this process prints one line per seed and, for every failure, its oracle, step,
-// message, rerun command and kept artifacts, then one summary line per group, and rewrites the JSON report after every
-// seed (`complete` once the run ended), so a red group never hides another and a killed run still leaves its report.
+// The SIM seed runner (Plan 2 Task 19, Plan 3 Task 16; 11-testing §3.11, rulings R-31…R-33, R3-47, R3-49, R3-51). One call runs
+// one or more profile groups: each `--profile` starts a group whose seeds are `${prefix}${profile}-${i}` for i in [from, from + N)
+// (`--seeds N --from I`) or its `--seed` list. All the seeds, group after group, are cut into J contiguous slices; each slice is
+// run by one tools/sim/run-shard.ts child process (tools/sim/profileRun.ts: the real engine, the profile's generator — `holds`
+// through holdsSetup —, the R-32 quiescence with holdTimersSettled, exitOracles(ns, {holds: {markers}}): Plan 2's six exit oracles
+// and Plan 3's ten), whose seed list travels in a JSON file (never on a command line: Windows caps its length). Every child prints
+// one JSON line per seed (profile, steps, kills and op-log rows per kind included); this process prints one line per seed and, for
+// every failure, its oracle, step, message, seed tuple, rerun command and kept artifacts, then one summary line per group, and
+// rewrites the JSON report after every seed (`complete` once the run ended, `wallMs` the run's wall time so far), so a red group
+// never hides another and a killed run still leaves its report.
 //
-// Usage: tsx tools/sim/run-seeds.ts [--profile edits|faults [--seeds N] [--from I] | [--seed S]...]... [--prefix P]
-//          [--peers 3] [--steps 40] [--parallel J] [--mutant <id>]... [--report <file.json>] [--keep-dir <dir>]
+// Usage: tsx tools/sim/run-seeds.ts [--profile edits|faults|holds [--seeds N] [--from I] | [--seed S]...]... [--prefix P]
+//          [--peers 3] [--steps N] [--parallel J] [--mutant <id>]... [--report <file.json>] [--keep-dir <dir>]
 //          [--timeout-min M] [--seed-timeout-min T]
-//   defaults: one group, --profile edits --seeds 10 --from 0; --peers 3 --steps 40 --parallel 4 (R-33: 4 processes);
-//   --mutant (repeatable) switches a test-build mutant on (R-29) in every seed;
+//   defaults: one group, --profile edits --seeds 10 --from 0; --peers 3 --parallel 4 (R-33: 4 processes); --steps: each group's
+//   PROFILES[profile].steps (edits 40, faults 40, holds 60; Plan 3 Task 16) unless given, which sets every group's;
+//   --mutant (repeatable) switches a test-build mutant on (R-29, R3-50) in every seed;
 //   --timeout-min M: the run's deadline — the running seeds dump their partial artifacts, every seed without a result is
 //   listed as lost with its rerun command, the report is kept, exit 2; --seed-timeout-min T: a seed still running after
 //   T minutes fails as TIMEOUT with its partial op-log and trace (its shard's later seeds are lost); --keep-dir <dir>:
@@ -27,6 +30,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import { PROFILES } from '../../test/sim/generators.js';
 import {
   badSeedText, isMutantId, isSeedLine, MUTANT_IDS, PROFILES_ALL, rerunCommand, type LostSeed, type Profile, type SeedLine, type SeedRef, type SeedsReport,
   type ShardInput,
@@ -45,7 +49,8 @@ class UsageError extends Error {}
 interface Group { profile: Profile; profileSet: boolean; count: number | null; from: number | null; list: string[]; }
 interface Args {
   groups: Array<{ profile: Profile; seeds: string[] }>;
-  peers: number; steps: number; parallel: number; mutants: string[]; report: string | null; keepDir: string | null;
+  /** --steps, or null: each group runs its profile's PROFILES[profile].steps. */
+  peers: number; steps: number | null; parallel: number; mutants: string[]; report: string | null; keepDir: string | null;
   timeoutMs: number; seedTimeoutMs: number;
 }
 
@@ -67,7 +72,7 @@ function parseArgs(argv: readonly string[]): Args {
   const once = new Map<string, string>();
   let prefix = '';
   let peers = 3;
-  let steps = 40;
+  let steps: number | null = null;
   let parallel = 4;
   let report: string | null = null;
   let keepDir: string | null = null;
@@ -87,7 +92,7 @@ function parseArgs(argv: readonly string[]): Args {
     };
     switch (flag) {
       case '--profile': {
-        if (!(PROFILES_ALL as readonly string[]).includes(v)) throw new UsageError(`--profile is edits or faults, got ${v}`);
+        if (!(PROFILES_ALL as readonly string[]).includes(v)) throw new UsageError(`--profile is ${PROFILES_ALL.join(', ')}, got ${v}`);
         const cur = g.profileSet || g.count !== null || g.from !== null || g.list.length > 0 ? null : g;
         if (cur !== null) {
           cur.profile = v as Profile;
@@ -193,21 +198,23 @@ async function main(argv: readonly string[]): Promise<number> {
     }
     throw e;
   }
-  const refs: SeedRef[] = a.groups.flatMap((g) => g.seeds.map((seed) => ({ seed, profile: g.profile })));
+  const stepsOf = (p: Profile): number => a.steps ?? PROFILES[p].steps;
+  const refs: SeedRef[] = a.groups.flatMap((g) => g.seeds.map((seed) => ({ seed, profile: g.profile, steps: stepsOf(g.profile) })));
   const cut = slices(refs, a.parallel);
-  const settings = { peers: a.peers, steps: a.steps, mutants: a.mutants };
+  const settings = { peers: a.peers, steps: a.steps ?? PROFILES.edits.steps, mutants: a.mutants };
   const rerun = (s: SeedRef): string => rerunCommand(s, settings);
   const order = new Map(refs.map((s, i) => [s.seed, i]));
   const lost: LostSeed[] = [];
   const problems: string[] = [];
   const work = mkdtempSync(join(tmpdir(), 'cowork-run-seeds-'));
   let deadlineHit = false;
+  const started = Date.now();
 
   const report = (complete: boolean): SeedsReport => {
     const results = shards.flatMap((s) => s.lines).sort((x, y) => (order.get(x.seed) ?? 0) - (order.get(y.seed) ?? 0));
     return {
       runs: a.groups, peers: a.peers, steps: a.steps, mutants: a.mutants, shards: cut.map((s) => s.map((x) => x.seed)),
-      results, failures: results.filter((l) => !l.ok).length, lost, problems, complete,
+      results, failures: results.filter((l) => !l.ok).length, lost, problems, complete, wallMs: Date.now() - started,
     };
   };
   // The report on disk after every change (temp file + rename), so a run killed from outside still leaves one.
@@ -243,7 +250,9 @@ async function main(argv: readonly string[]): Promise<number> {
       return;
     }
     err(`sim:seeds FAIL ${l.seed} ${l.oracle ?? 'UNKNOWN'} at step ${l.step ?? '?'}: ${(l.message ?? '').split('\n').join('\n    ')}`);
-    err(`  rerun: ${rerun(l)}`);
+    // The seed tuple (TST-02: the same tuple gives the same run) and the command that runs it again.
+    err(`  tuple: ${JSON.stringify({ seed: l.seed, peers: l.peers ?? a.peers, ops: l.steps ?? stepsOf(l.profile) })}`);
+    err(`  rerun: ${rerun({ seed: l.seed, profile: l.profile, steps: l.steps ?? stepsOf(l.profile) })}`);
     // runSim keeps the temp root of a failed run; test/helpers/tmp.ts removeKeptRoot(<dir>) deletes it.
     if (l.artifacts !== undefined) {
       err(`  artifacts: ${l.artifacts}`);
@@ -253,7 +262,7 @@ async function main(argv: readonly string[]): Promise<number> {
 
   const shards: Shard[] = cut.map((slice, k) => ({ k, slice, child: null, lines: [], running: null, problem: null, dumped: null, done: Promise.resolve() }));
   for (const s of shards) {
-    const input: ShardInput = { peers: a.peers, steps: a.steps, mutants: a.mutants as ShardInput['mutants'], seeds: s.slice, seedTimeoutMs: a.seedTimeoutMs };
+    const input: ShardInput = { peers: a.peers, steps: settings.steps, mutants: a.mutants as ShardInput['mutants'], seeds: s.slice, seedTimeoutMs: a.seedTimeoutMs };
     const file = join(work, `shard-${s.k}.json`);
     await writeFile(file, `${JSON.stringify(input)}\n`, 'utf8');
     s.done = new Promise((done) => {
@@ -368,7 +377,7 @@ async function main(argv: readonly string[]): Promise<number> {
   const results = report(false).results;
   for (const g of a.groups) {
     const mine = results.filter((l) => l.profile === g.profile && g.seeds.includes(l.seed));
-    out(`sim:seeds: ${mine.length} seeds, ${mine.filter((l) => !l.ok).length} failures (profile ${g.profile}, peers ${a.peers}, steps ${a.steps}, ${cut.length} shards)`);
+    out(`sim:seeds: ${mine.length} seeds, ${mine.filter((l) => !l.ok).length} failures (profile ${g.profile}, peers ${a.peers}, steps ${stepsOf(g.profile)}, ${cut.length} shards)`);
   }
   await saveReport(!deadlineHit);
   if (problems.length > 0 || lost.length > 0) return 2;

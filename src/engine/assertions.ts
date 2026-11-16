@@ -4,24 +4,43 @@
 //
 // Check order (the first failure is reported): (a) parents, (d) OUT non-empty, (b) paths(diff(TIP, OUT)) ⊆ paths(diff(A, P))
 // for a code publish, (c) OUT[p] == TIP[p] wherever P[p] == A[p], (e) new conflict-marker rows, (g) gitlinks and symlinks,
-// (h) quarantined and save-only paths, (i) held paths in P, INV-MASK path classes in P, (j) held/ entries.
+// (h) quarantined and save-only paths, (i) held paths in P, INV-MASK path classes in P, (j) held/ entries, (k) restore-marker
+// rows in new live blobs.
 //
 // (b) and (c) state one fact twice (p ∉ diff(A, P) ⇒ p ∉ diff(TIP, OUT)); (b) is the code-publish form and runs only when
 // P differs from A somewhere, so (c) is the letter of a publish whose P is A everywhere (board-only: OUT must be TIP).
 // (i) is the held side of ENG-41 (i) (`masked`: a record — PIN, CONFLICTED, local_only, whole-path guard — masks p); the
 // path classes QUARANTINED, SAVE_ONLY and UNMANAGED differing from A in P are reported as HLD-19's INV-MASK assertion.
+// Plan 3 (Task 2, R3-20): `masked(p)` keeps meaning "withheld whole by a record" — MASK steps 2–4, a binary or filtered step-5
+// path, or a step-5 conflict: MaskResult.withheld.has(p) && maskReason(p) !== 'path_class' (publishStep computes it itself).
+// A step-5 path MASK changed only partly is not `masked`: its held ranges are HLD-19's assertP (clause p_range), not letter (i).
+// Plan 3 (Task 4; ENG-41 (j), DAT-46, D-18): (j) checks the held/ entries Bnew really adds (`heldAdded`, exactly its puts):
+// each belongs to a non-local_only record and a LIVE path, and no new held/ blob carries a restore-marker row (LF or CRLF)
+// unless that blob is already a blob of tree(TIP).
+// Final review R3-FF2-B1 (DAT-46's live-blob half, INV-DAT-NOMARKER): (k) is the fail-closed backstop for a masking site that
+// missed a restore-marker path (a journaled pair whose R holds the rows of a conflicted RESTORE, its `markers` record parked):
+// no blob of diff(TIP, OUT) carries a restore-marker row unless that blob is already a blob of tree(TIP). It is independent of P
+// ((e) passes whenever P[p] carries the rows, which is exactly that shape) and reuses (e)'s single read of each OUT blob. Last
+// letter, so every earlier letter keeps its report. Final review r3 B3-1 (ruling R3-FF3-B1; DAT-46 has no text-only qualifier): it
+// scans every such blob whatever the DAT-04 binary sniff, as (j) does — R3-18 sniffs only a RESTORE's input sides, and a conflicted
+// merge of three text sides can put its NUL in the first 8,000 bytes (both sides delete rows before it), a result restore() still
+// marks `markers` (hasRestoreMarkerRow, no binary gate).
+import type { HeldBlob } from '../board/boardCommit.js';
 import type { ScopeClass } from '../data/scope.js';
-import { conflictMarkerRows } from '../data/rows.js';
+import { conflictMarkerRows, hasRestoreMarkerRow } from '../data/rows.js';
 import { ABSENT, isOid, type Oid, type OidOrAbsent } from '../git/oid.js';
 import type { TreeEntry, TreeMap } from '../git/repo.js';
 import { diffPaths, isRegularEntry as isRegular } from './treeDiff.js';
 
-export type AssertLetter = 'a' | 'b' | 'c' | 'd' | 'e' | 'g' | 'h' | 'i' | 'j' | 'INV-MASK';
+export type AssertLetter = 'a' | 'b' | 'c' | 'd' | 'e' | 'g' | 'h' | 'i' | 'j' | 'k' | 'INV-MASK';
 export interface PrePushInput {
   T: OidOrAbsent; tip: Oid; tipMap: TreeMap; A: TreeMap; P: TreeMap; out: TreeMap; outTree: Oid; emptyTree: Oid;
   bnewParents: readonly Oid[]; liveCode: Oid; cParents: readonly Oid[] | null;   // null = board-only (liveCode == tip)
-  scope: (p: string) => ScopeClass; masked: (p: string) => boolean;
-  heldEntriesAdded: number;                                                       // 0 in Plan 2
+  scope: (p: string) => ScopeClass;
+  /** Withheld whole by a record (MASK steps 2–4, a binary/filtered step-5 path, a step-5 conflict); never a path class (R3-20). */
+  masked: (p: string) => boolean;
+  /** The held/ entries Bnew adds (its puts; Plan 3 Task 4): (j) non-local_only, LIVE, no restore-marker row unless the blob is in tree(TIP). */
+  heldAdded: ReadonlyArray<{ holdId: string; path: string; stage: HeldBlob['stage']; oid: Oid; localOnly: boolean; live: boolean }>;
   readBlob: (o: Oid) => Promise<Buffer>;
 }
 export type PrePushResult = { ok: true } | { ok: false; letter: AssertLetter; path: string | null };
@@ -49,6 +68,12 @@ async function markerRows(inp: PrePushInput, e: TreeEntry | undefined): Promise<
   return isRegular(e) ? conflictMarkerRows(await inp.readBlob(e.oid)) : new Set();
 }
 
+/** The blob ids of tree(TIP), built once per call when (j) or (k) needs them. */
+function tipBlobs(TIP: TreeMap): () => ReadonlySet<string> {
+  let s: Set<string> | null = null;
+  return () => (s ??= new Set<string>([...TIP.values()].map((e) => e.oid)));
+}
+
 export async function prePushAsserts(inp: PrePushInput): Promise<PrePushResult> {
   const { A, P, tipMap: TIP, out: OUT } = inp;
 
@@ -73,10 +98,17 @@ export async function prePushAsserts(inp: PrePushInput): Promise<PrePushResult> 
   // (c) OUT[p] == TIP[p] for every p with P[p] == A[p].
   for (const p of outDiff) if (!pChanged.has(p)) return fail('c', p);
 
-  // (e) no blob of diff(TIP, OUT) carries a conflict-marker row absent from both P[p] and TIP[p].
+  // (e) no blob of diff(TIP, OUT) carries a conflict-marker row absent from both P[p] and TIP[p]. The same read gives (k) its
+  // input: every restore-marker row is a conflict-marker row, so a blob without marker rows has none.
+  const inTip = tipBlobs(TIP);
+  let liveMarked: string | null = null;   // (k): the first path of diff(TIP, OUT) whose new blob carries a restore-marker row
   for (const p of outDiff) {
-    const rows = await markerRows(inp, OUT.get(p));   // none for a deletion, a symlink or a gitlink
+    const o = OUT.get(p);
+    if (!isRegular(o)) continue;                      // nothing to scan for a deletion, a symlink or a gitlink
+    const blob = await inp.readBlob(o.oid);
+    const rows = conflictMarkerRows(blob);
     if (rows.size === 0) continue;                    // P[p] and TIP[p] are read only when OUT[p] has marker rows
+    if (liveMarked === null && hasRestoreMarkerRow(blob) && !inTip().has(o.oid)) liveMarked = p;   // text or binary (R3-FF3-B1)
     const known = new Set([...(await markerRows(inp, P.get(p))), ...(await markerRows(inp, TIP.get(p)))]);
     for (const r of rows) if (!known.has(r)) return fail('e', p);
   }
@@ -95,8 +127,27 @@ export async function prePushAsserts(inp: PrePushInput): Promise<PrePushResult> 
   const held = heldPathInP(A, P, inp.masked, inp.scope);
   if (held !== null) return fail(held.letter, held.path);
 
-  // (j) every held/ entry Bnew adds belongs to a mirrored LIVE record: Plan 2 mirrors no record, so none may be added.
-  if (inp.heldEntriesAdded !== 0) return fail('j', null);
+  // (j) every held/ entry Bnew adds belongs to a non-local_only record and a LIVE path (ENG-41 (j), D-18), and no new held/ blob
+  // holds a restore-marker row — LF or CRLF, row 1's BOM ignored (Review Focus 5) — unless that blob is already one of
+  // tree(TIP) (DAT-46). Each blob is read once.
+  if (inp.heldAdded.length > 0) {
+    const marked = new Map<string, boolean>();
+    for (const e of inp.heldAdded) {
+      if (e.localOnly || !e.live) return fail('j', e.path);
+      if (inTip().has(e.oid)) continue;
+      let m = marked.get(e.oid);
+      if (m === undefined) {
+        m = hasRestoreMarkerRow(await inp.readBlob(e.oid));
+        marked.set(e.oid, m);
+      }
+      if (m) return fail('j', e.path);
+    }
+  }
+
+  // (k) no new live blob — a blob of diff(TIP, OUT) that is not already a blob of tree(TIP), text or binary by DAT-04 — carries a
+  // restore-marker row, LF or CRLF, row 1's BOM ignored (DAT-46's live-blob half; rulings R3-FF2-B1, R3-FF3-B1), whatever P holds:
+  // found by (e)'s loop above.
+  if (liveMarked !== null) return fail('k', liveMarked);
 
   return { ok: true };
 }

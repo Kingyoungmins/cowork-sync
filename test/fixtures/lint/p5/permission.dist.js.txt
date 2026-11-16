@@ -1,0 +1,5 @@
+// CCI-03 (5): a bundle (dist/x.js) whose text names the permission field.
+function out(r) {
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: r } });
+}
+export { out };

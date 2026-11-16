@@ -19,7 +19,8 @@
 //             [L0, B0], A = tree(L0)
 //   join      proto; fold from the nearest checkpoint; Hb = live_base(TIP); HEAD == Hb (R-08: HEAD == Hr ≠ Hb refuses
 //             START_HEAD_AHEAD{base_move: unsupported}); A := tree(HEAD) (mutant M05: tree(TIP)); the local-work preview
-//             (R-22); state [L_b, T]; the join op queued for the first publish; the first apply, then LA_C := TIP;
+//             (R-22); state [L_b, T]; the join op queued for the first publish; the first apply, then LA_C := TIP, then the
+//             loop's step 5R over that apply (recordStep: R1, the PREDICATE guards, incomingStep — EF4 E3-1, R3-EF4-5);
 //             crashpoint('join.first_apply'); 'all': M one human CS, closed here and captured by Engine.start at once
 //             (final review FC-8: through step 4's eol-bom hold and INV-MASK); nothing opted in: the first publish is
 //             board-only (ENG-52 step 8, asserted by publishStep)
@@ -43,12 +44,14 @@ import { fetchRefs, lsRemote } from '../git/fetch.js';
 import { ABSENT, type Oid, type OidOrAbsent } from '../git/oid.js';
 import { pushSpec, type PushOutcomeRaw } from '../git/push.js';
 import type { TreeEntry, TreeMap } from '../git/repo.js';
+import { setBlob, type BlobMap } from '../holds/record.js';
 import { crashpoint, KilledAt } from '../ports/crashpoint.js';
 import { noTrace, type PushPurpose } from '../ports/trace.js';
 import { sanitizeUrl } from '../sec/redact.js';
 import { applyStep } from './apply.js';
+import { recordStep } from './holdSteps.js';
 import {
-  attachState, foldPatch, joinDraft, liveCodeOf, observeOwnLanding, pathIsFiltered, pathIsText, prepareIteration, sameEntry,
+  attachCsTable, attachState, ensureAttrs, foldPatch, joinDraft, liveCodeOf, observeOwnLanding, pathIsFiltered, pathIsText, prepareIteration, sameEntry,
   setBoardOnlyFirstPublish, tickSkip, type EngineCore,
 } from './core.js';
 import { isRemoteContentError } from './errors.js';
@@ -426,18 +429,24 @@ async function localWork(core: EngineCore, aTree: Oid, epochBase: Oid, tipMap: T
   return { M: c.M, nIn: incoming(A, tipMap), unshared: c.unshared, A, aTree, mat, unsettled: c.unsettled };
 }
 
-/** R-22 'none': M held in one ON_DISK PIN with guard `join` (masked; the local registry). */
-async function pinLocalWork(core: EngineCore, w: LocalWork): Promise<string> {
+/**
+ * R-22 'none': M held in one ON_DISK PIN with guard `join` (masked; the local registry). The attributes of M at epochBase are
+ * requested first, so the registry classes a new file (never in A or TIP) instead of failing closed to local_only (R3-71).
+ */
+async function pinLocalWork(core: EngineCore, w: LocalWork, epochBase: Oid): Promise<string> {
+  await ensureAttrs(core, epochBase, w.M);
+  // BlobMap entries by setBlob (own properties): a root path named __proto__ is an ordinary key, never the map's prototype
+  // (an assignment h0[p] would drop it and the record check would then refuse the PIN; final review FC minor).
+  const h0: BlobMap = {};
+  const h1: BlobMap = {};
   const S = w.mat?.sDiskMap ?? w.A;
-  // Path-keyed maps as own properties (Object.fromEntries defines each key): an assignment h0[p] would drop a path named
-  // __proto__ (final review FC minor), and the record check would then refuse the PIN.
-  const h0: Record<string, Oid | typeof ABSENT> = Object.fromEntries(w.M.map((p) => [p, w.A.get(p)?.oid ?? ABSENT]));
-  const h1: Record<string, Oid | typeof ABSENT> = Object.fromEntries(w.M.map((p) => {
+  for (const p of w.M) {
+    setBlob(h0, p, w.A.get(p)?.oid ?? ABSENT);
     const u = w.unsettled.get(p);
     // Unsettled bytes were not read: a pending deletion holds ABSENT; an unread file holds A's entry (the PIN masks the
     // whole path either way, so nothing of p is published).
-    return [p, u === 'absent' ? ABSENT : (S.get(p)?.oid ?? (u === 'unread' ? (w.A.get(p)?.oid ?? ABSENT) : ABSENT))];
-  }));
+    setBlob(h1, p, u === 'absent' ? ABSENT : (S.get(p)?.oid ?? (u === 'unread' ? (w.A.get(p)?.oid ?? ABSENT) : ABSENT)));
+  }
   return core.holds.hold({
     kind: 'PIN', residence: 'ON_DISK', state: 'ACTIVE', paths: w.M, blobs: { h0, h1 }, guard: 'join', origin: 'human',
     cs_ids: [], displaced_by: null, local_only: false,
@@ -656,7 +665,7 @@ export async function genesis(core: EngineCore, hr: Oid, opts: StartOptions): Pr
   observeOwnLanding(core, B0, ABSENT);
 
   // R-22 'none': the PIN before the state, so no state ever exists without it.
-  if (work.M.length > 0 && opts.publishLocal === 'none') await pinLocalWork(core, work);
+  if (work.M.length > 0 && opts.publishLocal === 'none') await pinLocalWork(core, work, hr);
   const ep = await epochNow(repo);
   const meta: Meta = {
     v: 1, proto: 1, peer_id: core.peerId, epoch, seq_next: writer.seq + 1,
@@ -669,6 +678,9 @@ export async function genesis(core: EngineCore, hr: Oid, opts: StartOptions): Pr
   };
   const view = await core.state.create({ laC: L0, laB: B0, base: hrTree, snap: work.mat?.sDisk ?? hrTree, meta, fold: s0 });
   attachState(core, view);
+  await attachCsTable(core, view);   // R3-69 (Plan 3 Task 12a): awaited right after every attachState
+  // R3-59 (Plan 3 Task 8): the provenance journal starts empty at the live code of B0 (L0), before any apply.
+  await core.prov.load(L0, L0);
   committed.set(core, 'genesis');
   emitStartASet(core, hrMap, 'genesis');
   if (work.M.length > 0 && opts.publishLocal === 'all') captureLocalWork(core, work.M);
@@ -718,7 +730,7 @@ export async function join(core: EngineCore, T: Oid, hr: OidOrAbsent, opts: Star
   if (preview.M.length > 0 && opts.publishLocal === null) return previewRefusal(preview);
   const work = await localWork(core, aTree, lb.base, tipMap);
   if (work.M.length > 0 && opts.publishLocal === null) return previewRefusal(work);   // the authoritative M (S_disk)
-  if (work.M.length > 0 && opts.publishLocal === 'none') await pinLocalWork(core, work);
+  if (work.M.length > 0 && opts.publishLocal === 'none') await pinLocalWork(core, work, lb.base);
 
   // 5 state [L_b, T]; EPOCH_BASE := Hb; H_adopt := HEAD; a new epoch; the join op queued for the first publish.
   const ep = await epochNow(repo);
@@ -736,12 +748,16 @@ export async function join(core: EngineCore, T: Oid, hr: OidOrAbsent, opts: Star
   };
   const view = await core.state.create({ laC: lb.introducedBy, laB: T, base: aTree, snap: work.mat?.sDisk ?? aTree, meta, fold: folded.state });
   attachState(core, view);
+  await attachCsTable(core, view);   // R3-69 (Plan 3 Task 12a): awaited right after every attachState
+  // R3-59 (Plan 3 Task 8): the journal starts empty at TIP (liveCodeOf T) before the first apply, so the first apply's move of
+  // LA_C from L_b to TIP appends nothing: a joiner never turns the team's pre-join history into 14-day revert protection.
+  await core.prov.load(tip, tip);
   committed.set(core, 'join');
   emitStartASet(core, work.A, 'join');
   // ENG-52 step 8: with nothing opted in (no local work, or 'none'), the first publish is board-only (OUT == tree(TIP)).
   if (work.M.length === 0 || opts.publishLocal !== 'all') setBoardOnlyFirstPublish(core, true);
 
-  // 7 the first apply through the writer; LA_C := TIP only after it.
+  // 7 the first apply through the writer; LA_C := TIP only after it; then step 5R over it (below).
   const prepared = await prepareIteration(core, 0, { materialize: false, forceFetch: true });
   if (prepared.ok) {
     const it = prepared.it;
@@ -752,6 +768,15 @@ export async function join(core: EngineCore, T: Oid, hr: OidOrAbsent, opts: Star
       const fp = foldPatch(core);
       await core.commit({ laC: it.tip, laB: it.T, ...(fp !== null ? { meta: { ...now.meta, ...fp.meta }, fold: fp.fold } : {}) });
     }
+    // EF4 E3-1 (R3-EF4-5): the loop's step 5R after this apply, as after every loop apply — R1, the PREDICATE guards and incomingStep
+    // over this apply's report — so a not-applicable path has its own INCOMING record and a deferred closure its 60 s clock from this
+    // apply on (HLD-54 "from the start", ENG-07, R3-29, R3-30; 11-testing §3.4 INV-GROUP "after every apply"), not from the first loop
+    // iteration: a team push landing in between (TIP no longer changes the path; EF2 D5's re-derivation needs A != TIP) or a FREEZE
+    // before it (a frozen apply reports no closures) left the path with no record, the closure with no clock. The join PIN (step 6) is
+    // R1-evaluated here exactly as by the loop's step 5R after its apply: against this apply's materialization (it.mat, which applyStep
+    // sets once its admission passes), or, when the apply was skipped, the snapshot's last one (the start's local-work materialization,
+    // if it made one; with none, only R1's OFF_DISK check runs).
+    await recordStep(core, it, r);
   } else {
     deps.log.write('warn', 'JOIN_FIRST_APPLY_DEFERRED', { why: prepared.why });
   }

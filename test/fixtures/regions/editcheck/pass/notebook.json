@@ -1,0 +1,13 @@
+{
+  "name": "pass/notebook",
+  "check": null,
+  "lang": "notebook",
+  "expect": "pass",
+  "tipEqualsA": true,
+  "A": {
+    "analysis.ipynb": "{\n \"cells\": [\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"n0\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"total = 1 + 1\\n\"\n   ]\n  }\n ],\n \"metadata\": {},\n \"nbformat\": 4,\n \"nbformat_minor\": 5\n}\n"
+  },
+  "R": {
+    "analysis.ipynb": "{\n \"cells\": [\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"n0\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": [\n    \"total = 1 + 2\\n\"\n   ]\n  }\n ],\n \"metadata\": {},\n \"nbformat\": 4,\n \"nbformat_minor\": 5\n}\n"
+  }
+}

@@ -11,12 +11,13 @@ import { PassThrough } from 'node:stream';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { TOKEN_ENV } from '../../../src/claude/client/mcp/doorbell.js';
 import type { Fs } from '../../../src/ports/fs.js';
 import { realOwnerProbe } from '../../../src/viz/cli/ownerProbe.js';
 import {
   killTree, killTreeWith, parseReadyLine, READY_MAX_BYTES, READY_REFUSE_CODES, READY_TIMEOUT_MS, READY_TIMEOUT_WIN32_MS, readyTimeoutMs, spawnViewer,
   spawnViewerWith, viewerArgv,
-  viewerOldSpaceMb, VIEWER_MAX_OLD_SPACE_MB, VIEWER_OLD_SPACE_BASE_ROOMS, VIEWER_OLD_SPACE_ROOM_MB, VIEWER_ROOMS_MAX,
+  viewerOldSpaceMb, VIEWER_LINUX_MALLOC_ENV, VIEWER_MAX_OLD_SPACE_MB, VIEWER_OLD_SPACE_BASE_ROOMS, VIEWER_OLD_SPACE_ROOM_MB, VIEWER_ROOMS_MAX,
   openViewerStderr, VIEWER_STDERR_FILE, VIEWER_STDERR_MAX_BYTES, type KillDeps, type KillTarget, type SpawnDeps, type ViewerArgs,
 } from '../../../src/viz/cli/spawn.js';
 import { ROOMS_MAX } from '../../../src/viz/source/rooms.js';
@@ -27,7 +28,7 @@ import { assertAllRendered, fakePluginRoot, findSystemGit, hostFs, PROBE_LAUNCH,
 const SYSTEM_ROOT = process.platform === 'win32' ? (process.env.SystemRoot ?? 'C:\\Windows') : null;
 const SHA = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 const TOKEN = 'tok-messaging-secret-7f3a91';
-const MESSAGING = ['CLAUDE', 'CODE', 'MESSAGING', 'TOKEN'].join('_');
+const MESSAGING = TOKEN_ENV;
 
 interface ProbeReport { env: Record<string, string>; cwd: string; argv: string[]; pid: number; grandchild: number | null; }
 const report = (dataDir: string): ProbeReport => JSON.parse(readFileSync(join(dataDir, 'probe.json'), 'utf8')) as ProbeReport;
@@ -169,6 +170,31 @@ test('VIEWER_MAX_OLD_SPACE_MB\'s rule (Task 15 fix round 2 ruling): the viewer\'
   assert.equal(flag({ ...base, git: null }), '--max-old-space-size=150', 'no room (the viewer refuses RF_VIZ_NO_ROOMS)');
 });
 
+test('the viewer\'s glibc malloc settings (12 §3.2 item 2, §3.12 row 1; viz-hosted-perf): on linux spawnViewerWith passes a copy of the builder environment with MALLOC_ARENA_MAX=2, MALLOC_MMAP_THRESHOLD_=65536 and MALLOC_TRIM_THRESHOLD_=131072 set; on every other platform the builder environment itself; the caller\'s environment is never changed (spy spawn, every leg on every host)', async () => {
+  assert.deepEqual(VIEWER_LINUX_MALLOC_ENV, { MALLOC_ARENA_MAX: '2', MALLOC_MMAP_THRESHOLD_: '65536', MALLOC_TRIM_THRESHOLD_: '131072' });
+  assert.ok(Object.isFrozen(VIEWER_LINUX_MALLOC_ENV));
+  const valid = `{"v":1,"port":${PROBE_PORT},"launch":"${PROBE_LAUNCH}"}\n`;
+  for (const platform of ['linux', 'darwin', 'win32', 'freebsd'] as const) {
+    const systemRoot = platform === 'win32' ? 'C:\\Windows' : null;
+    // A value the builder would have dropped (09-security §3.4 keeps no MALLOC_* name) is overridden on linux, kept elsewhere.
+    const a = args('/data', { LC_ALL: 'C', MALLOC_ARENA_MAX: '64' }, { platform, systemRoot });
+    const before = { ...a.env };
+    const v = silentViewer();
+    const seen: SpawnOptions[] = [];
+    const ready = spawnViewerWith(a, { spawn: (_exe, _argv, options) => { seen.push(options); return v.child; }, killTree: async () => {} });
+    v.say(valid);
+    assert.deepEqual(await ready, { port: PROBE_PORT, launch: PROBE_LAUNCH }, platform);
+    assert.deepEqual(a.env, before, `${platform}: the caller's environment is unchanged`);
+    assert.equal(seen.length, 1);
+    if (platform === 'linux') {
+      assert.deepEqual(seen[0]!.env, { ...before, ...VIEWER_LINUX_MALLOC_ENV }, platform);
+      assert.notEqual(seen[0]!.env, a.env, 'a copy');
+    } else {
+      assert.equal(seen[0]!.env, a.env, platform);
+    }
+  }
+});
+
 test('spawnViewer refuses repos without a git before spawning anything', async () => {
   const t = await makeTempRoot('viz-nogit');
   try {
@@ -283,7 +309,9 @@ test('T-VIZ-handshake: the spawn is execPath with an argv array, no shell, detac
     assert.deepEqual({ ...c.options, env: undefined }, {
       shell: false, detached: true, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'], cwd: exited, env: undefined,
     });
-    assert.equal(c.options.env, a.env);
+    // The builder environment as given; on linux a copy with the viewer's glibc malloc settings (VIEWER_LINUX_MALLOC_ENV).
+    if (a.platform === 'linux') assert.deepEqual(c.options.env, { ...a.env, ...VIEWER_LINUX_MALLOC_ENV });
+    else assert.equal(c.options.env, a.env);
     // Still running after a bad line: killed by its pid.
     const running = join(t.root, 'running');
     mkdirSync(running);
@@ -512,7 +540,7 @@ function filesUnder(dir: string): string[] {
   return out;
 }
 
-test('T-VIZ-env: the probe child\'s environment has none of CLAUDE_CODE_MESSAGING_TOKEN, CLAUDE_PLUGIN_DATA, NODE_OPTIONS, GIT_DIR, has LC_ALL=C, its cwd is the data directory, its PATH is the filtered list, and its argv carries --data-dir, --lang, --sha256 and, with --repo, --git', async () => {
+test(`T-VIZ-env: the probe child's environment has none of ${TOKEN_ENV}, CLAUDE_PLUGIN_DATA, NODE_OPTIONS, GIT_DIR, has LC_ALL=C, its cwd is the data directory, its PATH is the filtered list, and its argv carries --data-dir, --lang, --sha256 and, with --repo, --git`, async () => {
   const t = await makeTempRoot('viz-env');
   try {
     const git = findSystemGit();
@@ -548,6 +576,8 @@ test('T-VIZ-env: the probe child\'s environment has none of CLAUDE_CODE_MESSAGIN
     const keys = Object.keys(r.env).map((k) => k.toUpperCase());
     for (const k of [MESSAGING, 'CLAUDE_PLUGIN_DATA', 'CLAUDE_PROJECT_DIR', 'NODE_OPTIONS', 'GIT_DIR']) assert.ok(!keys.includes(k), k);
     assert.equal(r.env.LC_ALL, 'C');
+    // The CLI's own spawn sets the glibc malloc settings on linux only (VIEWER_LINUX_MALLOC_ENV; the builder keeps no MALLOC_* name).
+    for (const [k, v] of Object.entries(VIEWER_LINUX_MALLOC_ENV)) assert.equal(r.env[k], process.platform === 'linux' ? v : undefined, k);
     assert.equal(realpathSync(r.cwd), realpathSync(dataDir));
     assert.deepEqual(Object.keys(r.env).filter((k) => k.toUpperCase() === 'PATH'), [pathKey]);
     assert.equal(r.env[pathKey], [good, gitDir].join(delimiter));

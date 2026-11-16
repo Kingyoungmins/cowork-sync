@@ -14,9 +14,13 @@
 // Every op is the parseOpLine() normalization of its draft plus id, so what take() returns is exactly what
 // a fold reads back, and serializeOps() accepts it. A draft that cannot form a valid op line is refused at
 // add() (TypeError) instead of stalling the outbox later.
+//
+// Plan 3 (Task 4; HLD-10, PRO-06, PRO-09; R3-25): one pending `hold` draft per record (replaceHold replaces the unallocated
+// draft of the same hold_id; an allocated op keeps its id and the new draft is appended after it), and PRO-06's withholding
+// (take's room.withhold and pendingAllowed's withhold: the drafts it names neither leave nor count as pending).
 import { canonicalJson, type Json } from './canonicalJson.js';
 import { formatOpId, parseOpId, type EpochId, type PeerId } from './ids.js';
-import { eventCid, OPS_MAX_BYTES, OPS_MAX_LINES, parseOpLine, type EventKind, type Op, type OpDraft } from './ops.js';
+import { eventCid, OPS_MAX_BYTES, OPS_MAX_LINES, parseOpLine, type EventKind, type HoldOp, type Op, type OpDraft } from './ops.js';
 
 /**
  * What may be pushed (02-protocol §3.8 table). The engine passes one value per active condition (several
@@ -32,25 +36,35 @@ export interface SeqAllocator { next(): number; }
 export interface PendingOp { draft: OpDraft; op: Op | null; }
 
 type Self = { peer: PeerId; epoch: EpochId };
-type Room = { maxOps: number; maxBytes: number };
+/** withhold (PRO-06, Plan 3 Task 4): drafts it names stay where they are (an unallocated one gets no seq); later ones keep seq order. */
+type Room = { maxOps: number; maxBytes: number; withhold?: (d: OpDraft) => boolean };
 
 /** Event kinds whose cid is H(own op id, kind) (02-protocol §3.2 item 4); the others are conflict kinds. */
 const OWN_ID_CID_KINDS: ReadonlySet<string> = new Set<EventKind>(['freeze', 'unfreeze', 'incident', 'nonretryable', 'health']);
-/** The FREEZE row: freeze-class and health events, answer-class, release-class, hold mirrors (glossary §8). */
-const FROZEN_TYPES: ReadonlySet<string> = new Set(['answer', 'request_status', 'release', 'seat_end', 'leave', 'hold']);
+/**
+ * The FREEZE row: freeze-class and health events, answer-class, release-class, hold mirrors (glossary §8), and the epoch's pending
+ * `join` (ruling R3-EF4-3): a fold treats every other op of an unrecorded epoch as a no-op (02-protocol §3.3 step 3b, PRO-16), so
+ * the freeze events and hold mirrors this row lets out (ENG-17) fold only behind the join, which leads the epoch's first board push.
+ */
+const FROZEN_TYPES: ReadonlySet<string> = new Set(['answer', 'request_status', 'release', 'seat_end', 'leave', 'hold', 'join']);
 const FROZEN_EVENT_KINDS: ReadonlySet<string> = new Set(['freeze', 'unfreeze', 'health']);
 /** The VERSION regionSpec row (glossary §8): no events at all, answers only with these verbs. */
 const VERSION_TYPES: ReadonlySet<string> = new Set(['join', 'leave', 'seat_end', 'release', 'request_status', 'hold']);
 const VERSION_ANSWER_VERBS: ReadonlySet<string> = new Set(['decline', 'later', 'release']);
 
 const field = (d: OpDraft, k: string): unknown => (d as Record<string, unknown>)[k];
+/** A `hold` draft of record holdId. */
+const holdOf = (d: OpDraft, holdId: string): d is Omit<HoldOp, 'id'> => d.type === 'hold' && field(d, 'hold_id') === holdId;
 
 /**
  * The 02-protocol §3.8 table for one state (PRO-45). Where rows overlap the most restrictive wins; the
  * PushState values already name the overlaps that the table resolves (FREEZE with INCIDENT is 'incident',
- * FREEZE with CONFIG(url|public) is 'config_net', both allowing nothing). The FREEZE and VERSION regionSpec
- * rows are incomparable (FREEZE admits freeze/unfreeze/health events and every answer verb, VERSION admits
- * join), so when both hold only what both rows allow may leave: allowedInAll, which take and
+ * FREEZE with CONFIG(url|public) is 'config_net', both allowing nothing). The epoch's pending `join` may leave
+ * in every row that allows a board-only push, FREEZE included (ruling R3-EF4-3), so it leads the epoch's first
+ * board push whatever the state (it is always the first entry its epoch's outbox gets: start, the lost-state
+ * rebuild, the re-anchor). Since that ruling the VERSION regionSpec row is a subset of the FREEZE row (FREEZE
+ * also admits freeze/unfreeze/health events and the accept and grant answers), but the two conditions hold
+ * independently, so when both hold only what both rows allow may leave: allowedInAll, which take and
  * pendingAllowed use.
  */
 export function allowedInState(d: OpDraft, state: PushState): boolean {
@@ -151,13 +165,48 @@ export class Outbox {
   }
 
   /**
+   * One pending op per record (HLD-10, R3-25): an earlier draft of the same hold_id without a seq is replaced in place (its
+   * queue position kept); else the draft is appended (after an allocated op of that record, which keeps its id, PRO-09).
+   * TypeError, with nothing changed, when it cannot form a valid op line.
+   */
+  replaceHold(draft: Omit<HoldOp, 'id'>): void {
+    materialize(draft, widestId(PROBE_SELF));
+    const at = this.entries.findIndex((e) => e.op === null && holdOf(e.draft, draft.hold_id));
+    const entry: PendingOp = { draft: copyOf(draft), op: null };
+    if (at < 0) this.entries.push(entry);
+    else this.entries[at] = entry;
+  }
+
+  /** The newest pending (unlanded) draft or op of record holdId, as a draft copy; null when none. */
+  pendingHold(holdId: string): Omit<HoldOp, 'id'> | null {
+    for (let i = this.entries.length - 1; i >= 0; i--) {
+      const d = this.entries[i]!.draft;
+      if (holdOf(d, holdId)) return copyOf(d) as Omit<HoldOp, 'id'>;
+    }
+    return null;
+  }
+
+  /**
+   * The newest allocated (sent or placed, not landed) op of record holdId; null when none. mirrorSync chains the next draft
+   * on its rev (prevRev = the rev of r's newest allocated pending op, else the folded rev, R3-26; Plan 3 Task 4).
+   */
+  allocatedHold(holdId: string): HoldOp | null {
+    for (let i = this.entries.length - 1; i >= 0; i--) {
+      const e = this.entries[i]!;
+      if (e.op !== null && e.op.type === 'hold' && e.op.hold_id === holdId) return JSON.parse(canonicalJson(e.op as unknown as Json)) as HoldOp;
+    }
+    return null;
+  }
+
+  /**
    * Allowed ops (PRO-45) in seq order within the caps; allocates seqs on first placement (event drafts get
    * cid = eventCid(id, kind)). The room is clamped to the ops.jsonl caps (1,000 ops, 64 KiB, PRO-03); the
    * first allowed op that does not fit ends the take, so later ops never jump ahead (oldest seq first,
    * PRO-06), and an op left out is not allocated a seq. `states` are every active push state; an op leaves
    * only if each allows it (allowedInAll; `[]` is ok). Ops not allowed stay, unallocated ones without a
    * seq. An op allocated under another (peer, epoch) can never fold valid for this writer (PRO-16); it is
-   * placed again as a fresh draft.
+   * placed again as a fresh draft. room.withhold (PRO-06: record-creating hold drafts at the 5,000-record cap) skips the
+   * entries it names like ops the states do not allow: an unallocated one stays without a seq, later ones keep seq order.
    */
   take(states: readonly PushState[], self: Self, alloc: SeqAllocator, room: Room): Op[] {
     checkStates(states); // a malformed state list is refused before anything changes
@@ -173,6 +222,7 @@ export class Outbox {
     try {
       for (const e of this.entries) {
         if (!allowedInAll(e.draft, states)) continue;
+        if (room.withhold !== undefined && room.withhold(e.draft)) continue;
         if (out.length >= maxOps) break;
         const size = e.op !== null ? lineBytes(e.op) : lineBytes(materialize(e.draft, widest));
         if (bytes + size > maxBytes) break;
@@ -212,10 +262,13 @@ export class Outbox {
     return before - this.entries.length;
   }
 
-  /** Some queued op may leave while every state in `states` holds (PRO-42's "allowed outbox ops"; `[]` is ok). */
-  pendingAllowed(states: readonly PushState[]): boolean {
+  /**
+   * Some queued op may leave while every state in `states` holds (PRO-42's "allowed outbox ops"; `[]` is ok); the drafts
+   * `withhold` names do not count (PRO-06: false when only withheld drafts remain).
+   */
+  pendingAllowed(states: readonly PushState[], withhold?: (d: OpDraft) => boolean): boolean {
     checkStates(states); // a malformed state list throws even on an empty outbox
-    return this.entries.some((e) => allowedInAll(e.draft, states));
+    return this.entries.some((e) => allowedInAll(e.draft, states) && (withhold === undefined || !withhold(e.draft)));
   }
 
   get size(): number {

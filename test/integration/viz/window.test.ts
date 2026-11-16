@@ -9,7 +9,7 @@ import { ZERO_PEER } from '../../../src/viz/model/frame.js';
 import { BoardWriter } from '../../../tools/viz/boardWriter.js';
 import { VirtualClock } from '../../sim/vclock.js';
 import { makeRepoFixture } from '../../helpers/repoFixture.js';
-import { script } from '../../helpers/vizSource.js';
+import { kinds, script } from '../../helpers/vizSource.js';
 import { gitRoom, reference, ticksOf } from '../../helpers/vizStore.js';
 
 test('the window starts at 256·⌊max(0, t − 1,023)/256⌋', async () => {
@@ -24,6 +24,15 @@ test('the window starts at 256·⌊max(0, t − 1,023)/256⌋', async () => {
       assert.equal(w.tip().height, t);
       const r = gitRoom(fx, w.ref, { clock });
       await r.store.init();
+      // The git processes of a first window (12 §3.12 row 4, "≈ 6 git processes per room"; viz-hosted-perf): the tip (rev-parse),
+      // its newest 1,281 commits in one rev-list page, which hold the whole window (≤ 1,279 heights), and for a chain longer than the
+      // page the height (rev-list --count); then one --batch-check/--batch pair for every board commit of the window, h0 included.
+      const long = t + 2 >= 1_281;
+      assert.deepEqual(kinds(r.git.calls), ['rev-parse --verify', 'rev-list --first-parent', ...(long ? ['rev-list --first-parent'] : []), 'cat-file --batch-check', 'cat-file --batch'], `t = ${t}: git processes`);
+      assert.deepEqual(r.git.calls[1]!.args.slice(2), ['--skip=0', '--max-count=1281', w.tip().oid], `t = ${t}: the page`);
+      if (long) assert.deepEqual(r.git.calls[2]!.args.slice(2), ['--count', w.tip().oid]);
+      const items = r.git.calls.filter((c) => c.args[1] === '--batch-check').map((c) => c.stdin.split('\n').filter((l) => l.endsWith('^{tree}')).length);
+      assert.deepEqual(items, [t - h0 + 1], `t = ${t}: one batch of the window's ${t - h0 + 1} board commits`);
       assert.deepEqual(r.spy.startAt, [h0], `t = ${t}: one start state, at h0`);
       assert.deepEqual(r.spy.frames, [{ from: h0 === 0 ? 0 : h0 + 1, to: t, start: h0 === 0 ? -1 : h0, self: ZERO_PEER }],
         `t = ${t}: ${h0 === 0 ? 'initialFoldState, frames from height 0' : 'the checkpoint state at h0, frames from h0 + 1'}`);

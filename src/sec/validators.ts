@@ -5,9 +5,12 @@ const MAX_PATH_BYTES = 4096;
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
 
 /**
- * Syntactic part of `validPath` (SEC-35): repo-relative POSIX, NFC, non-empty components, no `..`
+ * Syntactic part of `validPath` (SEC-35): repo-relative POSIX, NFC, non-empty components, no `.` or `..`
  * component, no leading `/`, no drive letter and no `:` (so no `C:/x`), no `\`, no NUL, at most
  * 4,096 UTF-8 bytes. Evaluable on the path string alone, so every peer classifies a path identically.
+ * A `.` component is rejected (final review F14): join(workTree, ...p.split('/')) collapses it, so
+ * `./.claude/settings.json` resolves onto the quarantined `.claude/settings.json` while passing the
+ * quarantine classifier and stageable(); git trees cannot carry a `.` entry, so no tracked path changes class.
  */
 export function validPathSyntax(p: string): boolean {
   if (typeof p !== 'string' || p.length === 0) return false;
@@ -16,7 +19,7 @@ export function validPathSyntax(p: string): boolean {
   if (Buffer.byteLength(p, 'utf8') > MAX_PATH_BYTES) return false;
   if (p.normalize('NFC') !== p) return false;
   for (const component of p.split('/')) {
-    if (component.length === 0 || component === '..') return false;
+    if (component.length === 0 || component === '.' || component === '..') return false;
   }
   return true;
 }

@@ -1,0 +1,16 @@
+{
+  "name": "1/new_error_node",
+  "check": 1,
+  "lang": "python",
+  "expect": "fail",
+  "reason": "new_error_node",
+  "tipEqualsA": true,
+  "A": {
+    "lib.py": "def foo(a, b):\n    \"\"\"Price of a line.\"\"\"\n    return a * b\n\n\ndef helper(x):\n    return round(x, 2)\n",
+    "orders.py": "from lib import foo\n\n\ndef subtotal(lines):\n    total = 0\n    for price, qty in lines:\n        total += price * qty\n    return total\n\n\ndef checkout(order):\n    price = order.price\n    qty = order.quantity\n    total = foo(price, qty)\n    return round(subtotal(order.lines) + total, 2)\n"
+  },
+  "R": {
+    "lib.py": "def foo(a, b):\n    \"\"\"Price of a line.\"\"\"\n    return round(a * b\n\n\ndef helper(x):\n    return round(x, 2)\n",
+    "orders.py": "from lib import foo\n\n\ndef subtotal(lines):\n    total = 0\n    for price, qty in lines:\n        total += price * qty\n    return total\n\n\ndef checkout(order):\n    price = order.price\n    qty = order.quantity\n    total = foo(price, qty)\n    return round(subtotal(order.lines) + total, 2)\n"
+  }
+}

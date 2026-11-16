@@ -72,9 +72,36 @@ export function emptyScene(at: Position): Scene {
   };
 }
 
+/**
+ * A deep copy of plain scene data — Maps (keys kept, in order), Sets, arrays, records (own enumerable keys, in order) and
+ * primitives — equal to structuredClone of the same data (unit-tested against it), without the serializer round trip that made
+ * the per-event copies the fold's largest CPU cost (viz-hosted-perf: T-VIZ-perf's first world on the hosted Windows leg).
+ */
+function copyData<T>(v: T): T {
+  if (typeof v !== 'object' || v === null) return v;
+  if (Array.isArray(v)) {
+    const out = new Array<unknown>(v.length);
+    for (let i = 0; i < v.length; i++) out[i] = copyData(v[i] as unknown);
+    return out as T;
+  }
+  if (v instanceof Map) {
+    const out = new Map<unknown, unknown>();
+    for (const [k, x] of v) out.set(k, copyData(x));
+    return out as T;
+  }
+  if (v instanceof Set) {
+    const out = new Set<unknown>();
+    for (const x of v) out.add(copyData(x));
+    return out as T;
+  }
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(v)) out[k] = copyData((v as Record<string, unknown>)[k]);
+  return out as T;
+}
+
 /** A deep copy (Maps, arrays and every nested record): two scenes never share a mutable part. */
-function cloneScene(s: Scene): Scene {
-  return structuredClone(s);
+export function cloneScene(s: Scene): Scene {
+  return copyData(s);
 }
 const posOf = (p: Position): Position => ({ height: p.height, sub: p.sub, k: p.k });
 const copyActor = (a: ActorRef): ActorRef => ('peer' in a ? { peer: a.peer } : { seat: a.seat });
@@ -125,7 +152,7 @@ function character(s: Scene, peer: PeerRef, f: (c: CharacterState) => void): voi
  */
 function step(s: Scene, e: SceneEvent, layout: Layout): void {
   if (e.height !== s.at.height) s.beat = [];
-  s.beat.push(structuredClone(e));
+  s.beat.push(copyData(e));
   s.at = posOf(e);
   let hint: PlaceHint | null = null;            // request_open and grant_start: where the event sends its actor
   let reset: string | null = null;
@@ -364,6 +391,14 @@ export class SceneReducer {
   /** A deep copy. */
   scene(): Scene {
     return cloneScene(this.s);
+  }
+
+  /**
+   * The current scene itself, read only (no copy): push() replaces it by an updated copy and never changes it, so a reference
+   * stays the scene it was. For the timeline builder's rows (RowContext.scene, read only); never handed out.
+   */
+  peek(): Scene {
+    return this.s;
   }
 }
 

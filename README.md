@@ -149,6 +149,13 @@ state) and `log/daemon-0.jsonl` (the daemon log).
   scanned for secrets yet, so do not put secrets into synced files.
 - Files over 1 MiB are not shared when new, and files of 50 MiB or more never
   sync live.
+- An editor buffer you opened **before you joined** and save after the join,
+  a Claude `/rewind` ("Restore code") to a checkpoint from before your join,
+  or any other restore of a whole file from before your join, can undo rows
+  your teammates wrote, without a warning (known gap J-PROV, open until the
+  journal covers the range your join brought in). After you join, reload
+  files you had open before you save them, and do not restore whole files
+  from checkpoints older than your join.
 - Stopping sync or uninstalling the plugin leaves the custom refs on the
   remote. After every PC has stopped, you can delete them by hand, for example
   `git push origin --delete refs/cowork/main/board refs/cowork/main/code`.

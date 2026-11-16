@@ -1,7 +1,8 @@
 // meta.json of the state commit (01-engine §3.2; ENG-05; LIF-37 meta_v): the 01-engine §3.2 fields plus the
 // Plan 2 additions flagged for that section (ruling R-14: outbox, fold_board, cs_human_next, incident_next;
 // controller ruling P2-FOLDPERSIST: fold_verified, checkpoint_mismatch). No wall-clock or monotonic timestamp:
-// every timer restarts at daemon start (INV-CLOCK).
+// every timer restarts at daemon start (INV-CLOCK). Rev 2.5 (F04-a, ENG-05): the optional `since` catch-up heights, parsed by
+// every build before any build writes them (Plan 5 does), with no meta.v change.
 //
 // The bytes are RFC 8785 canonical JSON. parseMeta accepts exactly what serializeMeta writes: v first (a newer
 // meta_v refuses the branch whatever else it holds), then the exact key set, every field's type, and the
@@ -16,6 +17,11 @@ import { validId, validPathSyntax } from '../sec/validators.js';
 
 export type FreezeReason = 'EPOCH' | 'MASS' | 'PAUSED' | 'INCIDENT' | 'CONFIG' | 'NOHOOKS';
 export type ConfigDetail = 'url' | 'identity' | 'filter' | 'public';
+/**
+ * F04's local catch-up marks (01-engine §3.2, 10-product §3.9a; rev 2.5): board heights only, never timestamps. seen_h and
+ * return_h are folded heights at human activity and at a return, run_h the `to` of the last accepted `since`; null = no mark.
+ */
+export interface SinceMarks { seen_h: number | null; return_h: number | null; run_h: number | null; }
 export interface Meta {
   v: 1; proto: 1;
   peer_id: PeerId; epoch: EpochId; seq_next: number;
@@ -37,6 +43,8 @@ export interface Meta {
   outbox: Json;
   cs_human_next: number;
   incident_next: number;
+  // Rev 2.5 (F04-a, ENG-05): optional and additive; absent = no marks. Written by nothing before Plan 5.
+  since?: SinceMarks;
 }
 
 /** meta.v > 1: written by a newer plugin; the branch is 'refused' (LIF-37). */
@@ -67,6 +75,9 @@ const META_KEYS = [
   'freeze_reasons', 'config_detail', 'incident', 'nonretryable', 'rejections', 'throttle', 'pending', 'displaced',
   'fold_board', 'fold_verified', 'checkpoint_mismatch', 'outbox', 'cs_human_next', 'incident_next',
 ];
+/** The one optional key (rev 2.5, F04-a): META_KEYS plus `since` when present. */
+const META_KEYS_SINCE = [...META_KEYS, 'since'];
+const SINCE_KEYS = ['seen_h', 'return_h', 'run_h'] as const satisfies ReadonlyArray<keyof SinceMarks>;
 
 type Obj = Record<string, unknown>;
 
@@ -117,7 +128,7 @@ function members(v: unknown, allowed: (x: unknown) => boolean, what: string, max
 
 /** The v1 field checks, after v === 1 was established. */
 function checkV1(m: Obj): void {
-  obj(m, META_KEYS, 'meta');
+  obj(m, Object.hasOwn(m, 'since') ? META_KEYS_SINCE : META_KEYS, 'meta');
   if (m['proto'] !== 1) throw new MetaFormatError('proto must be 1');
   if (typeof m['peer_id'] !== 'string' || !validId('hex128', m['peer_id'])) throw new MetaFormatError('peer_id must be 32 lowercase hex');
   if (typeof m['epoch'] !== 'string' || !validId('hex128', m['epoch'])) throw new MetaFormatError('epoch must be 32 lowercase hex');
@@ -185,6 +196,11 @@ function checkV1(m: Obj): void {
   // outbox: any JSON value; Outbox.fromJson validates its entries when the engine restores it.
   int(m['cs_human_next'], 1, 'cs_human_next');
   int(m['incident_next'], 1, 'incident_next');
+  // ENG-05 (rev 2.5, F04-a): exactly the three keys, each null or a non-negative safe integer (a board height).
+  if (Object.hasOwn(m, 'since')) {
+    const since = obj(m['since'], SINCE_KEYS, 'since');
+    for (const k of SINCE_KEYS) if (since[k] !== null) int(since[k], 0, `since.${k}`);
+  }
 }
 
 /**

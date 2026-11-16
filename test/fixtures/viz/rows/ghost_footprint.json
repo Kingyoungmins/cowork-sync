@@ -1,0 +1,90 @@
+{
+ "row": "ghost",
+ "plan": 5,
+ "about": "VIZ-21, derived ghost row: when a peer leaves rankedSet, after person_ghost one pet_poof per live pet of that peer whose seat key is not a live folded seat (S1: a footprint only; S3: its folded seat ended), in ascending seat key; the seat_start pet S2 stays; a later footprint spawns S1 again",
+ "frames": [
+  {
+   "writer": "A",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Ann"
+    },
+    {
+     "type": "caps"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "join",
+     "display": "Bname"
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "seat_start",
+     "seat": "S2"
+    },
+    {
+     "type": "seat_start",
+     "seat": "S3"
+    }
+   ],
+   "code": {
+    "shape": "ordinary",
+    "seats": [
+     "S1"
+    ]
+   },
+   "cs": [
+    {
+     "seat": "S1",
+     "turn": 1,
+     "files": [
+      "src/a.ts"
+     ]
+    }
+   ]
+  },
+  {
+   "writer": "B",
+   "ops": [
+    {
+     "type": "seat_end",
+     "seat": "S3"
+    }
+   ],
+   "cs": [
+    {
+     "seat": "S3",
+     "turn": 1,
+     "files": [
+      "src/b.ts"
+     ]
+    }
+   ]
+  },
+  {
+   "writer": "A",
+   "repeat": 200
+  },
+  {
+   "writer": "B",
+   "cs": [
+    {
+     "seat": "S1",
+     "turn": 2,
+     "files": [
+      "src/a.ts"
+     ]
+    }
+   ]
+  }
+ ]
+}

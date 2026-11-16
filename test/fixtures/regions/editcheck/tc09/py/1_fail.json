@@ -1,0 +1,16 @@
+{
+  "name": "tc09/py/1_fail",
+  "check": 1,
+  "lang": "python",
+  "expect": "fail",
+  "reason": "new_error_node",
+  "tipEqualsA": true,
+  "A": {
+    "pricing.py": "def price(amount, qty):\n    return round(amount * qty, 2)\n\n\ndef discount(amount):\n    return round(amount * 0.9, 2)\n",
+    "checkout.py": "import pricing\n\n\ndef checkout(cart):\n    total = 0\n    for line in cart:\n        total += pricing.price(line.amount, line.qty)\n    return pricing.discount(total)\n"
+  },
+  "R": {
+    "pricing.py": "def price(amount, qty):\n    if amount >\n    return round(amount * qty, 2)\n\n\ndef discount(amount):\n    return round(amount * 0.9, 2)\n",
+    "checkout.py": "import pricing\n\n\ndef checkout(cart):\n    total = 0\n    for line in cart:\n        total += pricing.price(line.amount, line.qty)\n    return pricing.discount(total)\n"
+  }
+}

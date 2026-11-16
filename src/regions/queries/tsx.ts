@@ -1,0 +1,25 @@
+// cowork's tree-sitter query for TSX (R4-11): a string constant compiled into dist/worker.js and hashed into regionSpec on the
+// main thread. The same captures as the TypeScript query (a function component and an arrow component are function units).
+export const TSX_QUERY = [
+  '(function_declaration name: (identifier) @name) @unit.function',
+  '(generator_function_declaration name: (identifier) @name) @unit.function',
+  '(variable_declarator name: (identifier) @name value: [(arrow_function) (function_expression) (generator_function)]) @unit.function',
+  '(function_signature name: (identifier) @name) @signature',
+  '(class_declaration name: (type_identifier) @name) @unit.class',
+  '(abstract_class_declaration name: (type_identifier) @name) @unit.class',
+  '(variable_declarator name: (identifier) @name value: (class)) @unit.class',
+  '(method_definition name: (_) @name) @unit.method',
+  '(pair key: (_) @name value: [(arrow_function) (function_expression) (generator_function)]) @unit.method',
+  '(interface_declaration name: (type_identifier) @name) @unit.type',
+  '(type_alias_declaration name: (type_identifier) @name) @unit.type',
+  '(enum_declaration name: (identifier) @name) @unit.type',
+  '(export_statement) @export',
+  '(import_statement) @import',
+  '(import_alias) @import',
+  '(export_statement source: (_)) @import',
+  '((call_expression function: (identifier) @name) @import (#eq? @name "require"))',
+  '(call_expression function: [(function_expression) (arrow_function) (parenthesized_expression [(function_expression) (arrow_function)])]) @iife',
+  '(call_expression arguments: (arguments [(function_expression) (arrow_function)])) @iife',
+  '(comment) @comment',
+  '',
+].join('\n');

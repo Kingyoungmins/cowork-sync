@@ -16,7 +16,7 @@ import { GitCommandError, parseCommitObject as parseCommitText, type CommitInfo 
 import type { GitResult } from '../git/runner.js';
 import type { Trailer } from '../git/trailers.js';
 import {
-  BATCH_READ_MAX_BYTES, batchCheck, batchObjects, BOARD_COMMIT_OBJECT_MAX_BYTES, capViolation, opsLinesOf, parseCsTrailers, parseWriter, subtreeNames,
+  BATCH_READ_MAX_BYTES, batchCheck, batchObjects, BOARD_COMMIT_OBJECT_MAX_BYTES, capViolation, modeType, opsLinesOf, parseCsTrailers, parseWriter, subtreeNames,
   type BoardCommitData, type BoardEntries, type BoardMalformedReason, type CsTrailer, type EntryInfo, type WriterId,
 } from './boardCommit.js';
 import { CHECKPOINT_EVERY } from './fold.js';
@@ -73,7 +73,8 @@ export interface BoardReadFailure { oid: Oid; height: number; malformed: BoardMa
  * the first item not read (`reads.length`; the number of items when all were read). The objects read for the prefix
  * add up to at most BATCH_READ_MAX_BYTES of `cat-file --batch` output on both paths: the one --batch of the round, or,
  * when git dies on the round (R-V74), the --batch calls of the item-by-item rounds together (an object counts once per
- * --batch that reads it; an `unreadable` item counts nothing). The prefix is never empty when there are items (one
+ * --batch that reads it; a git-fatal `unreadable` item counts nothing, a header-parse `unreadable` one counts the bytes
+ * read for it). The prefix is never empty when there are items (one
  * item's objects are at most ~13 MB by the caps). The caller continues from `next` in its next call (readBoardCommits:
  * with prevLive = the liveCode of the last read when it is a BoardRead, else null).
  */
@@ -184,14 +185,8 @@ function treeEntries(raw: Buffer | undefined, hashBytes: number): TreeEntry[] | 
   return entries;
 }
 
-/**
- * The object type git takes an entry of this mode to name (canon_mode on the S_IFMT bits): a directory is a tree, a
- * regular file or a symlink a blob, and every other mode a gitlink (`<oid> submodule` when the object is absent).
- */
-function modeType(mode: string): 'tree' | 'blob' | 'commit' {
-  const fmt = Number.parseInt(mode.slice(-6), 8) & 0o170000;
-  return fmt === 0o040000 ? 'tree' : fmt === 0o100000 || fmt === 0o120000 ? 'blob' : 'commit';
-}
+// modeType (the object type git takes an entry of a mode to name: canon_mode on the S_IFMT bits of the last six octal
+// digits) is boardCommit.ts's, shared with the board reader's §3.1 held/ walk (final review F13 r2, E-1).
 
 /**
  * The entry git's own lookup (tree-walk.c find_tree_entry) takes for `path` in one tree: the first entry of that name,

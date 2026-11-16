@@ -9,20 +9,31 @@
 //            iteration error rebuilds the Engine from disk and starts again (RESTART) within the RespawnBudget (5 per
 //            10 min); a lost state CAS (a second writer, ENG-03) exits at once after a security log line
 //   recover  under daemon.lock (so no daemon runs): the restart, then the human recover (a preview without --confirm)
-//   resume   under daemon.lock: the host-reject PIN ended (05-holds: lifted by resume; final review FC-5), then R-28's one
-//            state CAS clearing meta.nonretryable and the rejection streak, so the next run retries the rejected publish
+//   resume   under daemon.lock: Engine.resume (Plan 3 Task 8, R3-38, R3-39) — the host-reject guard released (a pathless PIN
+//            ends SUBSUMED), then one state CAS clearing meta.nonretryable and the rejection streak and lifting MASS, so the
+//            next run retries the rejected publish; the ResumeReport is printed as one JSON line
+//   resolve  under daemon.lock for its whole run (Plan 3 Task 11, R3-02; a live holder refuses DAEMON_ALREADY_RUNNING, a dead pid's
+//            lock is replaced, R-26): the restart first (Engine.start: intent resolution, own leftovers, settleHoldOps), then
+//            Engine.resolve with the human's evidence (a human at a terminal) — one fresh fetch and fold, one Table 4 verb
+//            (--publish | --discard | --park | --restore; --handoff is Plan 6's) — and one printed line: the result code, else the
+//            refusal code with its 05 §1 next command; exit 0 done (HOLD_ALREADY_RESOLVED included), 1 refusal or lock
 // Every printed line passes through the URL-userinfo filter (https and scp form; the one word it keeps is an exact
 // url.<base>.insteadOf key without scheme userinfo, so SEC_REFUSE_URL_REWRITE's command names the rule that exists); the
 // pinned URL carries no userinfo either (src/sec/redact.ts). Every word of a printed command is quoted for the OS shell
 // (shellQuote), or shown as a <placeholder> where no quoting is safe. Exit 0 success, 1 refusal, 2 internal error; a
-// failing daemon.lock release is reported and keeps the command's code; the daemon log is flushed before the command
-// returns.
+// failing daemon.lock release is reported and keeps the command's code; the daemon log and the security log are flushed
+// before the command returns.
 import { createHash } from 'node:crypto';
-import { join, resolve as resolvePath } from 'node:path';
+import { dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Json } from '../board/canonicalJson.js';
-import { humanOnlyAttribution, PLAN2_REGION_SPEC, type EngineDeps } from '../engine/deps.js';
+import { humanOnlyAttribution, noClaude, PLAN2_REGION_SPEC, type EngineDeps, type RegionDeps } from '../engine/deps.js';
+import { productionRegionDeps } from '../engine/regionDeps.js';
+import { RegionRuntimeMissingError } from '../regions/runtime.js';
 import { STOP_REQUEST_FILE } from '../engine/daemonFiles.js';
+import { FETCH_OWED_NEXT, INDEX_LOCK_PATH, type ResolveResult, type ResolveVerb } from '../engine/resolve.js';
+import { NEXT_COMMAND } from '../holds/codes.js';
+import { plan3Ports } from '../holds/ports.js';
 import { DAEMON_LOCK_FILE, DaemonLock, Engine, runLoop } from '../engine/loop.js';
 import { RELEASE_NAMESPACE, refNames } from '../engine/refs.js';
 import { StateCasLostError } from '../engine/state.js';
@@ -33,11 +44,21 @@ import { GitRepo, type RepoContext, type RepoPaths } from '../git/repo.js';
 import { createGitRunner, type GitRunner } from '../git/runner.js';
 import { GIT_FLOOR, meetsFloor, parseGitVersion } from '../git/version.js';
 import { RegistryCasLostError } from '../holds/registry.js';
+import { canonRoot, endpointRoot } from '../data/canonRoot.js';
+import { realRootProbe } from '../ports/fs.js';
+import { createClaudeDaemon, plan5Bindings, type ClaudeDaemon } from '../claude/daemon/claudeDaemon.js';
+import { endpointName, socketDir, SOCK_NAME } from '../sec/endpoint.js';
+import { IpcKeyRefused, protectDataDir, readIpcKey, type KeyDeps } from '../sec/ipcKey.js';
+import { realWinAcl } from '../sec/winAcl.js';
+import { realIpc } from '../ports/ipc.js';
+import { logNotifier } from '../ports/notifier.js';
+import { securityLog, securityLogAsLog } from '../sec/securityLog.js';
+import { processAlive } from '../engine/daemonFiles.js';
 import { machineMonoMs, realClock, type Clock } from '../ports/clock.js';
 import { KilledAt } from '../ports/crashpoint.js';
-import { errnoCode, realFs } from '../ports/fs.js';
+import { errnoCode, realFs, type Fs } from '../ports/fs.js';
 import { alwaysLeased } from '../ports/lease.js';
-import { fileLog, type FileLog, type Log } from '../ports/log.js';
+import { fileLog, type FileLog, type Log, type LogLevel, type LogParam } from '../ports/log.js';
 import { randomHex, realRandom } from '../ports/random.js';
 import { realScheduler } from '../ports/scheduler.js';
 import { noTrace } from '../ports/trace.js';
@@ -45,26 +66,37 @@ import { sanitizeText, sanitizeUrl as redactUrl, userinfoKind } from '../sec/red
 import { validName } from '../sec/validators.js';
 import { PLUGIN_VERSION } from '../version.js';
 
-export type DaemonCommand = 'run' | 'recover' | 'resume';
-export interface DaemonArgs { cmd: DaemonCommand; repo: string; branch: string; publish: 'all' | 'none' | null; name: string | null; remote: string | null; confirm: string | null; }
+export type DaemonCommand = 'run' | 'recover' | 'resume' | 'resolve';
+/** `id` and `verb` are resolve's (null for every other command; Plan 3 Task 11, R3-02; Plan 6 adds --handoff). */
+export interface DaemonArgs {
+  cmd: DaemonCommand; repo: string; branch: string; publish: 'all' | 'none' | null; name: string | null; remote: string | null; confirm: string | null;
+  id: string | null; verb: Exclude<ResolveVerb, 'handoff'> | null;
+  dataDir: string | null; pluginRoot: string | null; spawned: boolean;   // A5-1 (X5-05, R5-19): the IPC mode's three flags
+}
 export interface ResolvedRemote { name: string; url: string; }
 export type RemoteRefusal = 'START_REMOTE' | 'SEC_REFUSE_REMOTE_SPLIT' | 'SEC_REFUSE_URL_REWRITE';
 export interface DaemonIo { out(line: string): void; err(line: string): void; onStop(cb: () => void): void; }
 
 export const DAEMON_USAGE = [
-  'usage: node dist/daemon.js run --repo <path> --branch <b> [--publish=all|none] [--name <display>] [--remote <name>]',
+  'usage: node dist/daemon.js run --repo <path> --branch <b> [--publish=all|none] [--name <display>] [--remote <name>] [--data-dir <p>] [--plugin-root <p>] [--spawned]',
   '       node dist/daemon.js recover --repo <path> --branch <b> [--confirm=<id>] [--remote <name>]',
   '       node dist/daemon.js resume --repo <path> --branch <b> [--remote <name>]',
+  '       node dist/daemon.js resolve --repo <path> --branch <b> --id <hold_id> --publish|--discard|--park|--restore [--remote <name>]',
   '       node dist/daemon.js --version',
 ].join('\n');
 
 /** The options each command accepts. */
 const ALLOWED: Readonly<Record<DaemonCommand, ReadonlySet<string>>> = {
-  run: new Set(['repo', 'branch', 'publish', 'name', 'remote']),
+  run: new Set(['repo', 'branch', 'publish', 'name', 'remote', 'data-dir', 'plugin-root', 'spawned']),
   recover: new Set(['repo', 'branch', 'confirm', 'remote', 'name']),
   resume: new Set(['repo', 'branch', 'remote', 'name']),
+  resolve: new Set(['repo', 'branch', 'id', 'remote', 'name']),
 };
-const COMMANDS: ReadonlySet<string> = new Set<DaemonCommand>(['run', 'recover', 'resume']);
+const COMMANDS: ReadonlySet<string> = new Set<DaemonCommand>(['run', 'recover', 'resume', 'resolve']);
+/** resolve's verbs: valueless flags, exactly one per call (--handoff is Plan 6's, a usage error here). */
+const RESOLVE_VERBS: ReadonlySet<string> = new Set(['--publish', '--discard', '--park', '--restore']);
+/** A ULID (glossary §2 hold_id): 26 Crockford base32 characters, the first at most 7. */
+const ULID_RE = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 
 /** The branch name passes refNames' checks (an over-long enc(b) is a start refusal, not a usage error). */
 function branchNameOk(branch: string): boolean {
@@ -81,15 +113,21 @@ export function parseDaemonArgs(argv: readonly string[]): DaemonArgs | { usage: 
   if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) return { usage: DAEMON_USAGE, exitCode: 0 };
   const cmd = argv[0]!;
   if (!COMMANDS.has(cmd)) return bad(`unknown command ${JSON.stringify(cmd)}`);
+  // resolve's verb flags and run's --spawned carry no value (run's --publish=all|none does): taken out before the --key value loop.
+  const verbs = cmd === 'resolve' ? argv.slice(1).filter((a) => RESOLVE_VERBS.has(a) || a === '--handoff') : [];
+  if (verbs.includes('--handoff')) return bad('--handoff is not a verb of daemon.js resolve (Plan 6 publishes the request)');
+  if (cmd === 'resolve' && verbs.length !== 1) return bad('resolve takes exactly one of --publish, --discard, --park, --restore');
+  const spawned = cmd === 'run' && argv.slice(1).includes('--spawned');   // A5-1: a flag, never --spawned=<v>
+  const rest = (cmd === 'resolve' ? argv.slice(1).filter((a) => !RESOLVE_VERBS.has(a)) : argv.slice(1)).filter((a) => a !== '--spawned');
   const opts = new Map<string, string>();
-  for (let i = 1; i < argv.length; i++) {
-    const a = argv[i]!;
-    const m = /^--([a-z]+)(?:=(.*))?$/s.exec(a);
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i]!;
+    const m = /^--([a-z-]+)(?:=(.*))?$/s.exec(a);
     if (m === null) return bad(`unexpected argument ${JSON.stringify(a)}`);
     const key = m[1]!;
     let value = m[2];
     if (value === undefined) {
-      const next = argv[i + 1];
+      const next = rest[i + 1];
       if (next === undefined || next.startsWith('--')) return bad(`--${key} needs a value`);
       value = next;
       i++;
@@ -111,7 +149,15 @@ export function parseDaemonArgs(argv: readonly string[]): DaemonArgs | { usage: 
   if (name !== null && !validName(name)) return bad('--name: letters, digits, spaces and _ . \' - only, at most 64');
   const confirm = opts.get('confirm') ?? null;
   if (confirm !== null && !/^[0-9a-f]{6}$/.test(confirm)) return bad('--confirm takes the 6-hex preview id');
-  return { cmd: cmd as DaemonCommand, repo, branch, publish, name, remote: opts.get('remote') ?? null, confirm };
+  const id = opts.get('id') ?? null;
+  if (cmd === 'resolve' && id === null) return bad('resolve needs --id <hold_id>');
+  if (id !== null && !ULID_RE.test(id)) return bad('--id takes a hold id (a ULID)');
+  const verb = verbs.length === 1 ? (verbs[0]!.slice(2) as Exclude<ResolveVerb, 'handoff'>) : null;
+  if (opts.has('spawned')) return bad('--spawned takes no value');   // A5-1: the flag form only
+  const dataDir = opts.get('data-dir') ?? null;
+  const pluginRoot = opts.get('plugin-root') ?? null;
+  if ((spawned || pluginRoot !== null) && dataDir === null) return bad('--spawned and --plugin-root need --data-dir');
+  return { cmd: cmd as DaemonCommand, repo, branch, publish, name, remote: opts.get('remote') ?? null, confirm, id, verb, dataDir, pluginRoot, spawned };
 }
 
 /** Drops userinfo from a URL (the contract's name for src/sec/redact.ts's sanitizeUrl). */
@@ -282,11 +328,61 @@ async function pluginSha(): Promise<string> {
 /** Every line passes the userinfo filter; `keep` names exact words it leaves alone (sanitizeText: never scheme userinfo). */
 interface Printer { out(line: string, keep?: readonly string[]): void; err(line: string): void; }
 
+/**
+ * The region binding of one daemon run (R4-78, B3-05, X-34): given the daemon's file system, clock and its one security Log, the
+ * RegionDeps whose pool runDaemon closes after the drain and on every early exit.
+ */
+export type DaemonRegionDeps = (o: { fs: Fs; clock: Clock; securityLog: Log }) => Promise<RegionDeps>;
+/**
+ * In-tree options; the shipped entry point (src/entry/daemon.ts) passes none. regionDeps: an in-tree caller's own region binding
+ * (below). onClaudeDaemon: an in-tree observer, called once with the IPC daemon right after createClaudeDaemon and before it
+ * listens (the integration cells read its ctx, as regionDeps lets them see the region binding); it changes nothing the daemon does.
+ */
+export interface DaemonOptions { readonly regionDeps?: DaemonRegionDeps; readonly onClaudeDaemon?: (d: ClaudeDaemon) => void; }
+
+/**
+ * The shipped binding: productionRegionDeps over this module's own directory — dist/daemon.js's, so dist/grammars and dist/worker.js
+ * (the plan's distDir = dirname(dist/daemon.js)). Nothing else is tried: run in-tree (src/daemon/run.ts) there is no runtime beside
+ * the module and the start refuses START_REGION_RUNTIME, so an in-tree caller (the integration tests) passes its own binding — a
+ * build into a temp outdir, or testRegionDeps (audit #15: no fallback, no runtime copied into src/).
+ */
+const shippedRegionDeps: DaemonRegionDeps = (o) => productionRegionDeps({ ...o, distDir: dirname(fileURLToPath(import.meta.url)) });
+
+/**
+ * A6-9 / R-26: a Log gated on daemon.lock. Before open() its lines wait in memory, in order — at most `max`; later ones are
+ * dropped and only counted in memory (no code is minted for them, X-29); open() replays the held lines into `target` and from
+ * then on every write goes straight through. A gate that is never opened (a run refused before the lock) writes nothing.
+ */
+export function lockGatedLog(target: Log, max = 64): Log & { open(): void; dropped(): number } {
+  let held: Array<{ level: LogLevel; code: string; params: Readonly<Record<string, LogParam>> | undefined }> | null = [];
+  let dropped = 0;
+  return {
+    write(level, code, params) {
+      if (held === null) {
+        target.write(level, code, params);
+        return;
+      }
+      if (held.length < max) held.push({ level, code, params: params === undefined ? undefined : { ...params } });
+      else dropped++;
+    },
+    open() {
+      if (held === null) return;
+      const lines = held;
+      held = null;
+      for (const l of lines) target.write(l.level, l.code, l.params);
+    },
+    dropped: () => dropped,
+  };
+}
+
 /** Exit 0 success, 1 refusal (code + one next command), 2 internal error. */
-export async function runDaemon(args: DaemonArgs, env: Readonly<Record<string, string | undefined>>, io: DaemonIo): Promise<number> {
-  const p: Printer = { out: (l, keep) => io.out(sanitizeText(l, keep)), err: (l) => io.err(sanitizeText(l)) };
+export async function runDaemon(args: DaemonArgs, env: Readonly<Record<string, string | undefined>>, io: DaemonIo, opts: DaemonOptions = {}): Promise<number> {
+  // A5-1 (R5-19): a spawned daemon's stdout/stderr are silent — the plugin captures them and Claude Code parses hook output.
+  const p: Printer = args.spawned === true
+    ? { out: () => undefined, err: () => undefined }
+    : { out: (l, keep) => io.out(sanitizeText(l, keep)), err: (l) => io.err(sanitizeText(l)) };
   try {
-    return await daemonMain(args, env, io, p);
+    return await daemonMain(args, env, io, p, opts);
   } catch (e) {
     p.err(`DAEMON_INTERNAL_ERROR ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`);
     return 2;
@@ -299,8 +395,9 @@ function refusal(p: Printer, code: string, params: Record<string, Json>, next: s
   return 1;
 }
 
-async function daemonMain(args: DaemonArgs, env: Readonly<Record<string, string | undefined>>, io: DaemonIo, p: Printer): Promise<number> {
+async function daemonMain(args: DaemonArgs, env: Readonly<Record<string, string | undefined>>, io: DaemonIo, p: Printer, opts: DaemonOptions): Promise<number> {
   const fs = realFs;
+  const bindRegions = opts.regionDeps ?? shippedRegionDeps;
   const self = selfCommand(args);
   const again = `fix the condition above, then: ${self(args.cmd)}`;
 
@@ -356,38 +453,164 @@ async function daemonMain(args: DaemonArgs, env: Readonly<Record<string, string 
   const userName = await config.configGet('user.name');
   const display = args.name ?? (userName !== null && validName(userName.trim()) ? userName.trim() : 'cowork peer');
 
+  // A5-1 (R5-19, SEC-21): with --data-dir the IPC key is verified (win32: the data directory made user-only first) and
+  // the endpoint binds — the single-instance authority — BEFORE daemon.lock is taken. 'reuse' (the holder answered our
+  // handshake as its client) exits 0 quietly; a squatter pipe refuses SEC_REFUSE_IPC_SQUATTER (one security line and one
+  // notification, written before the lock — the squatter test reads them). Only then: lock, Plan 2's start, the Engine,
+  // and attach(engine, core).
+  let claude: ClaudeDaemon | null = null;
+  // F2 #90 (CCI-52): the daemon's close('version') — a newer caller's hook — must end the run (daemon.lock released),
+  // not just drain: this record reaches runCommand, which fires the same requestStop io.onStop bound. A stop that
+  // arrives before runCommand binds (hello's drain is not held until attach) is replayed there.
+  const versionStop: { requested: boolean; fire: (() => void) | null } = { requested: false, fire: null };
+  // The two file logs of <coworkDir>/log — the ctor touches no fs (only writes do); the IPC preamble's mkdirp creates
+  // the directory when the bind path needs the logs, the lock block reuses the same instances (one fileLog per path).
+  const daemonFile = fileLog(fs, realClock, join(paths.coworkDir, 'log', 'daemon-0.jsonl'));
+  const securityFile = securityLog(fs, realClock, paths.coworkDir, daemonFile);   // mirrors every line into the daemon log
+  // Each file log's flush lands its own queue only (the security log's file, the daemon log's file):
+  // flushLogs awaits both, and every exit from here on awaits it first — the pre-lock refusals and 'reuse', a rethrown
+  // preamble error, and the finally — because the entry point calls process.exit as soon as runDaemon resolves and a line
+  // still queued then is lost (R5-19; SEC-21's "write a security event").
+  const flushLogs = async (): Promise<void> => { await Promise.all([securityFile.flush(), daemonFile.flush()]); };
+  // A6-9 / R-26: the ClaudeDaemon's own log is the daemon log, gated on daemon.lock — what it writes before the lock waits in
+  // memory and is replayed once the lock is held (open() below); a run that never takes the lock drops it. The bind path's
+  // security lines (securityFile above) are R5-19's one pre-lock exception and do not pass through this gate.
+  const claudeLog = lockGatedLog(daemonFile);
+  if (args.dataDir !== null) {
+    const keyDeps: KeyDeps = { fs: realFs, random: realRandom, platform: process.platform, uid: process.getuid?.() ?? null, acl: realWinAcl };
+    try {
+      await protectDataDir(args.dataDir, keyDeps);   // win32 only; POSIX: a no-op (the parent-mode check rides every read)
+      const k = await readIpcKey(args.dataDir, keyDeps, { stamp: 'write' });
+      if (!k.ok) {
+        const params: Record<string, Json> = k.code === null ? { reason: 'missing' } : { sid: null };
+        await flushLogs();   // R5-19: a spawned process must not exit before its queued log lines land
+        return refusal(p, 'SEC_REFUSE_IPC_ACL', params, `fix ipc.key in the data directory (32 bytes, user-only) or run cowork's start again, then: ${self(args.cmd)}`);
+      }
+      const eroot = endpointRoot(gitDir, realRootProbe, process.platform);
+      let dir: string | null = null;
+      if (process.platform !== 'win32') {
+        const s = await socketDir(env, process.getuid?.() ?? 0, realFs, SOCK_NAME);
+        if (!s.ok) { await flushLogs(); return refusal(p, s.code, {}, `fix the socket directory's permissions, then: ${self(args.cmd)}`); }
+        dir = s.dir;
+      }
+      // R5-19's order puts the bind before the lock, and the bind path already writes the security log (the squatter
+      // refusal's one notification): the log directory and the two log files are the one early <coworkDir> touch —
+      // created here once and reused after the lock (one fileLog instance per path).
+      await fs.mkdirp(join(paths.coworkDir, 'log'));
+      const endpoint = endpointName(k.key, eroot, process.platform, dir);
+      claude = createClaudeDaemon({
+        repo: { root: canonRoot(workTree, realRootProbe, process.platform), gitdir: gitDir, coworkDir: paths.coworkDir, dataDir: args.dataDir, endpointRoot: eroot },
+        key: k.key, endpoint, pluginVersion: PLUGIN_VERSION,
+        ports: { clock: realClock, random: realRandom, fs: realFs, scheduler: realScheduler(realClock), git: config, ipc: realIpc,
+          // NT lines go to the daemon log (logNotifier); before the lock they are R5-19's one exception, with the security lines.
+          notifier: logNotifier(daemonFile) },
+        log: claudeLog, security: securityFile, trace: noTrace,
+        bindings: plan5Bindings({ testBuild: false }),
+        osLocale: (() => { try { return Intl.DateTimeFormat().resolvedOptions().locale; } catch { return null; } })(),
+        pidAlive: processAlive,
+        requestStop: () => { versionStop.requested = true; versionStop.fire?.(); },   // C-STOP: close('version') fires it once, after the drain and the server close
+      });
+      opts.onClaudeDaemon?.(claude);   // an in-tree observer only (DaemonOptions); the shipped entry passes none
+      const bound = await claude.listen();
+      if (bound === 'reuse') { await flushLogs(); return 0; }
+      if (bound === 'SEC_REFUSE_IPC_SQUATTER') {
+        await flushLogs();   // the squatter's security lines (both files: the security log and its daemon-log mirror) + notification land before the exit
+        return refusal(p, 'SEC_REFUSE_IPC_SQUATTER', {}, `the endpoint answers, but not as a cowork daemon: stop the program holding it, then: ${self(args.cmd)}`);
+      }
+    } catch (e) {
+      if (e instanceof IpcKeyRefused) {
+        await flushLogs();
+        return refusal(p, 'SEC_REFUSE_IPC_ACL', { sid: null }, `fix ipc.key in the data directory (32 bytes, user-only) or run cowork's start again, then: ${self(args.cmd)}`);
+      }
+      await flushLogs();   // runDaemon reports the error (exit 2); the lines queued so far land first
+      throw e;
+    }
+  }
+
   // daemon.lock before anything in <coworkDir> is touched (R-26; restart and every own-leftover deletion run under it).
-  const lock = await DaemonLock.acquire(fs, paths.coworkDir, { pluginVersion: PLUGIN_VERSION, instance: randomHex(realRandom, 16) });
-  if (!(lock instanceof DaemonLock)) {
-    const pid = lock.held?.pid ?? null;
-    const file = join(paths.coworkDir, DAEMON_LOCK_FILE);
-    return refusal(p, 'DAEMON_ALREADY_RUNNING', { pid }, `stop the daemon running on this clone${pid === null ? '' : ` (pid ${pid})`} — or, if none runs, delete ${word(file, 'lock file')} — then: ${self(args.cmd)}`);
+  // The IPC server is already bound (above), so a lock this run does not get — held or thrown — still closes it
+  // (A5-1's close-with-the-process covers the pre-lock refusal paths too; review lens 2, finding 1).
+  let lock: DaemonLock;
+  try {
+    const acquired = await DaemonLock.acquire(fs, paths.coworkDir, { pluginVersion: PLUGIN_VERSION, instance: randomHex(realRandom, 16) });
+    if (!(acquired instanceof DaemonLock)) {
+      const pid = acquired.held?.pid ?? null;
+      const file = join(paths.coworkDir, DAEMON_LOCK_FILE);
+      await claude?.close('removal').catch(() => undefined);
+      await flushLogs();
+      return refusal(p, 'DAEMON_ALREADY_RUNNING', { pid }, `stop the daemon running on this clone${pid === null ? '' : ` (pid ${pid})`} — or, if none runs, delete ${word(file, 'lock file')} — then: ${self(args.cmd)}`);
+    }
+    lock = acquired;
+  } catch (e) {
+    await claude?.close('removal').catch(() => undefined);   // acquire itself threw: the bound server must not outlive the run
+    await flushLogs();
+    throw e;
   }
   let log: FileLog | null = null;
+  let regionWorkers: { close(): Promise<void> } | null = null;   // R4-78: closed in the finally, after the drain
   try {
     await fs.mkdirp(join(paths.coworkDir, 'log'));
-    log = fileLog(fs, realClock, join(paths.coworkDir, 'log', 'daemon-0.jsonl'));
+    log = daemonFile;
+    claudeLog.open();   // daemon.lock is held: the ClaudeDaemon's held lines land, in order, and later ones go straight through
     const runner = createGitRunner({ clock: realClock, hooksPath, daemonEnv, ...(sshCommand !== null ? { sshCommand } : {}), testBuild: false });
+    // R4-78: the region pool (shipped: productionRegionDeps beside this module, see shippedRegionDeps); its missing runtime refuses
+    // START_REGION_RUNTIME (Task 16 raises it); runDaemon awaits regions.workers.close() after the drain and on every early exit.
+    // X-34 / R4-52 / R5-46: RegionDeps.securityLog is the daemon's one SecurityLog (built above, before the bind — R5-19's
+    // order) as a Log: its lines pass checkLine and are mirrored to the daemon log; the security log file has no second writer.
+    let regions: RegionDeps;
+    try {
+      regions = await bindRegions({ fs, clock: realClock, securityLog: securityLogAsLog(securityFile) });
+    } catch (e) {
+      if (e instanceof RegionRuntimeMissingError) {
+        log.write('error', 'START_REGION_RUNTIME', { file: e.file });
+        p.err(`START_REGION_RUNTIME ${e.file}`);   // through the Printer: a spawned daemon's streams stay silent (R5-19)
+        return 1;
+      }
+      throw e;
+    }
+    regionWorkers = regions.workers;
     const deps: EngineDeps = {
       ports: { clock: realClock, random: realRandom, scheduler: realScheduler(realClock), fs, git: runner },
-      trace: noTrace, log, lease: alwaysLeased, attribution: humanOnlyAttribution, heartbeatMs: machineMonoMs,
+      trace: noTrace, log, lease: alwaysLeased, attribution: humanOnlyAttribution, claude: noClaude, heartbeatMs: machineMonoMs,
       paths, branch: args.branch, namespace: RELEASE_NAMESPACE, url: remote.url, display,
       pluginVersion: PLUGIN_VERSION, pluginSha: await pluginSha(), regionSpec: PLAN2_REGION_SPEC,
       platform: process.platform, testBuild: false, testMutants: new Set(),
+      ...plan3Ports(),   // Plan 3 Task 10: the edit check, T0 items 1–2, the B1 gate and the symbol branch (R3-03, R3-04, R3-07)
+      regions,           // Plan 4 Task 5 (R4-36, B3-05): the production region module
+      // A5-13 / X-111 (the one production wiring site): the daemon's claude/attribution/lease replace the defaults only
+      // when an IPC daemon was created above; without --data-dir Plan 2/3 behaviour is unchanged (OQ-22 (r3)).
+      ...(claude !== null ? claude.engineDeps : {}),
     };
     log.write('info', 'DAEMON_START', { cmd: args.cmd, pid: process.pid, git: version.raw });
     switch (args.cmd) {
       case 'run':
-        return await runCommand(args, deps, log, io, p, self);
+        return await runCommand(args, deps, log, io, p, self, claude, versionStop);
       case 'recover':
         return await recoverCommand(args, deps, p, self);
       case 'resume':
         return await resumeCommand(deps, p, self);
+      case 'resolve':
+        return await resolveCommand(args, deps, p, self);
     }
     throw new Error(`daemonMain: unknown command ${JSON.stringify(args.cmd)}`);
   } finally {
+    // A5-1: the IPC daemon's server closes with the process (the endpoint's last owner does not delete it; A3-5).
+    try {
+      await claude?.close('removal');
+    } catch (e) {
+      log?.write('error', 'DAEMON_IPC_CLOSE_FAILED', { error: e instanceof Error ? e.name : 'unknown' });
+    }
+    // R4-78: the region pool's live worker_threads keep the process alive, so the pool closes whatever the command
+    // did; a failing close is reported and never replaces the command's exit code.
+    if (regionWorkers !== null) {
+      try {
+        await regionWorkers.close();
+      } catch (e) {
+        log?.write('error', 'REGION_WORKER_CLOSE_FAILED', { code: errnoCode(e) ?? (e instanceof Error ? e.name : 'unknown') });
+      }
+    }
     // The lock is released whatever the command did; a failing release is reported and never replaces the command's
-    // exit code (the next run replaces a lock this process left behind). The log queue is flushed last.
+    // exit code (the next run replaces a lock this process left behind). Both log queues are flushed last.
     try {
       await lock.release();
     } catch (e) {
@@ -395,7 +618,7 @@ async function daemonMain(args: DaemonArgs, env: Readonly<Record<string, string 
       log?.write('error', 'DAEMON_LOCK_RELEASE_FAILED', { code });
       p.err(`DAEMON_LOCK_RELEASE_FAILED ${code} (the next run replaces ${word(lock.file, 'lock file')})`);
     }
-    await log?.flush();
+    await flushLogs();
   }
 }
 
@@ -513,7 +736,8 @@ function watchStopRequest(deps: EngineDeps, onRequest: () => void): { stop(): Pr
   };
 }
 
-async function runCommand(args: DaemonArgs, deps: EngineDeps, log: Log, io: DaemonIo, p: Printer, self: SelfCommand): Promise<number> {
+async function runCommand(args: DaemonArgs, deps: EngineDeps, log: Log, io: DaemonIo, p: Printer, self: SelfCommand, claude: ClaudeDaemon | null,
+  versionStop: { requested: boolean; fire: (() => void) | null }): Promise<number> {
   let stopRequested = false;
   let stopNow: (() => void) | null = null;
   let wakeSleep: (() => void) | null = null;
@@ -523,22 +747,31 @@ async function runCommand(args: DaemonArgs, deps: EngineDeps, log: Log, io: Daem
     wakeSleep?.();
   };
   io.onStop(requestStop);
+  // F2 #90 (C-STOP): the daemon's close('version') drains and closes the server, then fires this stop — runIterations
+  // returns, the finally releases daemon.lock. A drain that landed before this bind (hello is not held until attach) is
+  // replayed here; the finally clears it so a later daemon on the same object (none in production) cannot fire a dead stop.
+  versionStop.fire = requestStop;
+  if (versionStop.requested) requestStop();
   // A stop request an earlier run left behind (it ended before it saw the request) never stops this one.
   await deps.ports.fs.unlink(join(deps.paths.coworkDir, STOP_REQUEST_FILE)).catch(() => undefined);
   const watcher = watchStopRequest(deps, requestStop);
   try {
+    // A5-1: the engine runs inside the IPC daemon's context — each successful start (a respawn's too) attaches its engine
+    // (06 §3.17.2: one spawn routine; the lease is the daemon's SeatLeasePort from engineDeps from the first sync on).
     return await runIterations(args, deps, log, p, () => stopRequested, {
       setStopNow: (f) => { stopNow = f; },
       setWakeSleep: (f) => { wakeSleep = f; },
-    });
+    }, claude === null ? undefined : (engine, core) => claude.attach(engine, core));
   } finally {
+    versionStop.fire = null;   // F2 #90: the run's stop is dead once runCommand leaves
     await watcher.stop();
   }
 }
 
 interface StopHooks { setStopNow(f: (() => void) | null): void; setWakeSleep(f: (() => void) | null): void; }
 
-async function runIterations(args: DaemonArgs, deps: EngineDeps, log: Log, p: Printer, stopRequestedNow: () => boolean, hooks: StopHooks): Promise<number> {
+async function runIterations(args: DaemonArgs, deps: EngineDeps, log: Log, p: Printer, stopRequestedNow: () => boolean, hooks: StopHooks,
+  attachDaemon?: (engine: Engine, core: import('../engine/core.js').EngineCore) => Promise<void>): Promise<number> {
   const budget = new RespawnBudget(deps.ports.clock);
   // The last Engine built: a stop during the respawn sleep drains it, so status.json says `down` (final review FC minor).
   let last: Engine | null = null;
@@ -549,6 +782,10 @@ async function runIterations(args: DaemonArgs, deps: EngineDeps, log: Log, p: Pr
       const r = await engine.start({ publishLocal: args.publish });
       if (!r.ok) return refusal(p, r.code, r.params, startRefusalNext(r.code, r.params, args, deps.url));
       p.out(`started ${r.mode} on ${args.branch} as peer ${engine.peerId}`);
+      // A5-1 / A5-12: every successful start, a respawn's included, attaches its engine to the IPC daemon (the server
+      // answers hooks from here on), and the daemon rebinds to the newest engine (t5-compose's idempotent attach). A
+      // throwing attach is a crash of this engine: the catch below counts it in the respawn budget.
+      if (attachDaemon !== undefined) await attachDaemon(engine, engine.core);
       const handle = runLoop(engine, { scheduler: deps.ports.scheduler, clock: deps.ports.clock, lease: deps.lease });
       const stopNow = (): void => void handle.stop().catch(() => undefined);
       hooks.setStopNow(stopNow);
@@ -621,14 +858,78 @@ async function recoverCommand(args: DaemonArgs, deps: EngineDeps, p: Printer, se
   }
 }
 
+/**
+ * `resume` (Plan 3 Task 8; R-28 extended, R3-02, R3-38, R3-39): under daemon.lock (taken by daemonMain for the whole run, a dead
+ * pid's lock replaced, a live holder refused), Engine.resume — NONRETRYABLE and the streak cleared, the host-reject guard released,
+ * MASS lifted — and its ResumeReport printed as one JSON line, then the next command.
+ */
 async function resumeCommand(deps: EngineDeps, p: Printer, self: SelfCommand): Promise<number> {
   const engine = await Engine.create(deps);
   try {
-    const changed = await engine.resumeAfterNonretryable();
-    p.out(changed ? 'RESUMED the next run retries the rejected publish once' : 'RESUME_NOTHING no NONRETRYABLE pause on this branch');
+    const report = await engine.resume();
+    p.out(JSON.stringify(report));
     p.out(`next: ${self('run')}`);
     return 0;
   } finally {
     await engine.drain(null);
+  }
+}
+
+/**
+ * `resolve` (Plan 3 Task 11, R3-02): under daemon.lock (taken by daemonMain for the whole run), the restart first — Engine.start on
+ * the existing state: intent resolution, own leftovers and settleHoldOps (an interrupted PARK, RESTORE or discard completed by
+ * observation) before any fetch, a start refusal printed as Plan 2's run prints it — then Engine.resolve with humanEvidence true (a
+ * human at a terminal is the human evidence) and one printed line: done → `<code> {"hid", "created"}` (exit 0, HOLD_ALREADY_RESOLVED
+ * included); a refusal → `<code> {params} next: <05 §1 next command>` (exit 1); a lock → `LOCKED {"hid", "paths"} next: ...` (exit
+ * 1). A clone without cowork state has no record of this peer: HOLD_NOT_OWNER.
+ */
+async function resolveCommand(args: DaemonArgs, deps: EngineDeps, p: Printer, self: SelfCommand): Promise<number> {
+  const id = args.id;
+  const verb = args.verb;
+  if (id === null || verb === null) throw new Error('resolveCommand: --id and a verb are required');
+  const engine = await Engine.create(deps);
+  const again = self('resolve', ` --id ${id} --${verb}`);
+  const print = (res: ResolveResult): number => {
+    const { exit, line } = resolveLine(res, id, again);
+    p.out(line);
+    return exit;
+  };
+  try {
+    if (engine.core.view === null) return print({ kind: 'refused', code: 'HOLD_NOT_OWNER', params: { hid: id } });
+    const r = await engine.start({ publishLocal: null });
+    if (!r.ok) return refusal(p, r.code, r.params, startRefusalNext(r.code, r.params, args, deps.url));
+    return print(await engine.resolve(id, verb, { humanEvidence: true, actor: 'human' }));
+  } finally {
+    await engine.drain(null);
+  }
+}
+
+/** 05 §1's "—" in the "Next command shown" column: no next command is shown. */
+const NO_NEXT_COMMAND = '\u{2014}';
+
+/**
+ * The one line `daemon.js resolve` prints for a ResolveResult and its exit code (Plan 3 Task 11; R3-02; 05 §1): done → `<code>
+ * {"hid", "created"}` (exit 0, HOLD_ALREADY_RESOLVED included); a refusal → `<code> {params} next: <its registered next command>`
+ * (exit 1) — NEXT_COMMAND's 05 §1 entry with <id> filled in, none where the table shows "—" (HOLD_NOT_PARKABLE), FETCH_OWED_NEXT for
+ * Engine.resolve's fetch refusal; a lock → `LOCKED {"hid", "paths"} next: …, then repeat the command: <again>` (exit 1), git's
+ * .git/index.lock (the 0b gate) told as a git command to wait for, any other path as a program holding the file. `again` is the
+ * command to repeat. A seat's claude_refused never reaches the CLI (a caller bug: thrown).
+ */
+export function resolveLine(res: ResolveResult, id: string, again: string): { exit: 0 | 1; line: string } {
+  const line = (code: string, params: Record<string, Json>, cmd: string | null): string => `${code} ${JSON.stringify(params)}${cmd === null ? '' : ` next: ${cmd}`}`;
+  switch (res.kind) {
+    case 'done':
+      return { exit: 0, line: line(res.code, { hid: res.id, created: res.created }, null) };
+    case 'refused': {
+      const next = res.code === 'FETCH_OWED' ? FETCH_OWED_NEXT : NEXT_COMMAND[res.code];
+      return { exit: 1, line: line(res.code, res.params, next === NO_NEXT_COMMAND ? null : next.replace('<id>', id)) };
+    }
+    case 'locked': {
+      const wait = res.reason === 'txn' ? 'wait for the Claude shell command (Bash, PowerShell or Monitor) to finish'
+        : res.paths.length === 1 && res.paths[0] === INDEX_LOCK_PATH ? 'wait for the git command to finish' : 'close the program holding the file';
+      return { exit: 1, line: line('LOCKED', { hid: id, paths: res.paths }, `${wait}, then ${NEXT_COMMAND.HOLD_DISK_CHANGED}: ${again}`) };
+    }
+    case 'claude_refused':
+      throw new Error(`resolveCommand: a human resolve came back claude_refused (${res.reason})`);
   }
 }

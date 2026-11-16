@@ -4,10 +4,15 @@
 // off; CSS pixelated); text — zone signs, plaques, name tags, the "you" marker, "+n" counts, place labels and bubbles — with
 // fillText at device resolution on plates cached per (string, size, theme). Walks follow A* (ui/path.ts, cached per layout
 // version) at 4 tiles/s within 3 s, poofing with no path or at ≥ 4× over 12 tiles; the loop (ui/loop.ts) draws at most 12
-// frames/s and only when a frame index changes, and stops when paused, under reduced motion or with no actor on screen. The
+// frames/s and only when a frame index changes, and stops when paused, under reduced motion or with no actor on screen (once no
+// bubble is left: under reduced motion a beat's bubbles still show, drawn still, since only motion is removed, 12 §3.11). The
 // panel scrolls (the office grows downward; Z changes only on open, resize or a user zoom) and follows a new event's desk only
-// when the reader has not scrolled for 30 s. Colours come only from the palette. Browser only.
-import { actorKey } from '../model/events.js';
+// when the reader has not scrolled for 30 s — except in a room with a follow (rev 2.5, F32; 12 §3.8.1), where only the follow
+// camera scrolls it: ui/follow.ts's FollowCamera.step decides each move (the three steps over the followed actors' tiles, a 300 ms pan
+// or a jump, a user scroll honoured until a followed actor's place changes, nothing while paused but the reader's own actions) and
+// the office carries it out. The camera's own scrolls are told apart from the user's by the positions it set. Colours come only
+// from the palette. Browser only.
+import { actorKey, type ActorRef } from '../model/events.js';
 import { BIG_TABLE, DOOR, OFFICE_W, TILE_PX, cellOrigin, deskTiles, isBlocked, officeTiles, type Layout, type Tile } from '../model/layout.js';
 import { placeLabel } from '../model/labels.js';
 import type { Scene } from '../model/scene.js';
@@ -17,6 +22,7 @@ import { ICONS, type FrameName } from '../render/sprites.js';
 import type { LayoutVM, OverlayVM } from '../server/viewModel.js';
 import { TRIP_MAX_MS, WALK_TILES_PER_S } from '../ui/anim.js';
 import { BubbleSet } from '../ui/bubbles.js';
+import { FollowCamera, type FollowCause, type FollowMove } from '../ui/follow.js';
 import { createLoop } from '../ui/loop.js';
 import { headerLamp, roomDots, sceneOverlayMarks } from '../ui/map.js';
 import { PathCache, findPath, shouldPoof } from '../ui/path.js';
@@ -47,10 +53,13 @@ export interface OfficeDeps {
   selectRoom(id: string): void;
   /** The person filter: that character's place label is drawn. */
   highlighted(): string | null;
+  /** The peer the room on screen follows (12 §3.8.1), or null. */
+  followed(): string | null;
 }
 export interface Office {
   room(r: OfficeRoom | null): void;
-  /** The scene to draw. animate: walk to the new places and pop the beat's bubbles (a live beat or a replay step); else snap. */
+  /** The scene to draw. animate (a live beat or a replay step): walk to the new places and show the beat's bubbles; else snap. Under
+   *  reduced motion the actors snap and the bubbles still show, drawn still (12 §3.11); paused, they snap and no bubble shows. */
   show(s: Scene, o: { live: boolean; overlay: OverlayVM | null; speed: number; animate: boolean }): void;
   toggleCoarse(): boolean;
   zoomBy(delta: number): void;
@@ -58,8 +67,12 @@ export interface Office {
   /** Reduced motion or pause changed. */
   motion(): void;
   map(rooms: readonly MapRoom[], selected: string | null, focused: string | null): void;
-  /** Live: scroll to a desk unless the reader scrolled in the last 30 s. */
+  /** Live: scroll to a desk unless the reader scrolled in the last 30 s (a room without a follow); nothing while paused. */
   follow(desk: number): void;
+  /** The follow camera (12 §3.8.1) over the scene on screen, when the room follows someone: on follow start, every beat, a seek, a
+   *  room_snapshot, "load earlier", a room switch and a click on the now card's chip (which centres even a visible frame). Paused: a
+   *  beat or a room_snapshot scrolls nothing; the reader's own actions still do, by a jump (FollowCamera.step). */
+  camera(cause: FollowCause): void;
   /** Labels in the current language (plates are cached per string, so nothing else changes). */
   relabel(): void;
 }
@@ -122,7 +135,11 @@ export function createOffice(canvas: HTMLCanvasElement, mapCanvas: HTMLCanvasEle
   let live = true;
   let overlay: OverlayVM | null = null;
   let staticKey = '';
-  let programmaticScroll = false;
+  let speedNow = 1;
+  /** The scroll position the page itself set last (the 30 s rule's scroll, the follow camera's): a scroll event at it is not the user's. */
+  let ownScroll: { top: number; left: number } | null = null;
+  let pan: number | null = null;                       // the follow camera's pan in progress (a requestAnimationFrame id)
+  const camera = new FollowCamera();                   // the follow camera: what it last framed, an honoured user scroll
   const motions = new Map<string, Motion>();
 
   const dpr = (): number => (Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1);
@@ -164,6 +181,7 @@ export function createOffice(canvas: HTMLCanvasElement, mapCanvas: HTMLCanvasEle
     if (layout === undefined) return;
     const now = performance.now();
     const speed = Number.isFinite(o.speed) && o.speed > 0 ? o.speed : 1;
+    speedNow = speed;
     const animate = o.animate && !still();
     const next = targets(s, layout);
     const size = officeTiles(layout);
@@ -185,7 +203,10 @@ export function createOffice(canvas: HTMLCanvasElement, mapCanvas: HTMLCanvasEle
       m.path = null;
       if (animate) walk(m, { x: Math.round(here.x), y: Math.round(here.y) }, tg.to, layout, size, speed, now);
     }
-    if (animate && room !== null) {
+    // A beat's bubbles are information, not motion (12 §3.11: reduced motion removes only motion, never information; the §3.7 icon
+    // bubble's reduced form is "no pop"): a live beat or a replay step shows them under reduced motion too, drawn still for their §3.8
+    // duration (idle() keeps the loop until they end). A paused page shows no new bubble.
+    if (o.animate && !deps.paused() && room !== null) {
       for (const e of s.beat) {
         if (e.kind === 'request_open' && e.note !== null) bubbles.show(actorKey(e.from), room.id, e.note, now, speed);
         else if (e.kind === 'answer' && e.note !== null) bubbles.show(actorKey(e.holder), room.id, e.note, now, speed);
@@ -436,9 +457,58 @@ export function createOffice(canvas: HTMLCanvasElement, mapCanvas: HTMLCanvasEle
     }
   });
   scrollBox.addEventListener('scroll', () => {
-    if (programmaticScroll) programmaticScroll = false;
-    else follow.scrolled(performance.now());
+    if (ownScroll !== null && Math.abs(scrollBox.scrollTop - ownScroll.top) < 1 && Math.abs(scrollBox.scrollLeft - ownScroll.left) < 1) return;
+    // The user's scroll (wheel, touch, scrollbar, keys): the 30 s rule waits, the follow camera holds still until a followed actor
+    // moves (FEAT-F32-04), and a pan in progress stops.
+    ownScroll = null;
+    stopPan();
+    follow.scrolled(performance.now());
+    camera.userScrolled();
   });
+
+  /** The panel at (top, left) in CSS px, remembered as the page's own scroll. */
+  const scrollTo = (top: number, left: number): void => {
+    scrollBox.scrollTop = top;
+    scrollBox.scrollLeft = left;
+    ownScroll = { top: scrollBox.scrollTop, left: scrollBox.scrollLeft };
+  };
+  const stopPan = (): void => {
+    if (pan !== null) cancelAnimationFrame(pan);
+    pan = null;
+  };
+  /** A camera move: a jump, or a pan over the move's ms (ease-out) from where the panel is now. */
+  const moveTo = (m: FollowMove): void => {
+    stopPan();
+    const { top, left } = m;
+    if (m.motion === 'jump' || m.ms <= 0) return scrollTo(top, left);
+    const t0 = performance.now(), top0 = scrollBox.scrollTop, left0 = scrollBox.scrollLeft;
+    const step = (now: number): void => {
+      const f = Math.min(1, Math.max(0, (now - t0) / m.ms));
+      const e = f * (2 - f);
+      scrollTo(top0 + (top - top0) * e, left0 + (left - left0) * e);
+      pan = f < 1 ? requestAnimationFrame(step) : null;
+    };
+    pan = requestAnimationFrame(step);
+  };
+
+  /** The follow camera (12 §3.8.1) for the scene on screen: ui/follow.ts's FollowCamera.step decides (the pause, the fresh causes, the
+   *  honoured user scroll, both axes, the pan or the jump); the office only carries out the move it returns. */
+  const cameraNow = (cause: FollowCause): void => {
+    const peer = deps.followed();
+    const s = room === null ? null : scene;
+    const layout = room?.layout ?? null;
+    const size = layout === null ? { w: 0, h: 0 } : officeTiles(layout);
+    // The scroll extent of the office as it is now, before the panel scrolls within it.
+    if (peer !== null && s !== null && layout !== null) sizeCanvas(canvas, size.w * TILE_PX, size.h * TILE_PX, zoom.z);
+    const move = camera.step({
+      cause, peer, s, office: size, zoom, dpr: dpr(),
+      view: { top: scrollBox.scrollTop, left: scrollBox.scrollLeft, w: scrollBox.clientWidth, h: scrollBox.clientHeight },
+      paused: deps.paused(), reduced: deps.reduced(), speed: speedNow,
+      // The tiles the office draws the followed actors at (their walks' targets).
+      tileOf: (a: ActorRef): Tile => placeTile('peer' in a ? s!.characters.get(a.peer)!.place : s!.pets.get(a.seat)!.place, layout!, s!),
+    });
+    if (move !== null) moveTo(move);
+  };
 
   // ---------------------------------------------------------------------------------------------------------
   // The map (12 §3.5.1): one 48 × 32 art cell per room in server order, drawn at max(1, Z − 1)
@@ -495,6 +565,8 @@ export function createOffice(canvas: HTMLCanvasElement, mapCanvas: HTMLCanvasEle
       room = r;
       staticKey = '';
       motions.clear();
+      stopPan();
+      camera.reset();
       if (!opened && r !== null) {
         opened = true;
         zoom.open(scrollBox.clientWidth * dpr());
@@ -525,14 +597,16 @@ export function createOffice(canvas: HTMLCanvasElement, mapCanvas: HTMLCanvasEle
     },
     map: drawMap,
     follow(desk): void {
+      // Paused: no automatic scroll (12 §3.8.1 pause row; the reader's own actions still move the camera).
+      if (deps.paused()) return;
       if (room === null || desk >= room.layout.desks.length || !follow.follow(performance.now())) return;
       const d = room.layout.desks[desk]!;
       if (d.kind !== 'big_table' && (d.cell === null || d.slot === null)) return;
       const y = (deskTiles(room.layout, desk).desk[0]!.y * TILE_PX * zoom.z) / dpr();
       if (y >= scrollBox.scrollTop && y <= scrollBox.scrollTop + scrollBox.clientHeight - TILE_PX) return;
-      programmaticScroll = true;
-      scrollBox.scrollTop = Math.max(0, y - scrollBox.clientHeight / 2);
+      scrollTo(Math.max(0, y - scrollBox.clientHeight / 2), scrollBox.scrollLeft);
     },
+    camera: cameraNow,
     relabel(): void {
       loop.wake();
     },

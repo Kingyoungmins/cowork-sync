@@ -1,0 +1,36 @@
+{
+  "name": "S4",
+  "files": {
+    "app.py": {
+      "base": "from flask import Flask\n\nfrom handlers import parse, render\n\napp = Flask(__name__)\napp.debug = False\n\napp.add_route(\"/parse\", parse, methods=[\"POST\"])\napp.add_route(\"/render\", render, methods=[\"GET\"])\napp.add_route(\"/health\", lambda: \"ok\", methods=[\"GET\"])\n\n\ndef setup_routes():\n    app.add_route(\"/admin\", render, methods=[\"GET\"])\n",
+      "ours": "from flask import Flask\n\nfrom handlers import parse, render\n\napp = Flask(__name__)\napp.debug = False\n\n\ndef setup_routes():\n    app.add_route(\"/admin\", render, methods=[\"GET\"])\n",
+      "theirs": "from flask import Flask\n\nfrom handlers import parse, render\n\napp = Flask(__name__)\napp.debug = False\n\napp.add_route(\"/parse\", parse, methods=[\"POST\"])\napp.add_route(\"/render\", render, methods=[\"GET\"])\napp.add_route(\"/version\", lambda: \"1.0\", methods=[\"GET\"])\napp.add_route(\"/health\", lambda: \"ok\", methods=[\"GET\"])\n\n\ndef setup_routes():\n    app.add_route(\"/admin\", render, methods=[\"GET\"])\n"
+    }
+  },
+  "claims": [
+    {
+      "holderSeat": "p1/seat-holder",
+      "path": "app.py",
+      "ranges": [
+        [
+          8,
+          10
+        ]
+      ]
+    }
+  ],
+  "expect": "held",
+  "oracle": {
+    "app.py": "from flask import Flask\n\nfrom handlers import parse, render\n\napp = Flask(__name__)\napp.debug = False\n\napp.add_route(\"/parse\", parse, methods=[\"POST\"])\napp.add_route(\"/render\", render, methods=[\"GET\"])\napp.add_route(\"/version\", lambda: \"1.0\", methods=[\"GET\"])\napp.add_route(\"/health\", lambda: \"ok\", methods=[\"GET\"])\n\n\ndef setup_routes():\n    app.add_route(\"/admin\", render, methods=[\"GET\"])\n"
+  },
+  "corrupting": true,
+  "corruptOut": {
+    "app.py": "from flask import Flask\n\nfrom handlers import parse, render\n\napp = Flask(__name__)\napp.debug = False\n\n\ndef setup_routes():\n    app.add_route(\"/admin\", render, methods=[\"GET\"])\n"
+  },
+  "hazard": {
+    "path": "app.py",
+    "pattern": "app.add_route(\"/parse\"",
+    "count": 0
+  },
+  "caughtBy": "b1"
+}

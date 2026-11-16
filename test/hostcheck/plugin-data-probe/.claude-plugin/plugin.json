@@ -1,0 +1,5 @@
+{
+  "name": "plugin-data-probe",
+  "version": "0.0.1",
+  "description": "Throwaway host check (cowork-sync Plan 5 Task 4, A4-10): records CLAUDE_PLUGIN_ROOT and CLAUDE_PLUGIN_DATA as a SessionStart hook sees them."
+}

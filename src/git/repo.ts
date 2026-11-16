@@ -44,6 +44,11 @@ export class GitCommandError extends Error {
 export type FileMode = '100644' | '100755' | '120000' | '160000';
 /** A leaf of a recursive tree, with its full repo-relative path. */
 export interface TreeEntry { path: string; mode: FileMode; oid: Oid; }
+/**
+ * A regular file entry (100644 or 100755). The one definition (Global Constraints "Shared helpers, never copied"): src/engine reads
+ * it through treeDiff.ts's re-export, src/data (below src/engine) from here (Plan 3 Task 6 fix round 1).
+ */
+export const isRegularEntry = (e: TreeEntry | undefined): e is TreeEntry => e !== undefined && (e.mode === '100644' || e.mode === '100755');
 export type TreeMap = ReadonlyMap<string, TreeEntry>;
 export interface MktreeEntry { name: string; mode: FileMode | '040000'; type: 'blob' | 'tree' | 'commit'; oid: Oid; }
 export type IndexEdit = { path: string; mode: FileMode; oid: Oid } | { path: string; remove: true };
@@ -500,6 +505,26 @@ export class GitRepo {
   async configGet(key: string): Promise<string | null> {
     const r = await this.run(['config', '--get', key], { okCodes: [0, 1] });
     return r.code === 0 ? r.stdout.toString('utf8').replace(/\n$/, '') : null;
+  }
+
+  /**
+   * The user's own value of a single-valued key: the last value whose scope is not `command`. Every cowork git call forces
+   * some keys with `-c` (command scope; `core.hooksPath=<empty-hooks>`, glossary §18), so configGet answers cowork's value
+   * for those, never the user's. Null when no config file sets the key. Ruling R3-FF2-F2 (`--show-scope`: git ≥ 2.26).
+   * Layout of `config -z --show-scope --get-all`: `scope NUL value NUL` per value (a valueless key has an empty value).
+   * `type` 'path' (ruling R3-EF4-27): `--type=path`, so each value is read as git reads it for its own use (`~/` and `%(prefix)/`
+   * expanded; a relative value stays relative); an entry git cannot read as a path (a valueless key, a `~user` it cannot expand) is
+   * git's exit 128, a GitCommandError.
+   */
+  async configGetUser(key: string, type?: 'path'): Promise<string | null> {
+    const r = await this.run(['config', '-z', '--show-scope', ...(type === undefined ? [] : [`--type=${type}`]), '--get-all', key], { okCodes: [0, 1] });
+    if (r.code !== 0) return null;
+    const fields = r.stdout.toString('utf8').split('\0');
+    let value: string | null = null;
+    for (let i = 0; i + 1 < fields.length; i += 2) {
+      if (fields[i] !== 'command') value = fields[i + 1] ?? '';
+    }
+    return value;
   }
 
   async configGetRegexp(regex: string): Promise<Array<{ key: string; value: string }>> {

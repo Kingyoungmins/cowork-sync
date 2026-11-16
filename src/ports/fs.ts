@@ -26,6 +26,10 @@ export interface FsLstat {
   isFile: boolean;
   isDirectory: boolean;
   isSymbolicLink: boolean;
+  /** A3-1 (Plan 5 Task 3, X5-46): the owner uid (lstat({ bigint: true }).uid; Windows reports 0). Optional so Plan 2/3 literals keep compiling. */
+  uid?: number;
+  /** A3-1: the status-change time (ctimeNs; on Windows an ACL change moves it). sameStat ignores uid and ctimeNs. */
+  ctimeNs?: bigint;
 }
 
 /** The errno code of a thrown Fs (or Node) error (`ENOENT`, `EPERM`, …), undefined for anything else. */
@@ -54,8 +58,9 @@ export interface Fs {
   rmrf(p: string): Promise<void>;
   /** null on ENOENT or ENOTDIR; never follows a symlink. */
   lstat(p: string): Promise<FsLstat | null>;
-  /** open 'wx', one write, fsync, close; EEXIST when p exists. */
-  writeFileExclusive(p: string, data: Buffer): Promise<void>;
+  /** open 'wx', one write, fsync, close; EEXIST when p exists. A3-2 (Plan 5 Task 3, X-73): mode goes to the exclusive open (POSIX; the umask
+   *  still applies); absent = the default (0o666 before the umask). */
+  writeFileExclusive(p: string, data: Buffer, mode?: number): Promise<void>;
   /** Non-recursive; ENOTEMPTY and ENOENT propagate. */
   rmdir(p: string): Promise<void>;
   /** Buffer only (TypeError otherwise). */
@@ -129,6 +134,8 @@ export const realFs: Fs = {
         isFile: s.isFile(),
         isDirectory: s.isDirectory(),
         isSymbolicLink: s.isSymbolicLink(),
+        uid: Number(s.uid),
+        ctimeNs: s.ctimeNs,
       };
     } catch (e) {
       if (hasCode(e, 'ENOENT') || hasCode(e, 'ENOTDIR')) return null;
@@ -136,11 +143,11 @@ export const realFs: Fs = {
     }
   },
 
-  async writeFileExclusive(p: string, data: Buffer): Promise<void> {
+  async writeFileExclusive(p: string, data: Buffer, mode?: number): Promise<void> {
     if (!Buffer.isBuffer(data)) {
       throw new TypeError(`Fs.writeFileExclusive requires a Buffer (got ${typeof data}) for ${p}`);
     }
-    const h = await fsp.open(p, 'wx');
+    const h = await fsp.open(p, 'wx', mode);
     try {
       await h.writeFile(data);
       await h.sync();

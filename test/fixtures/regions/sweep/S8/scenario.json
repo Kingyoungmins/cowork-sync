@@ -1,0 +1,35 @@
+{
+  "name": "S8",
+  "files": {
+    "notes.py": {
+      "base": "# -*- coding: utf-8 -*-\n\"\"\"주문 메모 모듈.\"\"\"\n\n\ndef summary(orders):\n    # 합계 금액을 계산합니다\n    total = sum(o.amount for o in orders)\n    return f\"합계: {total}\"\n\n\ndef count(orders):\n    return len(orders)\n",
+      "ours": {
+        "b64": "IyAtKi0gY29kaW5nOiB1dGYtOCAtKi0KIiIi7KO866y4IOuplOuqqCDrqqjrk4guIiIiCgoKZGVmIHN1bW1hcnkob3JkZXJzKToKICAgICMg7ZWp6rOEIOq4CiAgICB0b3RhbCA9IHN1bShvLmFtb3VudCBmb3IgbyBpbiBvcmRlcnMpCiAgICByZXR1cm4gZiLtlanqs4Q6IHt0b3RhbH0iCgoKZGVmIGNvdW50KG9yZGVycyk6CiAgICByZXR1cm4gbGVuKG9yZGVycykK"
+      },
+      "theirs": "# -*- coding: utf-8 -*-\n\"\"\"주문 메모 모듈.\"\"\"\n\n\ndef summary(orders):\n    # 합계 금액을 계산합니다\n    total = sum(o.amount for o in orders)\n    return f\"합계: {total}\"\n\n\ndef count(orders):\n    return sum(1 for _ in orders)\n"
+    }
+  },
+  "claims": [
+    {
+      "holderSeat": "p1/seat-holder",
+      "path": "notes.py",
+      "claimUnit": "count"
+    }
+  ],
+  "expect": "held",
+  "oracle": {
+    "notes.py": "# -*- coding: utf-8 -*-\n\"\"\"주문 메모 모듈.\"\"\"\n\n\ndef summary(orders):\n    # 합계 금액을 계산합니다\n    total = sum(o.amount for o in orders)\n    return f\"합계: {total}\"\n\n\ndef count(orders):\n    return sum(1 for _ in orders)\n"
+  },
+  "corrupting": true,
+  "corruptOut": {
+    "notes.py": {
+      "b64": "IyAtKi0gY29kaW5nOiB1dGYtOCAtKi0KIiIi7KO866y4IOuplOuqqCDrqqjrk4guIiIiCgoKZGVmIHN1bW1hcnkob3JkZXJzKToKICAgICMg7ZWp6rOEIOq4CiAgICB0b3RhbCA9IHN1bShvLmFtb3VudCBmb3IgbyBpbiBvcmRlcnMpCiAgICByZXR1cm4gZiLtlanqs4Q6IHt0b3RhbH0iCgoKZGVmIGNvdW50KG9yZGVycyk6CiAgICByZXR1cm4gc3VtKDEgZm9yIF8gaW4gb3JkZXJzKQo="
+    }
+  },
+  "hazard": {
+    "path": "notes.py",
+    "pattern": "�",
+    "count": 1
+  },
+  "caughtBy": "tripwire_c"
+}

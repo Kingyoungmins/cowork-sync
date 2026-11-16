@@ -5,6 +5,9 @@ import { H, parseOpId } from '../../src/board/ids.js';
 import { eventCid, OPS_MAX_BYTES, OPS_MAX_LINES, serializeOps, type EventKind, type Op, type OpDraft } from '../../src/board/ops.js';
 import { allowedInAll, allowedInState, Outbox, type PushState, type SeqAllocator } from '../../src/board/outbox.js';
 
+/** R3-55: every test of this file carries the 10-minute node:test timeout. */
+const T10 = { timeout: 10 * 60_000 };
+
 const PEER = '0123456789abcdef0123456789abcdef';
 const EPOCH = 'fedcba9876543210fedcba9876543210';
 const OTHER_PEER = '00000000000000000000000000000001';
@@ -34,7 +37,7 @@ const leave = (): OpDraft => ({ type: 'leave' });
 const event = (kind: EventKind, reason = 'HOST_THROTTLED', cid = ''): OpDraft => ({ type: 'event', cid, kind, refs: [], reason_code: reason });
 const answer = (verb: string): OpDraft => ({ type: 'answer', req_id: ULID, to_holder: { seat: SEAT }, verb, by: 'human', reason_code: 'ANSWER_GIVEN' });
 
-test('intent [c(10), r(11)] writer 12 loses, intent [r(11)] writer 13 lands, and c is renumbered above 13', () => {
+test('intent [c(10), r(11)] writer 12 loses, intent [r(11)] writer 13 lands, and c is renumbered above 13', T10, () => {
   const alloc = new Counter(10);
   const box = new Outbox();
   box.add(claim(1));
@@ -73,7 +76,7 @@ test('intent [c(10), r(11)] writer 12 loses, intent [r(11)] writer 13 lands, and
   assert.deepEqual(box.take(['ok'], SELF, alloc, ROOM), [c2]);
 });
 
-test('renumberAtOrBelow renumbers ops at or below the folded last_seq, order kept', () => {
+test('renumberAtOrBelow renumbers ops at or below the folded last_seq, order kept', T10, () => {
   const alloc = new Counter(5);
   const box = new Outbox();
   box.add(claim(1)); // a: 5
@@ -120,7 +123,11 @@ function everyDraft(): Array<[string, OpDraft]> {
     ['request_status', requestStatus()],
     ['note', { type: 'note', target: null, text: 'hello' }],
     ['presume_absent', { type: 'presume_absent', peer: OTHER_PEER, epoch: OTHER_EPOCH, last_seq_seen: 3 }],
-    ['hold', { type: 'hold', hold_id: ULID, paths: ['src/f1.ts'] }],
+    // A typed hold draft (Plan 3 Task 3): every glossary §7 field, so it forms a valid op line when placed.
+    ['hold', {
+      type: 'hold', hold_id: ULID, rev: 1, prev_rev: null, kind: 'PATCH', residence: 'ON_DISK', state: 'ACTIVE', offer: 'none',
+      guards: [{ name: 'revert', class: 'DECISION', owner: 'HLD' }], paths: ['src/f1.ts'], origin: 'human', cs_ids: [], peer_authors: [], local_only: false,
+    }],
     ['save', { type: 'save', save_commit: OID, saved_live: OID, chain_base: OID, released_claim_ids: [] }],
   ];
   for (const verb of ['accept', 'decline', 'later', 'release', 'grant']) out.push([`answer:${verb}`, answer(verb)]);
@@ -138,6 +145,7 @@ const FROZEN_ALLOWED = new Set([
   'answer:accept', 'answer:decline', 'answer:later', 'answer:release', 'answer:grant', 'request_status', // answer-class
   'release', 'seat_end', 'leave', // release-class
   'hold', // hold mirrors
+  'join', // the epoch's pending join, which leads its first board push in every row that allows a board-only push (ruling R3-EF4-3)
 ]);
 const VERSION_BOARD_ONLY_ALLOWED = new Set(['join', 'leave', 'seat_end', 'release', 'request_status', 'answer:decline', 'answer:later', 'answer:release', 'hold']);
 const STATES: readonly PushState[] = ['ok', 'frozen', 'incident', 'config_net', 'offline', 'nonretryable', 'version_proto', 'version_board_only'];
@@ -160,7 +168,7 @@ const labelOf = (op: Op): string => {
   return op.type;
 };
 
-test('every op type in every PushState follows the 02-protocol §3.8 table; the most restrictive row wins', () => {
+test('every op type in every PushState follows the 02-protocol §3.8 table; the most restrictive row wins', T10, () => {
   const drafts = everyDraft();
   assert.equal(drafts.length, 32);
   for (const state of STATES) {
@@ -200,24 +208,26 @@ test('every op type in every PushState follows the 02-protocol §3.8 table; the 
     const d = (drafts.find(([l]) => l === label) as [string, OpDraft])[1];
     assert.deepEqual(STATES.filter((s) => allowedInState(d, s)), ['ok'], label);
   }
-  // The FREEZE row and the VERSION regionSpec row are incomparable: neither is a subset of the other,
-  // so one PushState value cannot carry both; take and pendingAllowed take every active state (P2-PUSHSTATES).
+  // Since ruling R3-EF4-3 (the epoch's pending join leaves in the FREEZE row too) the VERSION regionSpec row is a strict subset
+  // of the FREEZE row. The two conditions still hold independently, so take and pendingAllowed take every active state
+  // (P2-PUSHSTATES) and their intersection is the VERSION regionSpec row.
   const frozenOnly = drafts.filter(([, d]) => allowedInState(d, 'frozen') && !allowedInState(d, 'version_board_only')).map(([l]) => l);
   const versionOnly = drafts.filter(([, d]) => allowedInState(d, 'version_board_only') && !allowedInState(d, 'frozen')).map(([l]) => l);
   assert.deepEqual(frozenOnly, ['answer:accept', 'answer:grant', 'event:freeze', 'event:unfreeze', 'event:health:HOST_THROTTLED', 'event:health:BOARD_FULL']);
-  assert.deepEqual(versionOnly, ['join']);
+  assert.deepEqual(versionOnly, [], 'no op leaves under the VERSION regionSpec pause that FREEZE keeps back');
 });
 
-test('FREEZE and the VERSION regionSpec pause together allow only the intersection; [] behaves like ok', () => {
+test('FREEZE and the VERSION regionSpec pause together allow only the intersection; [] behaves like ok', T10, () => {
   const drafts = everyDraft();
   // An EPOCH freeze plus checkpoint_mismatch (ruling P2-PUSHSTATES): an op leaves only if every active row allows it.
   const both: readonly PushState[] = ['frozen', 'version_board_only'];
-  const want = ['leave', 'seat_end', 'release', 'request_status', 'hold', 'answer:decline', 'answer:later', 'answer:release'];
+  const want = ['join', 'leave', 'seat_end', 'release', 'request_status', 'hold', 'answer:decline', 'answer:later', 'answer:release'];
   const allowed = drafts.filter(([, d]) => allowedInAll(d, both)).map(([l]) => l);
   assert.deepEqual(allowed, want);
   const byLabel = (l: string): OpDraft => (drafts.find(([x]) => x === l) as [string, OpDraft])[1];
   assert.equal(allowedInState(byLabel('join'), 'version_board_only'), true);
-  assert.equal(allowedInAll(byLabel('join'), both), false, 'join: VERSION allows it, FREEZE refuses it');
+  assert.equal(allowedInState(byLabel('join'), 'frozen'), true);
+  assert.equal(allowedInAll(byLabel('join'), both), true, 'join: both rows allow the epoch\'s pending join (ruling R3-EF4-3)');
   assert.equal(allowedInState(byLabel('answer:accept'), 'frozen'), true);
   assert.equal(allowedInAll(byLabel('answer:accept'), both), false, 'answer accept: FREEZE allows it, VERSION refuses it');
   assert.equal(allowedInAll(event('health', 'HOST_THROTTLED'), both), false, 'no event leaves while VERSION holds');
@@ -240,13 +250,13 @@ test('FREEZE and the VERSION regionSpec pause together allow only the intersecti
   const out = box.take(both, SELF, alloc, ROOM);
   assert.deepEqual(out.map(labelOf), want);
   assert.equal(alloc.calls, want.length, 'no seq for an op either row refuses');
+  // Ops only the FREEZE row allows: pending while frozen, kept back while VERSION holds too.
   const onlyRefused = new Outbox();
-  onlyRefused.add(byLabel('join'));
   onlyRefused.add(byLabel('answer:accept'));
   onlyRefused.add(event('freeze', 'EPOCH_CHANGED'));
   assert.equal(onlyRefused.pendingAllowed(['frozen']), true);
-  assert.equal(onlyRefused.pendingAllowed(['version_board_only']), true);
-  assert.equal(onlyRefused.pendingAllowed(both), false, 'each op is allowed by one row, none by both');
+  assert.equal(onlyRefused.pendingAllowed(['version_board_only']), false);
+  assert.equal(onlyRefused.pendingAllowed(both), false, 'each op is allowed by FREEZE alone, none by both');
   assert.deepEqual(onlyRefused.take(both, SELF, new Counter(1), ROOM), []);
 
   // [] (no restricting condition) is the ok row: every op leaves.
@@ -260,7 +270,7 @@ test('FREEZE and the VERSION regionSpec pause together allow only the intersecti
   assert.equal(new Outbox().pendingAllowed([]), false, 'nothing queued');
 });
 
-test('event drafts get cid = H(id, kind) at allocation and again after renumbering', () => {
+test('event drafts get cid = H(id, kind) at allocation and again after renumbering', T10, () => {
   const alloc = new Counter(20);
   const box = new Outbox();
   box.add(event('health', 'HOST_THROTTLED'));
@@ -296,7 +306,7 @@ test('event drafts get cid = H(id, kind) at allocation and again after renumberi
   assert.equal((third.find((o) => labelOf(o) === 'event:K4') as Extract<Op, { type: 'event' }>).cid, conflictCid);
 });
 
-test('take keeps within 1,000 ops and 64 KiB, oldest seq first', () => {
+test('take keeps within 1,000 ops and 64 KiB, oldest seq first', T10, () => {
   // 1,200 leave ops: the 64 KiB cap binds before the 1,000-op cap (a leave line is ~90 bytes).
   const alloc = new Counter(1);
   const box = new Outbox();
@@ -341,7 +351,7 @@ test('take keeps within 1,000 ops and 64 KiB, oldest seq first', () => {
   assert.equal(alloc3.calls, 4);
 });
 
-test('toJson and fromJson round-trip allocated ids', () => {
+test('toJson and fromJson round-trip allocated ids', T10, () => {
   const alloc = new Counter(41);
   const box = new Outbox();
   box.add(claim(1));
@@ -381,7 +391,7 @@ test('toJson and fromJson round-trip allocated ids', () => {
   assert.throws(() => Outbox.fromJson(tampered as Json), TypeError);
 });
 
-test('drop removes matching drafts and add refuses a draft that cannot form a valid op', () => {
+test('drop removes matching drafts and add refuses a draft that cannot form a valid op', T10, () => {
   const box = new Outbox();
   box.add(event('health', 'HOST_THROTTLED'));
   box.add(event('health', 'BOARD_FULL'));

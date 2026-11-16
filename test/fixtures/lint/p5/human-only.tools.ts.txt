@@ -1,0 +1,2 @@
+// L-HUMAN-ONLY: an MCP tool outside glossary §15 (src/claude/client/mcp/tools.ts).
+export const TOOL_NAMES = ['cowork_status', 'cowork_show', 'cowork_request', 'cowork_respond', 'cowork_note', 'cowork_release', 'cowork_checkpoint', 'cowork_resolve', 'cowork_override'] as const;

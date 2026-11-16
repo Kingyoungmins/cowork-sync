@@ -28,6 +28,15 @@ export interface ConflictCtx {
   ref(path: string): Promise<Buffer | null>;
   /** Objects may be written (apply/publish). */
   write: boolean;
+  // ---- Plan 4 Task 5 (type-only; the stub regionConflictHooks returns them, Task 9 makes conflict() call them) ----
+  /** D9 (b): the path has a symbol-table grammar. */
+  hasGrammar?(path: string): boolean;
+  /** D9 step 3: the separator's blank-row need; firstNonBlankRow = the 1-based row of s2 where the region's L block's first non-blank row stands. */
+  need?(path: string, s2: Stage, firstNonBlankRow: number): Promise<0 | 1 | 2>;
+  /** D9 step 5 (ii), D8 step 0a: true = the splice passes within the parse budget. */
+  tripwire?(path: string, s3: Stage, s2: Stage, out: Buffer): Promise<boolean>;
+  /** D8 step 4: the tie-break for a TAKE_TIP unit; called once per TAKE_TIP verdict, never for CONCAT or DEFER. */
+  tieBreak?(path: string, s1: Stage, s2: Stage, s3: Stage): Promise<'k4' | 'breach'>;
 }
 
 export type ConflictVerdict =

@@ -28,6 +28,9 @@ import {
 } from '../../src/board/fold.js';
 import type { Oid } from '../../src/git/oid.js';
 
+/** R3-55: every test of this file carries the 10-minute node:test timeout. */
+const T10 = { timeout: 10 * 60_000 };
+
 const SELF = '5e1f5e1f5e1f5e1f5e1f5e1f5e1f5e1f';
 const OTHER = '07e207e207e207e207e207e207e207e2';
 const E1 = 'e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1';
@@ -86,17 +89,18 @@ class Board {
   }
 }
 
-const rej = (id: string, type: OwnRejection['type'], reason: OwnRejection['reason']): OwnRejection => ({ opId: id, type, reason });
+/** A Plan 2 (non-hold) own rejection: no hold id, no folded rev (Plan 3 Task 3 widened OwnRejection). */
+const rej = (id: string, type: OwnRejection['type'], reason: OwnRejection['reason']): OwnRejection => ({ opId: id, type, reason, holdId: null, foldedRev: null });
 const eventIds = (s: FoldState): string[] => Object.values(s.events).map((e) => e.op_id).sort();
 
-test('the fold constants are the glossary §20 board numbers', () => {
+test('the fold constants are the glossary §20 board numbers', T10, () => {
   assert.equal(CHECKPOINT_EVERY, 256);
   assert.equal(COMPACT_AGE, 512);
   assert.equal(K_EVICT, 200);
   assert.equal(REPLAY_MAX, 255);
 });
 
-test('generic validity for the Plan 2 types gives the exact no-op and own-rejection sets', () => {
+test('generic validity for the Plan 2 types gives the exact no-op and own-rejection sets', T10, () => {
   const b = new Board(SELF);
   b.commit(W(OTHER, EO, 3), [joinL(OTHER, EO, 1), capsL(OTHER, EO, 2)]);
   b.commit(W(SELF, E1, 11), [joinL(SELF, E1, 10)]);
@@ -183,7 +187,7 @@ test('generic validity for the Plan 2 types gives the exact no-op and own-reject
   assert.equal(b.state.peers[SELF]?.last_seq, 60);
 });
 
-test('[join(1), seat_start(2), event(3)] with writer seq 4 from a new epoch after last_seq 4,812 folds valid and sets last_seq 4', () => {
+test('[join(1), seat_start(2), event(3)] with writer seq 4 from a new epoch after last_seq 4,812 folds valid and sets last_seq 4', T10, () => {
   const b = new Board(OTHER);
   b.commit(W(OTHER, E1, 4_812), [joinL(OTHER, E1, 4_811)]);
   assert.equal(b.state.peers[OTHER]?.last_seq, 4_812);
@@ -201,7 +205,7 @@ test('[join(1), seat_start(2), event(3)] with writer seq 4 from a new epoch afte
   assert.deepEqual(b.state.events[cidOf(OTHER, E2, 3)], { kind: 'freeze', refs: [], reason_code: 'EPOCH_CHANGED', op_id: opId(OTHER, E2, 3), height: 1 });
 });
 
-test('a join of a new epoch retires the old one; leave; a rejoin after leave', () => {
+test('a join of a new epoch retires the old one; leave; a rejoin after leave', T10, () => {
   const b = new Board(SELF);
   b.commit(W(OTHER, E1, 3), [joinL(OTHER, E1, 1), seatStartL(OTHER, E1, 2, SEAT1)]);
   assert.deepEqual(liveSet(b.state), [OTHER]);
@@ -247,7 +251,8 @@ test('a join of a new epoch retires the old one; leave; a rejoin after leave', (
   assert.deepEqual(b.state.seats[`${OTHER}/${E2}/${SEAT3}`], { status: 'live', permission_mode: 'plan' });
 });
 
-test('claim, release, request, request_status, answer, note, presume_absent and hold fold as no-ops', () => {
+// `hold` has a fold effect since Plan 3 Task 3 (test/unit/fold.hold.test.ts); the other seven stay no-ops.
+test('claim, release, request, request_status, answer, note and presume_absent fold as no-ops', T10, () => {
   const b = new Board(SELF);
   b.commit(W(SELF, E1, 3), [joinL(SELF, E1, 1), seatStartL(SELF, E1, 2, SEAT1)]);
   b.commit(W(OTHER, EO, 2), [joinL(OTHER, EO, 1)]);
@@ -260,7 +265,6 @@ test('claim, release, request, request_status, answer, note, presume_absent and 
     L({ id: opId(writer, epoch, first + 4), type: 'answer', req_id: reqId, verb: 'decline', by: 'human', reason_code: 'REQUEST_DECLINED' }),
     L({ id: opId(writer, epoch, first + 5), type: 'note', target: null, text: 'hello' }),
     L({ id: opId(writer, epoch, first + 6), type: 'presume_absent', peer: OTHER, epoch: EO, last_seq_seen: 1 }),
-    L({ id: opId(writer, epoch, first + 7), type: 'hold', hold_id: reqId, rev: 1, prev_rev: null, paths: ['src/a.ts'], local_only: false }),
   ];
 
   for (const [writer, epoch, first, seqC] of [[SELF, E1, 4, 12], [OTHER, EO, 3, 11]] as const) {
@@ -279,7 +283,7 @@ test('claim, release, request, request_status, answer, note, presume_absent and 
   }
 });
 
-test('a conflict-kind event whose cid is folded is a no-op; a non-conflict event records op_id and height', () => {
+test('a conflict-kind event whose cid is folded is a no-op; a non-conflict event records op_id and height', T10, () => {
   const b = new Board(SELF);
   b.commit(W(SELF, E1, 2), [joinL(SELF, E1, 1)]);
   b.commit(W(OTHER, EO, 2), [joinL(OTHER, EO, 1)]);
@@ -305,7 +309,7 @@ test('a conflict-kind event whose cid is folded is a no-op; a non-conflict event
   assert.equal(b.state.record_count, 3);
 });
 
-test('last_height and last_seq advance even when every op of a commit is a no-op', () => {
+test('last_height and last_seq advance even when every op of a commit is a no-op', T10, () => {
   const b = new Board(SELF);
   b.commit(W(SELF, E1, 2), [joinL(SELF, E1, 1)]);
   b.commit(W(OTHER, EO, 2), [joinL(OTHER, EO, 1)]);
@@ -336,7 +340,7 @@ test('last_height and last_seq advance even when every op of a commit is a no-op
   assert.equal(b.state.peers[SELF]?.last_height, 5);
 });
 
-test('compaction at 512 drops the ended seat and the event of height 0 and keeps those of height 1, one height too young', () => {
+test('compaction at 512 drops the ended seat and the event of height 0 and keeps those of height 1, one height too young', T10, () => {
   const b = new Board(SELF);
   const key = (seat: string): string => `${SELF}/${E1}/${seat}`;
   // h0: SEAT1 starts and ends, SEAT3 starts and stays live, one event.
@@ -376,7 +380,7 @@ function threePeers(until: number): { b: Board; A: string; B: string; C: string 
   return { b, A, B, C };
 }
 
-test('rankedSet drops ghosts after 200 heights; governorRank orders by (last_height, peer_id) with peers without commits first and gives 1 outside R', () => {
+test('rankedSet drops ghosts after 200 heights; governorRank orders by (last_height, peer_id) with peers without commits first and gives 1 outside R', T10, () => {
   const { b, A, B, C } = threePeers(199);
   assert.equal(b.state.height, 199);
   assert.deepEqual(liveSet(b.state), [A, B, C]);
@@ -416,7 +420,7 @@ test('rankedSet drops ghosts after 200 heights; governorRank orders by (last_hei
   assert.equal(governorRank(b.state, B), 1);
 });
 
-test('teamRegionSpec switches only when every peer of R announced the same value; a ghost does not block', () => {
+test('teamRegionSpec switches only when every peer of R announced the same value; a ghost does not block', T10, () => {
   const [A, B, C, D] = ['a'.repeat(32), 'b'.repeat(32), 'c'.repeat(32), 'd'.repeat(32)] as const;
   const b = new Board(A);
   const seq: Record<string, number> = { [A]: 0, [B]: 0, [C]: 0, [D]: 0 };
@@ -456,7 +460,7 @@ test('teamRegionSpec switches only when every peer of R announced the same value
   assert.equal(b.state.teamRegionSpec, 'rs-3');
 });
 
-test('recentThrottleEvent sees a HOST_THROTTLED health event within the last 180 heights only', () => {
+test('recentThrottleEvent sees a HOST_THROTTLED health event within the last 180 heights only', T10, () => {
   const b = new Board(SELF);
   let n = 1;
   b.commit(W(SELF, E1, (n += 1)), [joinL(SELF, E1, 1)]);
@@ -478,7 +482,7 @@ test('recentThrottleEvent sees a HOST_THROTTLED health event within the last 180
   assert.equal(recentThrottleEvent(b.state, 181), true);
 });
 
-test('serializeFold is canonical and parseFold accepts exactly what it writes', () => {
+test('serializeFold is canonical and parseFold accepts exactly what it writes', T10, () => {
   const b = new Board(SELF);
   b.commit(W(SELF, E1, 6), [joinL(SELF, E1, 1), capsL(SELF, E1, 2), seatStartL(SELF, E1, 3, SEAT1), seatEndL(SELF, E1, 4, SEAT1), eventL(SELF, E1, 5)]);
   b.commit(W(SELF, E1, 8), [L({ id: opId(SELF, E1, 7), type: 'save', save_commit: OID('a'), saved_live: OID('b'), chain_base: OID('c'), released_claim_ids: ['x'] })]);

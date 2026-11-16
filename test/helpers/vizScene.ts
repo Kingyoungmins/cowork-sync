@@ -163,7 +163,9 @@ export function bangSequence(): SceneEvent[] {
 }
 
 export const SA3 = SEAT(A, 1, 'e2');
-/** VIZ-21: spawn by seat_start and by footprint, a repeated spawn, seat_end, respawn, presume_absent, leave, an owner ghost. */
+/** VIZ-21: spawn by seat_start and by footprint, a repeated spawn, seat_end, respawn, presume_absent, leave. (The owner of a
+ *  footprint-only seat becoming a ghost is the timeline builder's own pet_poof: pets.test.ts drives it through the
+ *  ghost_footprint row fixture, never a hand-written poof.) */
 export function petLifeSequence(): SceneEvent[] {
   return [
     ...enter([A, B, C, D]),
@@ -185,10 +187,7 @@ export function petLifeSequence(): SceneEvent[] {
     ev('person_exit', [11, 1, 0], { peer: C }),                            // 19: leave
     ev('pet_poof', [11, 1, 1], { seat: SC1, owner: C }),
     ev('claim_release', [11, 1, 2], { claimId: 'cl-c1', reason: 'stop' }),
-    ev('pet_spawn', [12, 1001, 0], { seat: SD1, owner: D }),               // 22: a footprint-only seat
-    ev('person_ghost', [13, 1002, 0], { peer: D }),
-    ev('pet_poof', [13, 1002, 1], { seat: SD1, owner: D }),                // 24: its owner became a ghost
-    ev('pet_spawn', [14, 1, 0], { seat: SA1, owner: A }),                  // 25: SA1 again
+    ev('pet_spawn', [14, 1, 0], { seat: SA1, owner: A }),                  // 22: SA1 again
   ];
 }
 

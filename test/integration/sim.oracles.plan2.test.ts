@@ -26,7 +26,7 @@ import { testRunner } from '../helpers/tmp.js';
 import { realEngine } from '../sim/engineAdapter.js';
 import { gitCallsOf, recordGitCalls, type GitCallRecord } from '../sim/gitCalls.js';
 import { seedFilesPlan2 } from '../sim/generators.js';
-import { DEFAULT_QUIESCENCE, runSim, type Oracle, type QuiescenceOptions, type SimContext, type SimResult } from '../sim/harness.js';
+import { DEFAULT_QUIESCENCE, runSim, type OpLogEntry, type Oracle, type QuiescenceOptions, type SimContext, type SimResult } from '../sim/harness.js';
 import { exitOracles, oracleFF } from '../sim/oracles.js';
 import type { RemoteLogEntry } from '../sim/remote.js';
 import type { SeedsReport } from '../../tools/sim/seedProtocol.js';
@@ -272,6 +272,8 @@ interface Plant {
   git?: GitCallRecord[];
   /** Remote-log entries appended after the remote's own. */
   log?: RemoteLogEntry[];
+  /** Op-log entries appended after the run's own (Plan 3 Task EF: INV-OID's gc_prune exemption reads the op-log). */
+  opLog?: OpLogEntry[];
 }
 
 /**
@@ -291,7 +293,7 @@ async function judge(ctx: SimContext, plant: Plant = {}): Promise<Record<string,
   recordGitCalls(git).push(...(gitCallsOf(ctx.git) ?? []), ...(plant.git ?? []));
   const log = plant.log;
   const remote = log === undefined ? ctx.remote : { ...ctx.remote, readRemoteLog: async () => [...(await ctx.remote.readRemoteLog()), ...log] };
-  const view: SimContext = { ...ctx, trace: { events, names: ctx.trace.names } as unknown as SimContext['trace'], git, remote };
+  const view: SimContext = { ...ctx, trace: { events, names: ctx.trace.names } as unknown as SimContext['trace'], git, remote, opLog: [...ctx.opLog, ...(plant.opLog ?? [])] };
   const fired: Record<string, string> = {};
   for (const o of exitOracles()) {
     const m = (await o.afterEveryOp?.call(o, view)) ?? (await o.atQuiescence?.call(o, view)) ?? null;
@@ -357,6 +359,17 @@ test('each exit oracle fires on its planted bad trace and on no other: INV-FF (-
       const fault = { cwd: dir0, sub: 'commit-tree', code: 128, stdoutEmpty: true };
       await run('OID push after a fault', { git: [fault, { cwd: dir0, sub: 'push', code: 0, stdoutEmpty: false }] });
       await run('OID fault, another peer pushes', { git: [fault, { cwd: dir1, sub: 'push', code: 0, stdoutEmpty: false }] });
+      // Plan 3 Task EF (01-engine §6, the gc row "reseed private index from state:snap, retry"): a write-tree that exited 128 after a
+      // gc_prune of that peer and was retried — a later write-tree of the peer exits 0 with an oid — before the push is the spec's
+      // reseed-and-retry, not a fault; either half alone is still a fault.
+      const wt128: GitCallRecord = { cwd: dir0, sub: 'write-tree', code: 128, stdoutEmpty: true };
+      const wt0: GitCallRecord = { cwd: dir0, sub: 'write-tree', code: 0, stdoutEmpty: false };
+      const push0: GitCallRecord = { cwd: dir0, sub: 'push', code: 0, stdoutEmpty: false };
+      const gc0: OpLogEntry = { step: 0, peer: 'p0', kind: 'gc_prune', detail: 'rc=0' };
+      await run('OID write-tree retried after a gc_prune', { git: [wt128, wt0, push0], opLog: [gc0] });
+      await run('OID write-tree retried, no gc_prune', { git: [wt128, wt0, push0] });
+      await run('OID write-tree after a gc_prune, not retried', { git: [wt128, push0], opLog: [gc0] });
+      await run('OID commit-tree after a gc_prune, write-tree ok', { git: [fault, wt0, push0], opLog: [gc0] });
 
       const merges = ctx.trace.ofKind('merge').filter((m) => m.peer === idOf('p1'));
       const states = ctx.trace.ofKind('state').filter((s) => s.peer === idOf('p1'));
@@ -446,6 +459,10 @@ test('each exit oracle fires on its planted bad trace and on no other: INV-FF (-
   only('OID foreign probe', 'INV-OID', /p0: a 'probe' push deletes refs\/cowork\/probe-[0-9a-f]+ \(only the peer's own probe ref/);
   only('OID push after a fault', 'INV-OID', /^p0: a push after its commit-tree exited 128 with empty stdout in the same op/);
   only('OID fault, another peer pushes', null);
+  only('OID write-tree retried after a gc_prune', null);
+  only('OID write-tree retried, no gc_prune', 'INV-OID', /^p0: a push after its write-tree exited 128 with empty stdout in the same op/);
+  only('OID write-tree after a gc_prune, not retried', 'INV-OID', /^p0: a push after its write-tree exited 128 with empty stdout in the same op/);
+  only('OID commit-tree after a gc_prune, write-tree ok', 'INV-OID', /^p0: a push after its commit-tree exited 128 with empty stdout in the same op/);
   only('FIRSTPARENT', 'INV-FIRSTPARENT', /^p1: (apply|publish) merge with LA_C [0-9a-f]+ not on TIP [0-9a-f]+'s first-parent chain/);
   only('PIM corrupted tree', 'INV-PUSHED-IS-MERGE', /^p0: landed [0-9a-f]+ has own\/plant\.txt = 100644 [0-9a-f]+, the merge of A, P and TIP/);
   only('PIM P not composed', 'INV-PUSHED-IS-MERGE', /^p0: publish [0-9a-f]+: its P [0-9a-f]+ is not the journaled t\/P /);

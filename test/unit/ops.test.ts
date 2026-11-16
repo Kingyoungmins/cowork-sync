@@ -17,6 +17,9 @@ import {
   type OpType,
 } from '../../src/board/ops.js';
 
+/** R3-55: every test of this file carries the 10-minute node:test timeout. */
+const T10 = { timeout: 10 * 60_000 };
+
 const PEER = '0123456789abcdef0123456789abcdef';
 const EPOCH = 'fedcba9876543210fedcba9876543210';
 const SEAT = '00112233445566778899aabbccddeeff';
@@ -54,14 +57,15 @@ function everyType(): Record<OpType, Record<string, Json>> {
     presume_absent: { id: id(12), type: 'presume_absent', peer: PEER, epoch: EPOCH, last_seq_seen: 40 },
     hold: {
       id: id(13), type: 'hold', hold_id: HOLD_ID, rev: 1, prev_rev: null, kind: 'PATCH', residence: 'ON_DISK', state: 'CONFLICTED', offer: 'none',
-      guards: ['conflict'], paths: ['src/a.ts', 'docs/b.md'], origin: 'human', cs_ids: [`${PEER}/human/2`, `${PEER}/human/1`], peer_authors: [PEER], local_only: false,
+      guards: [{ name: 'conflict', class: 'DECISION', owner: 'DAT' }], paths: ['docs/b.md', 'src/a.ts'], origin: 'human',
+      cs_ids: [`${PEER}/human/2`, `${PEER}/human/1`], peer_authors: [PEER], local_only: false,
     },
     event: { id: id(14), type: 'event', cid: H(id(14), 'health'), kind: 'health', refs: [], reason_code: 'HOST_THROTTLED' },
     save: { id: id(15), type: 'save', save_commit: OID_A, saved_live: OID_B, chain_base: OID_C, released_claim_ids: ['0123456789abcdef'] },
   };
 }
 
-const OPAQUE = ['claim', 'release', 'request', 'request_status', 'answer', 'note', 'presume_absent', 'hold'] as const;
+const OPAQUE = ['claim', 'release', 'request', 'request_status', 'answer', 'note', 'presume_absent'] as const;
 type OpaqueType = (typeof OPAQUE)[number];
 
 /**
@@ -82,9 +86,6 @@ function opaqueCanon(): Record<OpaqueType, string> {
     answer: `{"by":"human","id":"${id(10)}","reason_code":"BUSY_NOW","req_id":"${HOLD_ID}","to_holder":{"seat":"${SEAT}"},"type":"answer","verb":"decline"}`,
     note: `{"id":"${id(11)}","target":null,"text":"back in 5","type":"note"}`,
     presume_absent: `{"epoch":"${EPOCH}","id":"${id(12)}","last_seq_seen":40,"peer":"${PEER}","type":"presume_absent"}`,
-    hold: `{"cs_ids":["${PEER}/human/2","${PEER}/human/1"],"guards":["conflict"],"hold_id":"${HOLD_ID}","id":"${id(13)}","kind":"PATCH",`
-      + `"local_only":false,"offer":"none","origin":"human","paths":["src/a.ts","docs/b.md"],"peer_authors":["${PEER}"],"prev_rev":null,`
-      + `"residence":"ON_DISK","rev":1,"state":"CONFLICTED","type":"hold"}`,
   };
 }
 
@@ -95,12 +96,12 @@ function reversedKeys(v: Json): Json {
   return v;
 }
 
-test('every glossary §7 op type parses and re-serializes byte-identically; unknown fields are ignored', () => {
+test('every glossary §7 op type parses and re-serializes byte-identically; unknown fields are ignored', T10, () => {
   const ops = everyType();
   assert.equal(Object.keys(ops).length, 15);
   assert.deepEqual([...PLAN2_FOLDED_TYPES, ...OPAQUE].sort(), Object.keys(ops).sort());
 
-  // The 8 opaque types (R-12) keep every field as parsed. Each is pinned against its hand-written canonical
+  // The 7 opaque types (R-12; `hold` is typed since Plan 3 Task 3) keep every field as parsed. Each is pinned against its hand-written canonical
   // line, and parsed both from that line and from a non-canonical spelling (keys reversed at every level,
   // nested objects included), so a parser that drops, adds or reorders a field or an array element, or a
   // serializer that changes the byte form or stops sorting keys, fails here.
@@ -124,7 +125,7 @@ test('every glossary §7 op type parses and re-serializes byte-identically; unkn
     assert.equal(canonicalJson(extended as unknown as Json), `${canon[type].slice(0, -1)},"zz_future":[2,{"a":0,"b":1}]}`, `${type} unknown field bytes`);
   }
 
-  // The 7 typed Plan 2 types parse into new objects of exactly their glossary §7 fields.
+  // The 8 typed types (Plan 2's 7 and Plan 3's hold) parse into new objects of exactly their glossary §7 fields.
   for (const type of PLAN2_FOLDED_TYPES) {
     const obj = ops[type];
     const text = line(obj);
@@ -151,14 +152,14 @@ test('every glossary §7 op type parses and re-serializes byte-identically; unkn
     if (type === 'join') extended['config_fingerprint'] = { ...(obj['config_fingerprint'] as Record<string, Json>), lfs: '3.5' };
     assert.deepEqual(parseOpLine(line(extended)), obj, `${type} ignores unknown fields`);
   }
-  assert.deepEqual([...PLAN2_FOLDED_TYPES].sort(), ['caps', 'event', 'join', 'leave', 'save', 'seat_end', 'seat_start']);
+  assert.deepEqual([...PLAN2_FOLDED_TYPES].sort(), ['caps', 'event', 'hold', 'join', 'leave', 'save', 'seat_end', 'seat_start']);
   // Every event kind and both coauthor_optin forms parse.
   for (const kind of ['K1', 'K2', 'K3', 'K4', 'K5', 'K6', 'K7', 'breach', 'freeze', 'unfreeze', 'incident', 'nonretryable', 'health'] as EventKind[]) {
     assert.notEqual(parseOpLine(line({ ...ops.event, kind, cid: H(id(14), kind) })), null, kind);
   }
 });
 
-test('malformed lines parse to null', () => {
+test('malformed lines parse to null', T10, () => {
   const ops = everyType();
   const without = (type: OpType, field: string): string => {
     const o: Record<string, Json> = { ...ops[type] };
@@ -202,6 +203,8 @@ test('malformed lines parse to null', () => {
     ['claim path empty component', withField('claim', 'path', 'src//a.ts')], ['request path drive', withField('request', 'path', 'C:/x')],
     ['request path not NFC', withField('request', 'path', 'cafe\u{301}.md')], ['hold paths one bad', withField('hold', 'paths', ['ok.txt', 'a/../b'])],
     ['hold paths not strings', withField('hold', 'paths', [1])],
+    // final review F14: a '.' component (which join() collapses, so it defeats the quarantine classifier) fails validPathSyntax.
+    ['hold path dot segment', withField('hold', 'paths', ['./.claude/settings.json'])], ['claim path dot segment', withField('claim', 'path', '.vscode/./tasks.json')],
   ];
   for (const [what, text] of bad) assert.equal(parseOpLine(text), null, what);
 
@@ -221,7 +224,7 @@ test('malformed lines parse to null', () => {
   assert.equal(parseOpLine(padded(OP_MAX_LINE_BYTES + 1)), null);
 });
 
-test('an op nested deeper than MAX_JSON_DEPTH is malformed, on a cold and on a warmed canonicalJson (ruling P2-DEPTH)', () => {
+test('an op nested deeper than MAX_JSON_DEPTH is malformed, on a cold and on a warmed canonicalJson (ruling P2-DEPTH)', T10, () => {
   const ops = everyType();
   const arrays = (n: number): string => `${'['.repeat(n)}${']'.repeat(n)}`;          // depth n (n >= 1)
   const objects = (n: number): string => `${'{"a":'.repeat(n - 1)}{}${'}'.repeat(n - 1)}`;   // depth n (n >= 1)
@@ -258,7 +261,7 @@ test('an op nested deeper than MAX_JSON_DEPTH is malformed, on a cold and on a w
   assert.equal(parseOpLine(`${join},"zz_future":${arrays(5_000)}}`), null);
 });
 
-test('serializeOps refuses 1,001 ops, more than 64 KiB, or a line over 16 KiB', () => {
+test('serializeOps refuses 1,001 ops, more than 64 KiB, or a line over 16 KiB', T10, () => {
   assert.equal(OPS_MAX_LINES, 1_000);
   assert.equal(OPS_MAX_BYTES, 65_536);
   assert.equal(OP_MAX_LINE_BYTES, 16_384);
@@ -299,7 +302,7 @@ test('serializeOps refuses 1,001 ops, more than 64 KiB, or a line over 16 KiB', 
   assert.throws(() => serializeOps([noCid]), (e: unknown) => e instanceof Error && !(e instanceof BoardCapError));
 });
 
-test('eventCid is H(op id, kind)', () => {
+test('eventCid is H(op id, kind)', T10, () => {
   for (const kind of ['freeze', 'unfreeze', 'incident', 'nonretryable', 'health'] as EventKind[]) {
     assert.equal(eventCid(id(7), kind), H(id(7), kind));
   }

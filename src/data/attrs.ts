@@ -15,6 +15,9 @@ export interface PathAttrs {
   eol: string | null;
   generated: boolean;
   coworkOff: boolean;
+  /** R4-20 (Plan 4): the `working-tree-encoding` value ('set' for a bare attribute), null when unspecified or unset; any
+   *  non-null value puts the path in region path class 3. */
+  workingTreeEncoding: string | null;
 }
 
 export interface AttrSnapshot {
@@ -22,7 +25,7 @@ export interface AttrSnapshot {
   get(path: string): PathAttrs;
 }
 
-const ATTR_NAMES = ['filter', 'merge', 'text', 'binary', 'eol', 'linguist-generated', 'cowork-sync'] as const;
+const ATTR_NAMES = ['filter', 'merge', 'text', 'binary', 'eol', 'linguist-generated', 'cowork-sync', 'working-tree-encoding'] as const;
 const NO_VALUE: ReadonlySet<string> = new Set(['set', 'unset', 'unspecified']);
 
 /**
@@ -41,6 +44,12 @@ function stringValue(v: string): string | null {
   return NO_VALUE.has(v) ? null : v;
 }
 
+/** R4-20: any working-tree-encoding but unspecified/unset is an encoding attribute — a bare `working-tree-encoding` (check-attr
+ *  answers `set`) included, which is kept as the value 'set'. */
+function encodingValue(v: string): string | null {
+  return v === 'unspecified' || v === 'unset' ? null : v;
+}
+
 function toPathAttrs(v: ReadonlyMap<string, string>): PathAttrs {
   const get = (name: string): string => v.get(name) ?? 'unspecified';
   const merge = get('merge');
@@ -54,11 +63,12 @@ function toPathAttrs(v: ReadonlyMap<string, string>): PathAttrs {
     eol: stringValue(get('eol')),
     generated: generated === 'set' || generated === 'true',
     coworkOff: get('cowork-sync') === 'off',
+    workingTreeEncoding: encodingValue(get('working-tree-encoding')),
   });
 }
 
 /**
- * `check-attr -z --stdin filter merge text binary eol linguist-generated cowork-sync` under
+ * `check-attr -z --stdin filter merge text binary eol linguist-generated cowork-sync working-tree-encoding` under
  * `-c attr.tree=<epochBase>`; cached per (epochBase, path); the cache is dropped when the stat of
  * `$GIT_DIR/info/attributes` or of core.attributesFile changes, or on `invalidate()`.
  */

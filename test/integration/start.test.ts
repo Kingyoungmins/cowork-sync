@@ -381,7 +381,8 @@ test('local work at genesis and at join with publishLocal null refuses START_PRE
     if (cap !== null) await p1.core.commit({ ready: p1.core.cs.ready(), meta: { ...p1.core.view!.meta, cs_human_next: cap.nextN } });
     const codeBefore = (await remoteRefs(fx))[p1.core.refs.remoteCode];
     const pub = await publishStep(p1.core, await prep(p1));
-    assert.notEqual(pub.outcome, 'landed', JSON.stringify(pub));
+    // Plan 3 Task 4: the window carries only the join PIN's creation mirror — board-only, no live commit (R3-25, HLD-10).
+    assert.deepEqual([pub.outcome, pub.c, pub.mirrored], ['landed', null, [pin.id]], JSON.stringify(pub));
     assert.equal((await remoteRefs(fx))[p1.core.refs.remoteCode], codeBefore, 'no code published');
 
     // Join with local work, and an incoming teammate change (n_in > 0).
@@ -412,6 +413,55 @@ test('local work at genesis and at join with publishLocal null refuses START_PRE
     assert.ok(out.c !== null);
     assert.equal(await blobText(p2, await treeOf(p2, out.c), 'src/b.txt'), 'alpha\nbeta\ngamma\ndelta from p2, again\n');
     assert.equal(await blobText(p2, await treeOf(p2, out.c), 'README.md'), '# start fixture, edited by the team\n', 'the incoming change was applied first');
+  });
+});
+
+test('EF4 E3-1 (R3-EF4-5, LIF-08): the join\'s first apply runs step 5R; its R1 keeps a join PIN over a path TIP also changed ACTIVE with its pair unchanged (the REBASE onto the new A merges cleanly: neither SUBSUMED nor GONE), still masking the path, and the first publish stays board-only', async () => {
+  await withStart('start-join-pin-r1', { n: 2, files: FILES }, async (fx) => {
+    const [p1, p2] = [peerOf(fx, 0), peerOf(fx, 1)];
+    await startOk(p1, 'genesis');
+    const TEAM = 'one\ntwo\nthree\nfour\nfive\nsix\nseven\neight by the team\n';
+    const LOCAL = 'one by p2\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n';
+    await fx.pushTeamChange({ 'src/a.txt': buf(TEAM) });
+    await writeWork(p2, 'src/a.txt', LOCAL);
+    await startOk(p2, 'join', { publishLocal: 'none' });
+    const pins = p2.core.holds.nonTerminal().filter((h) => h.guards.some((g) => g.name === 'join'));
+    assert.equal(pins.length, 1, 'one join PIN');
+    const pin = pins[0]!;
+    assert.deepEqual(
+      { state: pin.state, rev: pin.rev, paths: pin.paths, blobs: pin.blobs },
+      {
+        state: 'ACTIVE', rev: 1, paths: ['src/a.txt'],
+        blobs: { h0: { 'src/a.txt': await p2.core.repo.hashBytes(FILES['src/a.txt']!, false) }, h1: { 'src/a.txt': await p2.core.repo.hashBytes(buf(LOCAL), false) } },
+      },
+      'R1 at the join\'s step 5R left the PIN as pinLocalWork made it (the verdict the first loop iteration\'s R1 gives too)',
+    );
+    assert.ok(p2.core.holds.maskingRecords().some((h) => h.id === pin.id), 'the PIN still masks its path');
+    assert.equal(await readFile(joinPath(p2.deps.paths.workTree, 'src', 'a.txt'), 'utf8'), 'one by p2\ntwo\nthree\nfour\nfive\nsix\nseven\neight by the team\n', 'the first apply merged the team edit under the local one');
+    fx.advance(30_000);
+    const pub = await publishStep(p2.core, await prep(p2));
+    assert.deepEqual([pub.outcome, pub.c], ['landed', null], `ENG-52 step 8: board-only (${JSON.stringify(pub)})`);
+  });
+});
+
+test('local work on a root file named __proto__ is held by the join PIN under that path (its blob maps keep the key as an own property)', async () => {
+  await withStart('start-proto', { n: 1, files: FILES }, async (fx) => {
+    const p1 = peerOf(fx, 0);
+    const PROTO = '__proto__';
+    await writeWork(p1, PROTO, 'proto local\n');
+    await writeWork(p1, 'src/a.txt', 'one\ntwo\nTHREE proto\nfour\nfive\nsix\nseven\neight\n');
+    const A0 = await p1.core.repo.readTreeMap(await headTree(p1));
+    await startOk(p1, 'genesis', { publishLocal: 'none' });
+    const pins = p1.core.holds.nonTerminal().filter((h) => h.guards.some((g) => g.name === 'join'));
+    assert.equal(pins.length, 1, 'one join PIN');
+    const pin = pins[0]!;
+    assert.deepEqual(pin.paths, [PROTO, 'src/a.txt']);
+    assert.ok('h1' in pin.blobs);
+    const { h0, h1 } = pin.blobs as { h0: Record<string, string>; h1: Record<string, string> };
+    assert.ok(Object.prototype.hasOwnProperty.call(h0, PROTO) && Object.prototype.hasOwnProperty.call(h1, PROTO), 'own keys');
+    assert.deepEqual([h0[PROTO], h1[PROTO]], [ABSENT, await p1.core.repo.hashBytes(buf('proto local\n'), false)]);
+    assert.equal(h0['src/a.txt'], A0.get('src/a.txt')!.oid);
+    assert.equal(pin.local_only, false);
   });
 });
 
